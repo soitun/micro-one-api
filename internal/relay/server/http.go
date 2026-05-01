@@ -10,20 +10,22 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	identityv1 "micro-one-api/api/identity/v1"
+	"micro-one-api/api/identity/v1"
 	channelv1 "micro-one-api/api/channel/v1"
 	"micro-one-api/internal/pkg/errors"
 	relayprovider "micro-one-api/internal/relay/provider"
+
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
-// HTTPServer handles HTTP requests for relay-gateway
+// HTTPServer handles HTTP requests for relay-gateway.
 type HTTPServer struct {
-	identityClient identityv1.IdentityServiceClient
-	channelClient channelv1.ChannelServiceClient
+	identityClient  identityv1.IdentityServiceClient
+	channelClient  channelv1.ChannelServiceClient
 	providerFactory *relayprovider.ProviderFactory
 }
 
-// NewHTTPServer creates a new HTTP server
+// NewHTTPServer creates a new HTTP server for Kratos.
 func NewHTTPServer(
 	identityClient identityv1.IdentityServiceClient,
 	channelClient channelv1.ChannelServiceClient,
@@ -36,11 +38,11 @@ func NewHTTPServer(
 	}
 }
 
-// RegisterRoutes registers HTTP routes
-func (s *HTTPServer) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
-	mux.HandleFunc("/v1/models", s.handleModels)
-	mux.HandleFunc("/health", s.handleHealth)
+// RegisterRoutes registers HTTP routes to a Kratos *khttp.Server.
+func (s *HTTPServer) RegisterRoutes(srv *khttp.Server) {
+	srv.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
+	srv.HandleFunc("/v1/models", s.handleModels)
+	srv.HandleFunc("/health", s.handleHealth)
 }
 
 func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Request) {

@@ -191,11 +191,10 @@ make dev-test-provider
 ## 后续计划
 
 第三阶段将重点关注：
-1. 流式响应（SSE）支持
-2. 完整账务扣费逻辑
-3. 更多 Provider 适配器
-4. 后台管理 API 迁移
-5. 真实数据库集成
+1. 完整账务扣费逻辑
+2. 更多 Provider 适配器（如 Anthropic、Gemini、Azure 等）
+3. 后台管理 API 迁移
+4. 真实数据库集成
 
 ## 鸣谢
 

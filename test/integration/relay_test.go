@@ -1,13 +1,17 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"testing"
 	"time"
 
 	relayprovider "micro-one-api/internal/relay/provider"
 	relayserver "micro-one-api/internal/relay/server"
+
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 func TestRelayIntegration(t *testing.T) {
@@ -21,16 +25,20 @@ func TestRelayIntegration(t *testing.T) {
 
 	httpServer := relayserver.NewHTTPServer(identityClient, channelClient, providerFactory)
 
-	mux := http.NewServeMux()
-	httpServer.RegisterRoutes(mux)
+	lis, err := net.Listen("tcp", ":19000")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
 
-	server := &http.Server{Addr: ":19000", Handler: mux}
+	srv := khttp.NewServer(khttp.Listener(lis))
+	httpServer.RegisterRoutes(srv)
+
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Start(context.Background()); err != nil && err != http.ErrServerClosed {
 			t.Logf("HTTP server error: %v", err)
 		}
 	}()
-	defer server.Close()
+	defer srv.Stop(context.Background())
 
 	time.Sleep(100 * time.Millisecond) // Give servers time to start
 

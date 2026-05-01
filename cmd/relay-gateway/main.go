@@ -2,18 +2,19 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"net/http"
 	"os"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
-	channelv1 "micro-one-api/api/channel/v1"
 	"micro-one-api/internal/relay/provider"
 	"micro-one-api/internal/relay/server"
+
+	"github.com/go-kratos/kratos/v2"
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 func main() {
@@ -56,16 +57,18 @@ func main() {
 
 	httpServer := server.NewHTTPServer(identityClient, channelClient, providerFactory)
 
-	mux := http.NewServeMux()
-	httpServer.RegisterRoutes(mux)
+	srv := khttp.NewServer(
+		khttp.Address(httpAddr),
+		khttp.Timeout(providerTimeout),
+	)
+	httpServer.RegisterRoutes(srv)
 
-	srv := &http.Server{
-		Addr:    httpAddr,
-		Handler: mux,
-	}
+	app := kratos.New(
+		kratos.Name("relay-gateway"),
+		kratos.Server(srv),
+	)
 
-	log.Printf("Relay Gateway HTTP server listening on %s", httpAddr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		panic(fmt.Sprintf("failed to start HTTP server: %v", err))
+	if err := app.Run(); err != nil {
+		panic(fmt.Sprintf("failed to start relay gateway: %v", err))
 	}
 }
