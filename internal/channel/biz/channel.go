@@ -75,17 +75,28 @@ func (uc *ChannelUsecase) SelectChannel(ctx context.Context, group, model string
 	sort.Slice(abilities, func(i, j int) bool {
 		return abilities[i].Priority > abilities[j].Priority
 	})
-	candidates := abilities
-	if !excludeFirstPriority {
+
+	var candidates []Ability
+	if excludeFirstPriority {
 		highest := abilities[0].Priority
-		candidates = abilities[:0]
 		for _, ability := range abilities {
 			if ability.Priority != highest {
-				break
+				candidates = append(candidates, ability)
 			}
-			candidates = append(candidates, ability)
+		}
+	} else {
+		highest := abilities[0].Priority
+		for _, ability := range abilities {
+			if ability.Priority == highest {
+				candidates = append(candidates, ability)
+			}
 		}
 	}
+
+	if len(candidates) == 0 {
+		return nil, ErrChannelNotFound
+	}
+
 	selected := candidates[uc.rng.Intn(len(candidates))]
 	return uc.repo.FindByID(ctx, selected.ChannelID)
 }

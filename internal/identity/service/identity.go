@@ -3,8 +3,12 @@ package service
 import (
 	"context"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	identityv1 "micro-one-api/api/identity/v1"
 	"micro-one-api/internal/identity/biz"
+	"micro-one-api/internal/pkg/errors"
 )
 
 // IdentityService is the transport layer entry for identity-service.
@@ -32,10 +36,7 @@ func (s *IdentityService) GetUserModel(ctx context.Context, userID int64) (*biz.
 func (s *IdentityService) ValidateToken(ctx context.Context, req *identityv1.ValidateTokenRequest) (*identityv1.ValidateTokenReply, error) {
 	token, err := s.uc.ValidateToken(ctx, req.Token)
 	if err != nil {
-		return &identityv1.ValidateTokenReply{
-			Valid:   false,
-			Message: err.Error(),
-		}, nil
+		return nil, mapIdentityErrorToGRPC(err)
 	}
 	return &identityv1.ValidateTokenReply{
 		Valid:   true,
@@ -48,7 +49,7 @@ func (s *IdentityService) ValidateToken(ctx context.Context, req *identityv1.Val
 func (s *IdentityService) GetAuthSnapshot(ctx context.Context, req *identityv1.GetAuthSnapshotRequest) (*identityv1.GetAuthSnapshotReply, error) {
 	snapshot, err := s.uc.GetAuthSnapshot(ctx, req.Token)
 	if err != nil {
-		return nil, err
+		return nil, mapIdentityErrorToGRPC(err)
 	}
 	return &identityv1.GetAuthSnapshotReply{
 		UserId:        snapshot.UserID,
@@ -63,7 +64,7 @@ func (s *IdentityService) GetAuthSnapshot(ctx context.Context, req *identityv1.G
 func (s *IdentityService) GetUser(ctx context.Context, req *identityv1.GetUserRequest) (*identityv1.GetUserReply, error) {
 	user, err := s.uc.GetUser(ctx, req.UserId)
 	if err != nil {
-		return nil, err
+		return nil, mapIdentityErrorToGRPC(err)
 	}
 	return &identityv1.GetUserReply{
 		UserId:      user.ID,
@@ -72,4 +73,34 @@ func (s *IdentityService) GetUser(ctx context.Context, req *identityv1.GetUserRe
 		Group:       user.Group,
 		Status:      user.Status,
 	}, nil
+}
+
+func mapIdentityErrorToGRPC(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	mappedErr := errors.MapIdentityError(err)
+	if structuredErr, ok := mappedErr.(*errors.Error); ok {
+		var code codes.Code
+		switch structuredErr.Reason {
+		case errors.ReasonUnauthorized,
+			errors.ReasonTokenDisabled,
+			errors.ReasonTokenExpired,
+			errors.ReasonTokenExhausted,
+			errors.ReasonTokenNotFound,
+			errors.ReasonUserNotFound:
+			code = codes.NotFound
+		case errors.ReasonUserDisabled,
+			errors.ReasonModelForbidden:
+			code = codes.PermissionDenied
+		case errors.ReasonQuotaNotEnough:
+			code = codes.ResourceExhausted
+		default:
+			code = codes.Internal
+		}
+		return status.Error(code, structuredErr.Message)
+	}
+
+	return status.Error(codes.Internal, err.Error())
 }

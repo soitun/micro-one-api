@@ -1,0 +1,254 @@
+package integration
+
+import (
+	"context"
+	"net"
+	"testing"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	identityv1 "micro-one-api/api/identity/v1"
+	channelv1 "micro-one-api/api/channel/v1"
+	channelbiz "micro-one-api/internal/channel/biz"
+	channelservice "micro-one-api/internal/channel/service"
+	identitybiz "micro-one-api/internal/identity/biz"
+	identityservice "micro-one-api/internal/identity/service"
+)
+
+// setupInMemoryIdentityService starts an in-memory identity service for testing
+func setupInMemoryIdentityService(t *testing.T, addr string) (func(), identityv1.IdentityServiceClient) {
+	repo := &testIdentityRepo{
+		tokens: map[string]*identitybiz.Token{
+			"test-token": {
+				ID:             1,
+				UserID:         1,
+				Key:            "test-token",
+				Status:         identitybiz.TokenStatusEnabled,
+				ExpiredAt:      time.Now().Add(time.Hour).Unix(),
+				RemainQuota:    1000,
+				UnlimitedQuota: false,
+				Models:         []string{},
+			},
+			"restricted-token": {
+				ID:             2,
+				UserID:         2,
+				Key:            "restricted-token",
+				Status:         identitybiz.TokenStatusEnabled,
+				ExpiredAt:      time.Now().Add(time.Hour).Unix(),
+				RemainQuota:    1000,
+				UnlimitedQuota: false,
+				Models:         []string{"gpt-4o-mini"},
+			},
+			"expired-token": {
+				ID:             3,
+				UserID:         3,
+				Key:            "expired-token",
+				Status:         identitybiz.TokenStatusEnabled,
+				ExpiredAt:      time.Now().Add(-time.Hour).Unix(),
+				RemainQuota:    1000,
+				UnlimitedQuota: false,
+				Models:         []string{},
+			},
+			"disabled-token": {
+				ID:             4,
+				UserID:         4,
+				Key:            "disabled-token",
+				Status:         identitybiz.TokenStatusDisabled,
+				ExpiredAt:      time.Now().Add(time.Hour).Unix(),
+				RemainQuota:    1000,
+				UnlimitedQuota: false,
+				Models:         []string{},
+			},
+		},
+		users: map[int64]*identitybiz.User{
+			1: {
+				ID:       1,
+				Username: "test-user",
+				Group:    "default",
+				Status:   identitybiz.UserStatusEnabled,
+			},
+			2: {
+				ID:       2,
+				Username: "restricted-user",
+				Group:    "premium",
+				Status:   identitybiz.UserStatusEnabled,
+			},
+			3: {
+				ID:       3,
+				Username: "expired-user",
+				Group:    "default",
+				Status:   identitybiz.UserStatusEnabled,
+			},
+			4: {
+				ID:       4,
+				Username: "disabled-user",
+				Group:    "default",
+				Status:   identitybiz.UserStatusEnabled,
+			},
+			5: {
+				ID:       5,
+				Username: "disabled-user",
+				Group:    "default",
+				Status:   identitybiz.UserStatusDisabled,
+			},
+		},
+	}
+
+	uc := identitybiz.NewIdentityUsecase(repo)
+	svc := identityservice.NewIdentityService(uc)
+
+	server := grpc.NewServer()
+	identityv1.RegisterIdentityServiceServer(server, svc)
+
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+
+	go func() {
+		if err := server.Serve(lis); err != nil {
+			t.Logf("identity server error: %v", err)
+		}
+	}()
+
+	cleanup := func() {
+		server.Stop()
+		lis.Close()
+	}
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := identityv1.NewIdentityServiceClient(conn)
+
+	return cleanup, client
+}
+
+// setupInMemoryChannelService starts an in-memory channel service for testing
+func setupInMemoryChannelService(t *testing.T, addr string) (func(), channelv1.ChannelServiceClient) {
+	repo := &testChannelRepo{
+		channels: map[int64]*channelbiz.Channel{
+			1: {
+				ID:       1,
+				Type:     1,
+				Name:     "mock-channel-1",
+				Status:   channelbiz.ChannelStatusEnabled,
+				BaseURL:  "http://localhost:9999",
+				Group:    "default",
+				Models:   []string{"gpt-4o-mini", "gpt-4o"},
+				Priority: 10,
+				Key:      "mock-api-key-1",
+			},
+		},
+		abilities: map[string][]channelbiz.Ability{
+			"default:gpt-4o-mini": {
+				{Group: "default", Model: "gpt-4o-mini", ChannelID: 1, Enabled: true, Priority: 10},
+			},
+			"default:gpt-4o": {
+				{Group: "default", Model: "gpt-4o", ChannelID: 1, Enabled: true, Priority: 10},
+			},
+		},
+	}
+
+	uc := channelbiz.NewChannelUsecase(repo)
+	svc := channelservice.NewChannelService(uc)
+
+	server := grpc.NewServer()
+	channelv1.RegisterChannelServiceServer(server, svc)
+
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+
+	go func() {
+		if err := server.Serve(lis); err != nil {
+			t.Logf("channel server error: %v", err)
+		}
+	}()
+
+	cleanup := func() {
+		server.Stop()
+		lis.Close()
+	}
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := channelv1.NewChannelServiceClient(conn)
+
+	return cleanup, client
+}
+
+type testIdentityRepo struct {
+	tokens map[string]*identitybiz.Token
+	users  map[int64]*identitybiz.User
+}
+
+func (m *testIdentityRepo) FindTokenByKey(ctx context.Context, key string) (*identitybiz.Token, error) {
+	token, ok := m.tokens[key]
+	if !ok {
+		return nil, identitybiz.ErrTokenNotFound
+	}
+	return token, nil
+}
+
+func (m *testIdentityRepo) FindUserByID(ctx context.Context, userID int64) (*identitybiz.User, error) {
+	user, ok := m.users[userID]
+	if !ok {
+		return nil, identitybiz.ErrUserNotFound
+	}
+	return user, nil
+}
+
+type testChannelRepo struct {
+	channels  map[int64]*channelbiz.Channel
+	abilities map[string][]channelbiz.Ability
+}
+
+func (m *testChannelRepo) FindByID(ctx context.Context, channelID int64) (*channelbiz.Channel, error) {
+	channel, ok := m.channels[channelID]
+	if !ok {
+		return nil, channelbiz.ErrChannelNotFound
+	}
+	return channel, nil
+}
+
+func (m *testChannelRepo) ListAbilitiesByGroupAndModel(ctx context.Context, group, model string) ([]channelbiz.Ability, error) {
+	key := group + ":" + model
+	abilities, ok := m.abilities[key]
+	if !ok {
+		return []channelbiz.Ability{}, nil
+	}
+	enabled := make([]channelbiz.Ability, 0, len(abilities))
+	for _, ability := range abilities {
+		if ability.Enabled {
+			enabled = append(enabled, ability)
+		}
+	}
+	return enabled, nil
+}
+
+func (m *testChannelRepo) ListAvailableModels(ctx context.Context, group string) ([]string, error) {
+	uniqueModels := make(map[string]bool)
+	for key, abilities := range m.abilities {
+		if len(key) > len(group)+1 && key[:len(group)+1] == group+":" {
+			for _, ability := range abilities {
+				if ability.Enabled {
+					uniqueModels[ability.Model] = true
+				}
+			}
+		}
+	}
+	models := make([]string, 0, len(uniqueModels))
+	for model := range uniqueModels {
+		models = append(models, model)
+	}
+	return models, nil
+}

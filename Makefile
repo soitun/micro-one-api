@@ -75,17 +75,86 @@ test:
 .PHONY: run-identity
 # run identity-service
 run-identity:
+	IDENTITY_GRPC_ADDR=127.0.0.1:9001 \
+	IDENTITY_SQL_DSN="" \
 	go run ./cmd/identity-service
 
 .PHONY: run-channel
 # run channel-service
 run-channel:
+	CHANNEL_GRPC_ADDR=127.0.0.1:9002 \
+	CHANNEL_SQL_DSN="" \
 	go run ./cmd/channel-service
 
 .PHONY: run-relay
 # run relay-gateway
 run-relay:
+	IDENTITY_GRPC_ENDPOINT=127.0.0.1:9001 \
+	CHANNEL_GRPC_ENDPOINT=127.0.0.1:9002 \
+	RELAY_HTTP_ADDR=:8080 \
+	RELAY_PROVIDER_TIMEOUT=30s \
 	go run ./cmd/relay-gateway
+
+.PHONY: run-all
+# run all services
+run-all:
+	@echo "Starting all services in background..."
+	@mkdir -p logs
+	@make run-identity > logs/identity.log 2>&1 &
+	@echo "Identity service started (PID: $$!)"
+	@sleep 2
+	@make run-channel > logs/channel.log 2>&1 &
+	@echo "Channel service started (PID: $$!)"
+	@sleep 2
+	@make run-relay > logs/relay.log 2>&1 &
+	@echo "Relay gateway started (PID: $$!)"
+	@echo "All services started. Check logs in ./logs/ directory."
+	@echo "To stop all services, run: make stop-all"
+
+.PHONY: stop-all
+# stop all services
+stop-all:
+	@echo "Stopping all services..."
+	@pkill -f "identity-service" || true
+	@pkill -f "channel-service" || true
+	@pkill -f "relay-gateway" || true
+	@echo "All services stopped."
+
+.PHONY: dev-test-identity
+# test identity-service
+dev-test-identity:
+	go test -v ./internal/identity/biz/
+
+.PHONY: dev-test-channel
+# test channel-service
+dev-test-channel:
+	go test -v ./internal/channel/biz/
+
+.PHONY: dev-test-provider
+# test relay provider
+dev-test-provider:
+	go test -v ./internal/relay/provider/
+
+.PHONY: dev-test-integration
+# run integration tests
+dev-test-integration:
+	go test -v ./test/integration/
+
+.PHONY: dev-test-all
+# run all development tests
+dev-test-all:
+	@echo "Running all development tests..."
+	@make dev-test-identity
+	@make dev-test-channel
+	@make dev-test-provider
+	@make dev-test-integration
+	@echo "All tests completed!"
+
+.PHONY: clean
+# clean build artifacts and logs
+clean:
+	rm -rf bin/
+	rm -rf logs/
 
 .PHONY: all
 # generate all

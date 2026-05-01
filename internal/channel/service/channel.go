@@ -5,6 +5,7 @@ import (
 
 	channelv1 "micro-one-api/api/channel/v1"
 	"micro-one-api/internal/channel/biz"
+	"micro-one-api/internal/pkg/errors"
 )
 
 // ChannelService is the transport layer entry for channel-service.
@@ -32,7 +33,8 @@ func (s *ChannelService) ListAvailableModelsModel(ctx context.Context, group str
 func (s *ChannelService) SelectChannel(ctx context.Context, req *channelv1.SelectChannelRequest) (*channelv1.SelectChannelReply, error) {
 	channel, err := s.uc.SelectChannel(ctx, req.Group, req.Model, req.ExcludeFirstPriority)
 	if err != nil {
-		return nil, err
+		mappedErr := errors.MapChannelError(err)
+		return nil, mappedErr
 	}
 	return &channelv1.SelectChannelReply{
 		Channel: toChannelInfo(channel),
@@ -42,7 +44,8 @@ func (s *ChannelService) SelectChannel(ctx context.Context, req *channelv1.Selec
 func (s *ChannelService) GetChannel(ctx context.Context, req *channelv1.GetChannelRequest) (*channelv1.GetChannelReply, error) {
 	channel, err := s.uc.GetChannel(ctx, req.ChannelId)
 	if err != nil {
-		return nil, err
+		mappedErr := errors.MapChannelError(err)
+		return nil, mappedErr
 	}
 	return &channelv1.GetChannelReply{
 		Channel: toChannelInfo(channel),
@@ -52,7 +55,8 @@ func (s *ChannelService) GetChannel(ctx context.Context, req *channelv1.GetChann
 func (s *ChannelService) ListAvailableModels(ctx context.Context, req *channelv1.ListAvailableModelsRequest) (*channelv1.ListAvailableModelsReply, error) {
 	models, err := s.uc.ListAvailableModels(ctx, req.Group)
 	if err != nil {
-		return nil, err
+		mappedErr := errors.MapChannelError(err)
+		return nil, mappedErr
 	}
 	return &channelv1.ListAvailableModelsReply{
 		Models: models,

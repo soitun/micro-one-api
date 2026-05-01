@@ -1,13 +1,19 @@
 package main
 
 import (
-	"context"
 	"fmt"
+	"log"
+	"net/http"
 	"os"
+	"time"
 
-	"micro-one-api/internal/relay/biz"
-	"micro-one-api/internal/relay/data"
-	"micro-one-api/internal/relay/service"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	identityv1 "micro-one-api/api/identity/v1"
+	channelv1 "micro-one-api/api/channel/v1"
+	"micro-one-api/internal/relay/provider"
+	"micro-one-api/internal/relay/server"
 )
 
 func main() {
@@ -19,15 +25,47 @@ func main() {
 	if channelEndpoint == "" {
 		channelEndpoint = "127.0.0.1:9002"
 	}
-	clients, err := data.NewData(identityEndpoint, channelEndpoint)
-	if err != nil {
-		panic(err)
+	httpAddr := os.Getenv("RELAY_HTTP_ADDR")
+	if httpAddr == "" {
+		httpAddr = ":8080"
 	}
-	uc := biz.NewRelayUsecase(clients.Identity, clients.Channel)
-	svc := service.NewOpenAIService(uc)
-	plan, err := svc.Plan(context.Background(), "demo-token", "gpt-4o-mini")
+
+	identityConn, err := grpc.Dial(identityEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("failed to connect to identity service: %v", err))
 	}
-	fmt.Printf("relay plan: user=%d token=%d channel=%s base_url=%s\n", plan.Auth.UserID, plan.Auth.TokenID, plan.Channel.Name, plan.Channel.BaseURL)
+	defer identityConn.Close()
+
+	channelConn, err := grpc.Dial(channelEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		panic(fmt.Sprintf("failed to connect to channel service: %v", err))
+	}
+	defer channelConn.Close()
+
+	identityClient := identityv1.NewIdentityServiceClient(identityConn)
+	channelClient := channelv1.NewChannelServiceClient(channelConn)
+
+	providerTimeout := 30 * time.Second
+	if timeoutStr := os.Getenv("RELAY_PROVIDER_TIMEOUT"); timeoutStr != "" {
+		if duration, err := time.ParseDuration(timeoutStr); err == nil {
+			providerTimeout = duration
+		}
+	}
+
+	providerFactory := provider.NewProviderFactory(providerTimeout)
+
+	httpServer := server.NewHTTPServer(identityClient, channelClient, providerFactory)
+
+	mux := http.NewServeMux()
+	httpServer.RegisterRoutes(mux)
+
+	srv := &http.Server{
+		Addr:    httpAddr,
+		Handler: mux,
+	}
+
+	log.Printf("Relay Gateway HTTP server listening on %s", httpAddr)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		panic(fmt.Sprintf("failed to start HTTP server: %v", err))
+	}
 }
