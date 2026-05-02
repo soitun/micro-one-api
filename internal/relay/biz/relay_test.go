@@ -30,7 +30,7 @@ func (testChannelClient) SelectChannel(_ context.Context, group, model string, _
 }
 
 func TestRelayUsecasePlan(t *testing.T) {
-	uc := NewRelayUsecase(testIdentityClient{}, testChannelClient{})
+	uc := NewRelayUsecase(testIdentityClient{}, testChannelClient{}, nil, nil)
 	plan, err := uc.Plan(context.Background(), RelayRequest{
 		Token: "demo-token",
 		Model: "gpt-4o-mini",
@@ -44,6 +44,9 @@ func TestRelayUsecasePlan(t *testing.T) {
 	if plan.Channel.Name != "default:gpt-4o-mini" {
 		t.Fatalf("unexpected channel name: %s", plan.Channel.Name)
 	}
+	if plan.ResolvedModel != "gpt-4o-mini" {
+		t.Fatalf("unexpected resolved model: %s", plan.ResolvedModel)
+	}
 }
 
 type testIdentityClientError struct {
@@ -56,7 +59,7 @@ func (c testIdentityClientError) GetAuthSnapshot(_ context.Context, _ string) (*
 
 func TestRelayUsecasePlan_IdentityError(t *testing.T) {
 	wantErr := errors.New("token not found")
-	uc := NewRelayUsecase(testIdentityClientError{err: wantErr}, testChannelClient{})
+	uc := NewRelayUsecase(testIdentityClientError{err: wantErr}, testChannelClient{}, nil, nil)
 	_, err := uc.Plan(context.Background(), RelayRequest{Token: "bad-token", Model: "gpt-4o-mini"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -76,12 +79,95 @@ func (c testChannelClientError) SelectChannel(_ context.Context, _, _ string, _ 
 
 func TestRelayUsecasePlan_ChannelError(t *testing.T) {
 	wantErr := errors.New("no channel available")
-	uc := NewRelayUsecase(testIdentityClient{}, testChannelClientError{err: wantErr})
+	uc := NewRelayUsecase(testIdentityClient{}, testChannelClientError{err: wantErr}, nil, nil)
 	_, err := uc.Plan(context.Background(), RelayRequest{Token: "demo-token", Model: "gpt-4o-mini"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if err.Error() != wantErr.Error() {
 		t.Fatalf("expected error %v, got %v", wantErr, err)
+	}
+}
+
+func TestRelayUsecasePlan_ModelNotAllowed(t *testing.T) {
+	uc := NewRelayUsecase(testIdentityClient{}, testChannelClient{}, nil, nil)
+	_, err := uc.Plan(context.Background(), RelayRequest{Token: "demo-token", Model: "gpt-4"})
+	if err == nil {
+		t.Fatal("expected error for disallowed model, got nil")
+	}
+}
+
+func TestRelayUsecasePlan_WithModelMapping(t *testing.T) {
+	mapper := &ModelMapper{
+		models: map[string]*ModelEntry{
+			"gpt-4o": {ActualName: "gpt-4o-2024-08-06", Capabilities: []string{"function_call", "streaming"}},
+		},
+	}
+	// testIdentityClient allows "gpt-4o-mini" but we'll use a custom one that allows "gpt-4o"
+	uc := NewRelayUsecase(&testIdentityClientAllowAll{}, testChannelClient{}, mapper, nil)
+	plan, err := uc.Plan(context.Background(), RelayRequest{Token: "demo-token", Model: "gpt-4o"})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.ResolvedModel != "gpt-4o-2024-08-06" {
+		t.Fatalf("expected resolved model gpt-4o-2024-08-06, got %s", plan.ResolvedModel)
+	}
+}
+
+func TestRelayUsecase_ResolveModel(t *testing.T) {
+	mapper := &ModelMapper{
+		models: map[string]*ModelEntry{
+			"gpt-4o": {ActualName: "gpt-4o-2024-08-06"},
+		},
+	}
+	uc := NewRelayUsecase(testIdentityClient{}, testChannelClient{}, mapper, nil)
+	if got := uc.ResolveModel("gpt-4o"); got != "gpt-4o-2024-08-06" {
+		t.Fatalf("expected gpt-4o-2024-08-06, got %s", got)
+	}
+	if got := uc.ResolveModel("unknown"); got != "unknown" {
+		t.Fatalf("expected unknown, got %s", got)
+	}
+}
+
+func TestRelayUsecase_ResolveModel_NilMapper(t *testing.T) {
+	uc := NewRelayUsecase(testIdentityClient{}, testChannelClient{}, nil, nil)
+	if got := uc.ResolveModel("gpt-4o"); got != "gpt-4o" {
+		t.Fatalf("expected gpt-4o, got %s", got)
+	}
+}
+
+func TestRelayUsecase_HasCapability(t *testing.T) {
+	mapper := &ModelMapper{
+		models: map[string]*ModelEntry{
+			"gpt-4o": {ActualName: "gpt-4o-2024-08-06", Capabilities: []string{"function_call", "streaming"}},
+		},
+	}
+	uc := NewRelayUsecase(testIdentityClient{}, testChannelClient{}, mapper, nil)
+	if !uc.HasCapability("gpt-4o", "streaming") {
+		t.Fatal("expected streaming capability")
+	}
+	if uc.HasCapability("gpt-4o", "vision") {
+		t.Fatal("unexpected vision capability")
+	}
+}
+
+type testIdentityClientAllowAll struct{}
+
+func (testIdentityClientAllowAll) GetAuthSnapshot(_ context.Context, _ string) (*AuthSnapshot, error) {
+	return &AuthSnapshot{
+		UserID:        1,
+		TokenID:       1,
+		Group:         "default",
+		AllowedModels: []string{},
+		UserEnabled:   true,
+		TokenEnabled:  true,
+	}, nil
+}
+
+func TestRelayUsecase_NewRetryExecutor(t *testing.T) {
+	uc := NewRelayUsecase(testIdentityClient{}, testChannelClient{}, nil, nil)
+	exec := uc.NewRetryExecutor()
+	if exec == nil {
+		t.Fatal("expected non-nil RetryExecutor")
 	}
 }

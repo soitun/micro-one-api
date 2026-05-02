@@ -7,6 +7,7 @@ import (
 	"github.com/go-kratos/kratos/v2"
 	"github.com/google/wire"
 
+	relaybiz "micro-one-api/internal/relay/biz"
 	relaycfg "micro-one-api/internal/relay/config"
 	relayprovider "micro-one-api/internal/relay/provider"
 	"micro-one-api/internal/relay/server"
@@ -14,13 +15,16 @@ import (
 
 var ProviderSet = wire.NewSet(
 	relayprovider.NewProviderFactory,
+	relaybiz.NewRelayUsecase,
 	server.NewHTTPServer,
 )
 
-func InitApp(confPath string) (*relaycfg.Config, *kratos.App, func(), error) {
+func InitApp(confPath string) (*kratos.App, func(), error) {
 	panic(wire.Build(
 		loadConfig,
 		newClients,
+		newModelMapper,
+		newRetryPolicy,
 		ProviderSet,
 		newApp,
 	))

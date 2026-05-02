@@ -9,6 +9,8 @@ import (
 	"time"
 
 	billingv1 "micro-one-api/api/billing/v1"
+	relaybiz "micro-one-api/internal/relay/biz"
+	relaydata "micro-one-api/internal/relay/data"
 	relayprovider "micro-one-api/internal/relay/provider"
 	relayserver "micro-one-api/internal/relay/server"
 
@@ -86,7 +88,12 @@ func TestRelayIntegration(t *testing.T) {
 
 	providerFactory := relayprovider.NewProviderFactory(30 * time.Second)
 
-	httpServer := relayserver.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory)
+	// Create biz-layer RelayUsecase with adapters
+	identityAdapter := relaydata.NewIdentityAdapter(identityClient)
+	channelAdapter := relaydata.NewChannelAdapter(channelClient)
+	relayUsecase := relaybiz.NewRelayUsecase(identityAdapter, channelAdapter, nil, nil)
+
+	httpServer := relayserver.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
 
 	lis, err := net.Listen("tcp", ":19000")
 	if err != nil {

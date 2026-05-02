@@ -564,23 +564,23 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 
 ---
 
-## 16. 迁移进度核查清单（截至 2026/05/02）
+## 16. 迁移进度核查清单（截至 2026/05/02 更新）
 
 ### 16.1 骨架层 — ✅ 已完成
 
 | 构件 | 状态 | 备注 |
 |------|------|------|
-| `cmd/` 5 个服务入口 | ✅ | relay-gateway / admin-api / identity-service / channel-service / billing-service |
+| `cmd/` 9 个服务入口 | ✅ | 5 个一期服务 + 4 个二期服务（config / log / monitor / notify） |
 | `internal/` DDD 目录 | ✅ | biz / data / service / server 四层均已创建 |
-| `api/` proto 定义 | ✅ | 5 个 .proto 文件均已生成（identity / channel / billing / admin / relay / common） |
-| `configs/` 配置文件 | ✅ | 5 个 .yaml 文件均已创建，支持环境变量覆盖 |
+| `api/` proto 定义 | ✅ | 6 个 .proto 文件均已生成（identity / channel / billing / admin / relay / common） |
+| `configs/` 配置文件 | ✅ | 9 个 .yaml 文件均已创建，支持环境变量覆盖 |
 | `internal/pkg/` 共享包 | ✅ | auth / errors / events / grpc / middleware / model / logger / timeout / tls / validation / xdb / xgrpc / xhttp / xtrace |
 | `third_party/` | ✅ | google / validate proto 依赖 |
 | `migrations/billing/` | ✅ | 6 个 SQL 迁移文件 |
-| `deployments/` | ✅ | Docker / K8s 部署文件 |
+| `deployments/` | ✅ | Docker / K8s 部署文件（含二期服务） |
 | 旧 one-api 目录清理 | ✅ | controller/ / model/ / middleware/ / relay/ / monitor/ / web/ 已移除 |
 
-### 16.2 服务实现层 — ⚠️ 大部分已完成，少量遗漏
+### 16.2 服务实现层 — ✅ 全部完成
 
 #### 16.2.1 `identity-service` — ✅ 已完成
 
@@ -619,12 +619,12 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 | 聚合渠道管理 | ✅ 已实现（ListChannels / CreateChannel / UpdateChannel / DeleteChannel / ChangeChannelStatus） |
 | 聚合选项管理 | ✅ 已实现（GetSystemOptions / UpdateSystemOptions） |
 | 账务管理 | ✅ 已实现（复用 billing-service 所有 RPC） |
-| 日志查询 | ❌ 未实现 |
+| 日志查询 | ✅ 已实现（ListLogs 透传 billing ledger，支持 user_id / type / start_time / end_time 过滤） |
 | 充值 / 兑换码 | ✅ 已实现（复用 billing.proto） |
 
 当前 `admin-api` 已经完整承担了管理端 BFF 的职责，集成了 identity、channel、billing 三个服务的客户端。
 
-#### 16.2.5 `relay-gateway` — ⚠️ 核心功能完整，部分优化缺失
+#### 16.2.5 `relay-gateway` — ✅ 核心功能完整
 
 | 计划内容 | 当前状态 |
 |----------|----------|
@@ -633,22 +633,24 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 | 渠道选择调用 `channel-service` | ✅ 已集成（SelectChannel / ListAvailableModels） |
 | 账务预扣/提交/释放调用 `billing-service` | ✅ 已集成（ReserveQuota / CommitQuota / ReleaseQuota） |
 | 鉴权调用 `identity-service` | ✅ 已集成（GetAuthSnapshot） |
-| `data/client/` 服务间调用封装 | ✅ 已存在（internal/relay/data/data.go 包含 gRPC client） |
+| `data/client/` 服务间调用封装 | ✅ 已存在（`internal/relay/data/` 包含 gRPC client + 适配器） |
 | `data/provider/` 上游模型适配 | ✅ 已存在（internal/relay/provider/ 包含 factory.go / provider.go / stream_test.go） |
-| 重试策略 `biz/retry.go` | ❌ 不存在 |
+| 重试策略 `biz/retry.go` | ✅ 已实现 — `RetryPolicy` + `RetryExecutor`，指数退避 + channel fallback |
 | 流式处理 `biz/stream.go` | ✅ 已存在（在 provider 中实现） |
-| 模型映射 `biz/model_mapping.go` | ❌ 不存在 |
+| 模型映射 `biz/model_mapping.go` | ✅ 已实现 — 支持 YAML/JSON 格式，已接入 `RelayUsecase.Plan()` |
+| Biz 层编排 `biz/relay.go` | ✅ 已增强 — `RelayUsecase.Plan()` 编排模型映射→鉴权→权限校验→渠道选择 |
+| gRPC 适配器 `data/adapters.go` | ✅ 已实现 — `IdentityAdapter` / `ChannelAdapter` 桥接 gRPC 客户端与 biz 接口 |
 
-### 16.3 基础设施层 — ⚠️ 大部分已完成，DI 框架缺失
+### 16.3 基础设施层 — ✅ 已完成
 
 | 项目 | 计划 | 当前状态 |
 |------|------|----------|
-| 依赖注入 | wire | ⚠️ 有 `wire_gen.go` 手动实现，无真正的 `wire.go` |
+| 依赖注入 | wire | ✅ 9 个服务均有 `wire.go` + `wire_gen.go`，签名一致，`//go:build` 标签正确 |
 | 配置加载 | Kratos `config` 包加载 YAML | ✅ 所有服务均使用 Kratos config 包，支持环境变量覆盖 |
-| 服务健康检查 | Kratos health | ✅ 已实现 |
+| 服务健康检查 | Kratos health | ✅ 已实现（所有服务均有 `/healthz` 端点） |
 | TLS 配置 | Kratos TLS | ✅ 已实现（internal/pkg/tls/） |
 | 服务认证 | JWT / mTLS | ✅ 已实现（internal/pkg/auth/） |
-| 第二阶段服务 | config-service / log-service / monitor-worker / notify-worker | ❌ 均未创建 |
+| 第二阶段服务 | config-service / log-service / monitor-worker / notify-worker | ✅ 已创建并实现 HTTP API |
 
 ### 16.4 配置一致性 — ✅ 已修复
 
@@ -659,50 +661,57 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 | channel-service | http=:8002, grpc=:9002 | http=:8002, grpc=:9002 | ✅ 一致 |
 | billing-service | http=:8004, grpc=:9004 | http=:8004, grpc=:9004 | ✅ 一致 |
 | admin-api | http=:8000, grpc=:9000 | http=:8000, grpc=:9000 | ✅ 一致 |
+| config-service | http=:8005, grpc=:9005 | http=:8005, grpc=:9005 | ✅ 一致 |
+| log-service | http=:8006, grpc=:9006 | http=:8006, grpc=:9006 | ✅ 一致 |
+| monitor-worker | http=:8007, grpc=:9007 | http=:8007, grpc=:9007 | ✅ 一致 |
+| notify-worker | http=:8008, grpc=:9008 | http=:8008, grpc=:9008 | ✅ 一致 |
 
 所有服务配置文件与实际运行端口完全一致，且支持环境变量覆盖（如 `${DATABASE_DSN:-default}` 语法）。
 
-### 16.5 部署配置 — ⚠️ 部分完成
+### 16.5 部署配置 — ✅ 已完成
 
 | 项目 | 当前状态 |
 |------|----------|
-| Dockerfile | ✅ 已创建（deployments/docker/Dockerfile） |
-| docker-compose.yml | ⚠️ 仅包含 relay-gateway / identity-service / channel-service，缺少 billing-service 和 admin-api |
-| K8s deployment | ⚠️ 仅基础配置（deployments/k8s/deployment.yaml） |
+| Dockerfile | ✅ 已创建（deployments/docker/Dockerfile），通用 Dockerfile 支持构建任意服务 |
+| docker-compose.yml | ✅ 已完成 — 9 服务 + MySQL + Redis，包含一期和二期所有服务 |
+| K8s deployment | ✅ 已完成 — 一期 5 服务独立 manifest + 二期 4 服务 `phase2-services.yaml` |
+| K8s Ingress | ✅ 已完成 — relay-gateway + admin-api（`deployments/k8s/ingress.yaml`） |
 | 服务发现 | ✅ gRPC 直连，配置文件指定端点 |
 | 网络隔离 | ✅ docker-compose 中 backend 网络配置 |
 
-### 16.6 第二阶段服务 — ❌ 完全未开始
+### 16.6 第二阶段服务 — ✅ 已创建并实现
 
-计划第二阶段交付的 4 个服务均未创建：
+| 服务 | HTTP API | 当前状态 |
+|------|----------|----------|
+| `config-service` | GET/PUT/DELETE `/v1/configs/{namespace}/{key}` | ✅ 已实现（动态业务配置管理） |
+| `log-service` | GET/POST `/v1/logs`，GET `/v1/logs/{id}` | ✅ 已实现（日志聚合服务） |
+| `monitor-worker` | GET/POST `/v1/health-checks`，GET/POST `/v1/alert-rules` | ✅ 已实现（监控与告警） |
+| `notify-worker` | GET/POST `/v1/notifications`，GET `/v1/notifications/{id}` | ✅ 已实现（通知 worker） |
 
-- `config-service` — 动态业务配置管理
-- `log-service` — 日志聚合服务
-- `monitor-worker` — 监控与告警 worker
-- `notify-worker` — 通知 worker
+所有二期服务均遵循 Kratos DDD 分层架构（biz / data / service / server / config），支持 MySQL + Redis，具备完整的 HTTP API 端点。
 
 ---
 
 ## 17. 遗漏汇总与优先级建议
 
-### 高优先级（P0） - 阻塞生产可用性
+### 高优先级（P0） - 阻塞生产可用性 — ✅ 已全部完成
 
-1. ~~**docker-compose 完善**~~ — ✅ 已完成 — 5 服务 + MySQL + Redis，通用 Dockerfile 支持构建任意服务
-2. ~~**relay 重试策略**~~ — ✅ 已完成 — 指数退避重试 + channel fallback（`internal/relay/server/retry.go`）
-3. ~~**模型映射配置**~~ — ✅ 已完成 — `configs/models.yaml` + `internal/relay/biz/model_mapping.go`
+1. ~~**docker-compose 完善**~~ — ✅ 已完成 — 9 服务 + MySQL + Redis
+2. ~~**relay 重试策略**~~ — ✅ 已完成 — biz 层 `RetryPolicy` + `RetryExecutor`，指数退避 + channel fallback
+3. ~~**模型映射配置**~~ — ✅ 已完成 — `configs/models.yaml`（YAML 格式）+ `internal/relay/biz/model_mapping.go`
 
-### 中优先级（P1） - 提升可维护性
+### 中优先级（P1） - 提升可维护性 — ✅ 已全部完成
 
-4. ~~**真正接入 wire 依赖注入**~~ — ✅ 已完成 — 5 个服务均创建 `wire.go` 源文件
-5. ~~**K8s 部署完善**~~ — ✅ 已完成 — 4 服务 K8s 资源 + Ingress（`deployments/k8s/`）
-6. ~~**日志查询功能**~~ — ✅ 已完成 — admin-api `ListLogs` RPC 透传 billing ledger
-7. ~~**系统配置持久化**~~ — ✅ 已完成 — `system_options` 表 + DB 持久化（`internal/admin/data/system_options.go`）
+4. ~~**真正接入 wire 依赖注入**~~ — ✅ 已完成 — 9 个服务均有 `wire.go` + `wire_gen.go`，签名一致
+5. ~~**K8s 部署完善**~~ — ✅ 已完成 — 一期 5 服务 + 二期 4 服务 K8s 资源 + Ingress
+6. ~~**日志查询功能**~~ — ✅ 已完成 — admin-api `ListLogs` 支持 user_id / type / start_time / end_time 过滤
+7. ~~**系统配置持久化**~~ — ✅ 已完成 — `system_options` 表 + DB 持久化
 
 ### 低优先级（P2） - 扩展功能
 
-8. **第二阶段服务** — config-service / log-service / monitor-worker / notify-worker
+8. ~~**第二阶段服务**~~ — ✅ 已完成 — 4 个服务已创建并实现 HTTP API
 9. **性能优化** — 缓存策略、连接池配置、限流细化
-10. **监控告警** — Prometheus metrics、 Grafana dashboard、告警规则配置
+10. **监控告警** — Prometheus metrics、Grafana dashboard、告警规则配置
 
 ### 架构改进建议（可选）
 
@@ -710,6 +719,7 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 2. **链路追踪** — 当前已有 xtrace 包，建议补充 Jaeger/Zipkin 集成
 3. **服务治理** — 可考虑接入 consul/nacos 等注册中心，替代静态端点配置
 4. **API 文档** — 可考虑接入 swagger/OpenAPI 自动生成 API 文档
+5. **gRPC Proto 定义** — 二期服务目前仅有 HTTP API，建议补充 proto 定义以支持 gRPC 服务间调用
 
 ---
 
@@ -724,7 +734,7 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 ### 部署运维相关
 
 4. ~~**K8s 部署完善**~~ — ✅ 已完成
-5. **健康检查完善** — 确保所有服务的健康检查端点正常工作
+5. ~~**健康检查完善**~~ — ✅ 已完成 — 所有 9 个服务均有健康检查端点
 6. **部署文档** — 撰写详细的部署运维文档
 
 ### 功能完善相关 — ✅ 已全部完成
@@ -732,3 +742,12 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 7. ~~**日志查询功能**~~ — ✅ 已完成
 8. ~~**系统配置持久化**~~ — ✅ 已完成
 9. ~~**真正接入 wire**~~ — ✅ 已完成
+10. ~~**第二阶段服务**~~ — ✅ 已完成
+
+### 后续迭代建议
+
+11. **二期服务 Proto 定义** — 为 config / log / monitor / notify 服务补充 proto 定义
+12. **二期服务单元测试** — 为二期服务补充 biz / data 层单元测试
+13. **集成测试增强** — 补充 retry、model mapping、chat completions 流程的集成测试
+14. **性能优化** — 缓存策略、连接池配置、限流细化
+15. **监控告警** — Prometheus metrics、Grafana dashboard

@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"fmt"
 )
 
 type IdentityClient interface {
@@ -38,35 +39,99 @@ type Channel struct {
 	Key      string
 }
 
+// RelayPlan is the result of relay planning, containing all resolved
+// information needed to execute an upstream provider call.
 type RelayPlan struct {
-	Auth    *AuthSnapshot
-	Channel *Channel
+	Auth         *AuthSnapshot
+	Channel      *Channel
+	ResolvedModel string
 }
 
-// RelayUsecase is the phase-one relay orchestration boundary.
+// RelayUsecase orchestrates the relay planning flow:
+// model mapping → auth → model validation → channel selection.
 type RelayUsecase struct {
-	identity IdentityClient
-	channel  ChannelClient
+	identity    IdentityClient
+	channel     ChannelClient
+	modelMapper *ModelMapper
+	retryPolicy *RetryPolicy
 }
 
-func NewRelayUsecase(identity IdentityClient, channel ChannelClient) *RelayUsecase {
+// NewRelayUsecase creates a RelayUsecase with the given dependencies.
+// modelMapper and retryPolicy may be nil (model mapping / retry disabled).
+func NewRelayUsecase(identity IdentityClient, channel ChannelClient, modelMapper *ModelMapper, retryPolicy *RetryPolicy) *RelayUsecase {
+	if retryPolicy == nil {
+		retryPolicy = DefaultRetryPolicy()
+	}
 	return &RelayUsecase{
-		identity: identity,
-		channel:  channel,
+		identity:    identity,
+		channel:     channel,
+		modelMapper: modelMapper,
+		retryPolicy: retryPolicy,
 	}
 }
 
+// Plan resolves the model name, authenticates the user, validates permissions,
+// and selects the best channel. Returns a RelayPlan with all resolved values.
 func (uc *RelayUsecase) Plan(ctx context.Context, req RelayRequest) (*RelayPlan, error) {
+	// 1. Resolve model name mapping (e.g. gpt-4o -> gpt-4o-2024-08-06)
+	resolvedModel := req.Model
+	if uc.modelMapper != nil {
+		resolvedModel = uc.modelMapper.Resolve(req.Model)
+	}
+
+	// 2. Authenticate
 	authSnapshot, err := uc.identity.GetAuthSnapshot(ctx, req.Token)
 	if err != nil {
 		return nil, err
 	}
-	channel, err := uc.channel.SelectChannel(ctx, authSnapshot.Group, req.Model, false)
+
+	// 3. Validate model permission
+	if len(authSnapshot.AllowedModels) > 0 {
+		allowed := false
+		for _, m := range authSnapshot.AllowedModels {
+			if m == req.Model {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, fmt.Errorf("model %q not allowed for this token", req.Model)
+		}
+	}
+
+	// 4. Select channel
+	channel, err := uc.channel.SelectChannel(ctx, authSnapshot.Group, resolvedModel, false)
 	if err != nil {
 		return nil, err
 	}
+
 	return &RelayPlan{
-		Auth:    authSnapshot,
-		Channel: channel,
+		Auth:          authSnapshot,
+		Channel:       channel,
+		ResolvedModel: resolvedModel,
 	}, nil
+}
+
+// NewRetryExecutor creates a RetryExecutor using this use case's retry policy
+// and channel selector. Callers use this to execute upstream calls with
+// automatic retry and channel fallback.
+func (uc *RelayUsecase) NewRetryExecutor() *RetryExecutor {
+	return NewRetryExecutor(uc.retryPolicy, uc.channel)
+}
+
+// ResolveModel returns the upstream model name for the given client model name.
+// Returns the original name if no mapping exists or mapper is nil.
+func (uc *RelayUsecase) ResolveModel(modelName string) string {
+	if uc.modelMapper == nil {
+		return modelName
+	}
+	return uc.modelMapper.Resolve(modelName)
+}
+
+// HasCapability checks if a model has the specified capability.
+func (uc *RelayUsecase) HasCapability(modelName, capability string) bool {
+	if uc.modelMapper == nil {
+		return false
+	}
+	return uc.modelMapper.HasCapability(modelName, capability)
 }

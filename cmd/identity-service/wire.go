@@ -21,7 +21,7 @@ var ProviderSet = wire.NewSet(
 	server.NewGRPCServer,
 )
 
-func InitApp(confPath string) (*identitycfg.Config, *kratos.App, func(), error) {
+func InitApp(confPath string) (*kratos.App, func(), error) {
 	panic(wire.Build(
 		loadConfig,
 		ProviderSet,

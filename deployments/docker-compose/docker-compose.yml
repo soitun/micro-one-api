@@ -169,6 +169,136 @@ services:
     cap_drop:
       - ALL
 
+  # ────────────── Phase 2 Services ──────────────
+
+  config-service:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+      args:
+        SERVICE_NAME: config-service
+    container_name: config-service
+    environment:
+      - CONF_PATH=configs/config-service.yaml
+      - DATABASE_DSN=root:rootpassword@tcp(mysql:3306)/oneapi?parseTime=true&loc=Local
+      - REDIS_ADDR=redis:6379
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+    ports:
+      - "8005:8005"
+      - "9005:9005"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+
+  log-service:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+      args:
+        SERVICE_NAME: log-service
+    container_name: log-service
+    environment:
+      - CONF_PATH=configs/log-service.yaml
+      - DATABASE_DSN=root:rootpassword@tcp(mysql:3306)/oneapi?parseTime=true&loc=Local
+      - REDIS_ADDR=redis:6379
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+    ports:
+      - "8006:8006"
+      - "9006:9006"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+
+  monitor-worker:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+      args:
+        SERVICE_NAME: monitor-worker
+    container_name: monitor-worker
+    environment:
+      - CONF_PATH=configs/monitor-worker.yaml
+      - DATABASE_DSN=root:rootpassword@tcp(mysql:3306)/oneapi?parseTime=true&loc=Local
+      - REDIS_ADDR=redis:6379
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+    ports:
+      - "8007:8007"
+      - "9007:9007"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+
+  notify-worker:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+      args:
+        SERVICE_NAME: notify-worker
+    container_name: notify-worker
+    environment:
+      - CONF_PATH=configs/notify-worker.yaml
+      - DATABASE_DSN=root:rootpassword@tcp(mysql:3306)/oneapi?parseTime=true&loc=Local
+      - REDIS_ADDR=redis:6379
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+    ports:
+      - "8008:8008"
+      - "9008:9008"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+
   # ────────────── API Gateway ──────────────
 
   relay-gateway:

@@ -12,10 +12,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"micro-one-api/api/identity/v1"
+	identityv1 "micro-one-api/api/identity/v1"
 	channelv1 "micro-one-api/api/channel/v1"
 	billingv1 "micro-one-api/api/billing/v1"
-	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/internal/pkg/errors"
 	applogger "micro-one-api/internal/pkg/logger"
 	relaybiz "micro-one-api/internal/relay/biz"
@@ -30,8 +29,7 @@ type HTTPServer struct {
 	channelClient  channelv1.ChannelServiceClient
 	billingClient  billingv1.BillingServiceClient
 	providerFactory *relayprovider.ProviderFactory
-	retry           *retryConfig
-	modelMapper     *relaybiz.ModelMapper
+	relayUsecase    *relaybiz.RelayUsecase
 }
 
 // NewHTTPServer creates a new HTTP server for Kratos.
@@ -40,23 +38,15 @@ func NewHTTPServer(
 	channelClient channelv1.ChannelServiceClient,
 	billingClient billingv1.BillingServiceClient,
 	providerFactory *relayprovider.ProviderFactory,
+	relayUsecase *relaybiz.RelayUsecase,
 ) *HTTPServer {
 	return &HTTPServer{
 		identityClient:  identityClient,
 		channelClient:   channelClient,
 		billingClient:   billingClient,
 		providerFactory: providerFactory,
+		relayUsecase:    relayUsecase,
 	}
-}
-
-// SetRetryConfig sets the retry configuration for upstream provider calls.
-func (s *HTTPServer) SetRetryConfig(maxAttempts int, initialInterval, maxInterval string, multiplier float64, retryableStatus []int) {
-	s.retry = parseRetryConfig(maxAttempts, initialInterval, maxInterval, multiplier, retryableStatus)
-}
-
-// SetModelMapper sets the model name mapper for resolving client model names to upstream names.
-func (s *HTTPServer) SetModelMapper(mapper *relaybiz.ModelMapper) {
-	s.modelMapper = mapper
 }
 
 // RegisterRoutes registers HTTP routes to a Kratos *khttp.Server.
@@ -100,98 +90,57 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	authSnapshot, err := s.getAuthSnapshot(r.Context(), token)
+	// Delegate auth, model validation, model mapping, and channel selection to biz layer
+	plan, err := s.relayUsecase.Plan(r.Context(), relaybiz.RelayRequest{
+		Token: token,
+		Model: req.Model,
+	})
 	if err != nil {
-		s.handleIdentityError(w, err)
+		s.handleRelayPlanError(w, err)
 		return
 	}
 
-	if !s.isModelAllowed(authSnapshot.AllowedModels, req.Model) {
-		s.writeError(w, http.StatusForbidden, "model not allowed")
-		return
-	}
+	// Use resolved model name for upstream calls
+	req.Model = plan.ResolvedModel
 
-	// Resolve model name mapping (e.g. gpt-4o -> gpt-4o-2024-08-06)
-	if s.modelMapper != nil {
-		req.Model = s.modelMapper.Resolve(req.Model)
-	}
-
-	// First channel selection
-	channel, err := s.selectChannel(r.Context(), authSnapshot.Group, req.Model)
-	if err != nil {
-		s.handleChannelError(w, err)
-		return
-	}
-
-	// Retry loop for upstream provider calls
-	maxAttempts := 1
-	if s.retry != nil {
-		maxAttempts = s.retry.maxAttempts
-	}
-
-	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		// Wait before retry (skip on first attempt)
-		if attempt > 0 && s.retry != nil {
-			wait := backoffDuration(attempt-1, s.retry.initialInterval, s.retry.maxInterval, s.retry.multiplier)
-			logRetry(attempt-1, maxAttempts, wait, lastErr)
-			time.Sleep(wait)
-
-			// Re-select channel with excludeFirstPriority for fallback
-			newChannel, selErr := s.selectChannelExcludePriority(r.Context(), authSnapshot.Group, req.Model, true)
-			if selErr != nil {
-				// No more channels available, return the last upstream error
-				break
-			}
-			channel = newChannel
-		}
-
+	// Use RetryExecutor for upstream calls with channel fallback
+	retryExecutor := s.relayUsecase.NewRetryExecutor()
+	result := retryExecutor.Execute(r.Context(), plan.Auth.Group, plan.ResolvedModel, func(ctx context.Context, ch *relaybiz.Channel) error {
 		// Reserve quota
 		requestID := generateRequestID()
 		estimatedTokens := s.estimateTokens(&req)
-		reservation, reserveErr := s.reserveQuota(r.Context(), fmt.Sprintf("%d", authSnapshot.UserId), requestID, estimatedTokens, req.Model, fmt.Sprintf("%d", channel.Id))
+		reservation, reserveErr := s.reserveQuota(ctx, fmt.Sprintf("%d", plan.Auth.UserID), requestID, estimatedTokens, plan.ResolvedModel, fmt.Sprintf("%d", ch.ID))
 		if reserveErr != nil {
-			s.handleBillingError(w, reserveErr)
-			return
+			return &relaybiz.RetryableError{Status: http.StatusPaymentRequired, Err: reserveErr}
 		}
 
-		provider, provErr := s.providerFactory.CreateProvider(channel.Type, channel.BaseUrl, channel.Key)
+		provider, provErr := s.providerFactory.CreateProvider(ch.Type, ch.BaseURL, ch.Key)
 		if provErr != nil {
-			_ = s.releaseQuota(r.Context(), reservation.ReservationId, "failed to create provider")
-			s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create provider: %v", provErr))
-			return
+			_ = s.releaseQuota(ctx, reservation.ReservationId, "failed to create provider")
+			return fmt.Errorf("failed to create provider: %w", provErr)
 		}
 
 		if req.Stream {
 			s.handleStreamingResponse(w, r, provider, &req, reservation)
-			return
+			return nil
 		}
 
 		// Non-streaming call
-		resp, callErr := provider.ChatCompletions(r.Context(), &req)
+		resp, callErr := provider.ChatCompletions(ctx, &req)
 		if callErr != nil {
-			_ = s.releaseQuota(r.Context(), reservation.ReservationId, "upstream error")
-			lastErr = callErr
-			// Check if retryable
-			if s.retry == nil || !isRetryableError(callErr, s.retry.retryableStatus) {
-				s.writeError(w, mapUpstreamError(upstreamStatus(callErr)), fmt.Sprintf("upstream error: %v", callErr))
-				return
-			}
-			continue
+			_ = s.releaseQuota(ctx, reservation.ReservationId, "upstream error")
+			return callErr
 		}
 
 		// Success — commit quota and return
 		actualTokens := s.calculateActualTokens(resp)
-		_ = s.commitQuota(r.Context(), reservation.ReservationId, actualTokens, true)
+		_ = s.commitQuota(ctx, reservation.ReservationId, actualTokens, true)
 		s.writeJSON(w, http.StatusOK, resp)
-		return
-	}
+		return nil
+	})
 
-	// All retries exhausted
-	if lastErr != nil {
-		s.writeError(w, mapUpstreamError(upstreamStatus(lastErr)), fmt.Sprintf("upstream error after %d attempts: %v", maxAttempts, lastErr))
-	} else {
-		s.writeError(w, http.StatusServiceUnavailable, "no available channels")
+	if result.Err != nil {
+		s.writeError(w, mapUpstreamError(relaybiz.UpstreamStatus(result.Err)), fmt.Sprintf("upstream error after %d attempts: %v", result.Attempt+1, result.Err))
 	}
 }
 
@@ -325,49 +274,11 @@ func (s *HTTPServer) getAuthSnapshot(ctx context.Context, token string) (*identi
 	return s.identityClient.GetAuthSnapshot(ctx, req)
 }
 
-func (s *HTTPServer) selectChannel(ctx context.Context, group, model string) (*commonv1.ChannelInfo, error) {
-	req := &channelv1.SelectChannelRequest{
-		Group:              group,
-		Model:              model,
-		ExcludeFirstPriority: false,
-	}
-	resp, err := s.channelClient.SelectChannel(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	return resp.Channel, nil
-}
-
-func (s *HTTPServer) selectChannelExcludePriority(ctx context.Context, group, model string, excludeFirst bool) (*commonv1.ChannelInfo, error) {
-	req := &channelv1.SelectChannelRequest{
-		Group:              group,
-		Model:              model,
-		ExcludeFirstPriority: excludeFirst,
-	}
-	resp, err := s.channelClient.SelectChannel(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	return resp.Channel, nil
-}
-
 func (s *HTTPServer) listAvailableModels(ctx context.Context, group string) (*channelv1.ListAvailableModelsReply, error) {
 	req := &channelv1.ListAvailableModelsRequest{
 		Group: group,
 	}
 	return s.channelClient.ListAvailableModels(ctx, req)
-}
-
-func (s *HTTPServer) isModelAllowed(allowedModels []string, model string) bool {
-	if len(allowedModels) == 0 {
-		return true
-	}
-	for _, allowed := range allowedModels {
-		if allowed == model {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *HTTPServer) applyModelWhitelist(availableModels []string, allowedModels []string) []string {
@@ -388,6 +299,49 @@ func (s *HTTPServer) applyModelWhitelist(availableModels []string, allowedModels
 	}
 
 	return filtered
+}
+
+// handleRelayPlanError maps biz-layer Plan() errors to HTTP responses.
+func (s *HTTPServer) handleRelayPlanError(w http.ResponseWriter, err error) {
+	// Check for structured errors
+	if errors.IsUnauthorized(err) {
+		s.writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	if errors.IsForbidden(err) {
+		s.writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if errors.IsServiceUnavailable(err) {
+		s.writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+
+	// Handle gRPC errors from downstream services
+	st, ok := status.FromError(err)
+	if ok {
+		switch st.Code() {
+		case codes.NotFound:
+			s.writeError(w, http.StatusUnauthorized, st.Message())
+		case codes.PermissionDenied:
+			s.writeError(w, http.StatusForbidden, st.Message())
+		case codes.ResourceExhausted:
+			s.writeError(w, http.StatusTooManyRequests, st.Message())
+		case codes.Unavailable:
+			s.writeError(w, http.StatusServiceUnavailable, st.Message())
+		default:
+			s.writeError(w, http.StatusInternalServerError, st.Message())
+		}
+		return
+	}
+
+	// Model not allowed (string match from biz layer)
+	if strings.Contains(err.Error(), "not allowed") {
+		s.writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
+	s.writeError(w, http.StatusInternalServerError, err.Error())
 }
 
 func (s *HTTPServer) handleIdentityError(w http.ResponseWriter, err error) {
@@ -423,25 +377,6 @@ func (s *HTTPServer) handleIdentityError(w http.ResponseWriter, err error) {
 func (s *HTTPServer) handleChannelError(w http.ResponseWriter, err error) {
 	if errors.IsServiceUnavailable(err) {
 		s.writeError(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	s.writeError(w, http.StatusInternalServerError, err.Error())
-}
-
-func (s *HTTPServer) handleBillingError(w http.ResponseWriter, err error) {
-	// 处理计费服务错误
-	st, ok := status.FromError(err)
-	if ok {
-		switch st.Code() {
-		case codes.ResourceExhausted:
-			// 配额不足
-			s.writeError(w, http.StatusPaymentRequired, "insufficient quota")
-		case codes.Unavailable:
-			// 计费服务不可用
-			s.writeError(w, http.StatusServiceUnavailable, "billing service unavailable")
-		default:
-			s.writeError(w, http.StatusInternalServerError, st.Message())
-		}
 		return
 	}
 	s.writeError(w, http.StatusInternalServerError, err.Error())

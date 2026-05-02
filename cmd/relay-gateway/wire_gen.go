@@ -1,3 +1,5 @@
+//go:build !wireinject
+
 package main
 
 import (
@@ -20,6 +22,7 @@ import (
 	apptls "micro-one-api/internal/pkg/tls"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaycfg "micro-one-api/internal/relay/config"
+	relaydata "micro-one-api/internal/relay/data"
 	relayprovider "micro-one-api/internal/relay/provider"
 	"micro-one-api/internal/relay/server"
 )
@@ -36,6 +39,40 @@ func loadConfig(confPath string) (*relaycfg.Config, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// newModelMapper creates a ModelMapper from config, returning nil on error.
+func newModelMapper(cfg *relaycfg.Config) *relaybiz.ModelMapper {
+	mapper, err := relaybiz.NewModelMapper(cfg.Models.Path)
+	if err != nil {
+		fmt.Printf("Warning: Failed to load models config: %v\n", err)
+		return nil
+	}
+	return mapper
+}
+
+// newRetryPolicy creates a RetryPolicy from config.
+func newRetryPolicy(cfg *relaycfg.Config) *relaybiz.RetryPolicy {
+	retryCfg := cfg.Retry
+	statuses := make(map[int]bool)
+	for _, s := range retryCfg.GetRetryableStatus() {
+		statuses[s] = true
+	}
+	initialInterval, err := time.ParseDuration(retryCfg.GetInitialInterval())
+	if err != nil {
+		initialInterval = 500 * time.Millisecond
+	}
+	maxInterval, err := time.ParseDuration(retryCfg.GetMaxInterval())
+	if err != nil {
+		maxInterval = 5 * time.Second
+	}
+	return &relaybiz.RetryPolicy{
+		MaxAttempts:     retryCfg.GetMaxAttempts(),
+		InitialInterval: initialInterval,
+		MaxInterval:     maxInterval,
+		Multiplier:      retryCfg.GetMultiplier(),
+		RetryableStatus: statuses,
+	}
 }
 
 // InitApp loads config and builds the Kratos application.
@@ -110,21 +147,15 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	billingClient = billingv1.NewBillingServiceClient(billingConn)
 
 	providerFactory := relayprovider.NewProviderFactory(providerTimeout)
-	httpServer := server.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory)
-	httpServer.SetRetryConfig(
-		cfg.Retry.MaxAttempts,
-		cfg.Retry.InitialInterval,
-		cfg.Retry.MaxInterval,
-		cfg.Retry.Multiplier,
-		cfg.Retry.RetryableStatus,
-	)
+	modelMapper := newModelMapper(cfg)
+	retryPolicy := newRetryPolicy(cfg)
 
-	modelMapper, err := relaybiz.NewModelMapper(cfg.Models.Path)
-	if err != nil {
-		fmt.Printf("Warning: Failed to load models config: %v\n", err)
-	} else {
-		httpServer.SetModelMapper(modelMapper)
-	}
+	// Create biz-layer RelayUsecase with model mapping and retry policy
+	identityAdapter := relaydata.NewIdentityAdapter(identityClient)
+	channelAdapter := relaydata.NewChannelAdapter(channelClient)
+	relayUsecase := relaybiz.NewRelayUsecase(identityAdapter, channelAdapter, modelMapper, retryPolicy)
+
+	httpServer := server.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
 
 	srv := khttp.NewServer(khttp.Address(cfg.Server.HTTP.Addr), khttp.Timeout(providerTimeout))
 	httpServer.RegisterRoutes(srv)

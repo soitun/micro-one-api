@@ -19,12 +19,17 @@ func TestNewModelMapper_EmptyPath(t *testing.T) {
 func TestModelMapper_Resolve(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "models.yaml")
-	content := `{
-  "models": {
-    "gpt-4o": {"actual_name": "gpt-4o-2024-08-06", "capabilities": ["streaming"]},
-    "claude-3-5-sonnet": {"actual_name": "claude-3-5-sonnet-20241022", "capabilities": ["vision", "streaming"]}
-  }
-}`
+	content := `models:
+  gpt-4o:
+    actual_name: gpt-4o-2024-08-06
+    capabilities:
+      - streaming
+  claude-3-5-sonnet:
+    actual_name: claude-3-5-sonnet-20241022
+    capabilities:
+      - vision
+      - streaming
+`
 	if err := os.WriteFile(cfg, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -45,11 +50,14 @@ func TestModelMapper_Resolve(t *testing.T) {
 func TestModelMapper_HasCapability(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "models.yaml")
-	content := `{
-  "models": {
-    "gpt-4o": {"actual_name": "gpt-4o-2024-08-06", "capabilities": ["function_call", "vision", "streaming"]}
-  }
-}`
+	content := `models:
+  gpt-4o:
+    actual_name: gpt-4o-2024-08-06
+    capabilities:
+      - function_call
+      - vision
+      - streaming
+`
 	if err := os.WriteFile(cfg, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -73,11 +81,12 @@ func TestModelMapper_HasCapability(t *testing.T) {
 func TestNewModelMapper_Validation_EmptyActualName(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "models.yaml")
-	content := `{
-  "models": {
-    "gpt-4o": {"actual_name": "", "capabilities": ["streaming"]}
-  }
-}`
+	content := `models:
+  gpt-4o:
+    actual_name: ""
+    capabilities:
+      - streaming
+`
 	if err := os.WriteFile(cfg, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -94,11 +103,13 @@ func TestNewModelMapper_Validation_EmptyActualName(t *testing.T) {
 func TestNewModelMapper_Validation_UnknownCapability(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "models.yaml")
-	content := `{
-  "models": {
-    "gpt-4o": {"actual_name": "gpt-4o-2024-08-06", "capabilities": ["streaming", "telepathy"]}
-  }
-}`
+	content := `models:
+  gpt-4o:
+    actual_name: gpt-4o-2024-08-06
+    capabilities:
+      - streaming
+      - telepathy
+`
 	if err := os.WriteFile(cfg, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +120,65 @@ func TestNewModelMapper_Validation_UnknownCapability(t *testing.T) {
 	}
 	if expected := "unknown capability"; !contains(err.Error(), expected) {
 		t.Errorf("error %q should contain %q", err.Error(), expected)
+	}
+}
+
+func TestModelMapper_YAMLFormat(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "models.yaml")
+	content := `# Model config in YAML format
+models:
+  gpt-4o:
+    actual_name: gpt-4o-2024-08-06
+    capabilities:
+      - function_call
+      - vision
+      - streaming
+  claude-3-5-sonnet:
+    actual_name: claude-3-5-sonnet-20241022
+    capabilities:
+      - vision
+      - streaming
+`
+	if err := os.WriteFile(cfg, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := NewModelMapper(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := m.Resolve("gpt-4o"); got != "gpt-4o-2024-08-06" {
+		t.Errorf("Resolve(gpt-4o) = %s, want gpt-4o-2024-08-06", got)
+	}
+	if got := m.Resolve("claude-3-5-sonnet"); got != "claude-3-5-sonnet-20241022" {
+		t.Errorf("Resolve(claude-3-5-sonnet) = %s, want claude-3-5-sonnet-20241022", got)
+	}
+	if !m.HasCapability("gpt-4o", "vision") {
+		t.Error("expected gpt-4o to have vision capability")
+	}
+}
+
+func TestModelMapper_JSONFormat(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "models.json")
+	content := `{
+  "models": {
+    "gpt-4o": {"actual_name": "gpt-4o-2024-08-06", "capabilities": ["streaming"]}
+  }
+}`
+	if err := os.WriteFile(cfg, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := NewModelMapper(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := m.Resolve("gpt-4o"); got != "gpt-4o-2024-08-06" {
+		t.Errorf("Resolve(gpt-4o) = %s, want gpt-4o-2024-08-06", got)
 	}
 }
 

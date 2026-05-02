@@ -13,6 +13,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // AdminService is the transport layer entry for admin-api.
@@ -594,14 +595,8 @@ func (s *AdminService) UpdateSystemOptions(ctx context.Context, req *adminv1.Upd
 // ========== 日志查询 ==========
 
 // ListLogs returns ledger logs by proxying to billing-service.
+// Supports filtering by user_id, type, start_time, and end_time.
 func (s *AdminService) ListLogs(ctx context.Context, req *adminv1.ListLogsRequest) (*adminv1.ListLogsResponse, error) {
-	if req.UserId == "" {
-		return &adminv1.ListLogsResponse{
-			Logs:  []*adminv1.LogEntry{},
-			Total: 0,
-		}, nil
-	}
-
 	page := req.Page
 	if page <= 0 {
 		page = 1
@@ -615,6 +610,16 @@ func (s *AdminService) ListLogs(ctx context.Context, req *adminv1.ListLogsReques
 		UserId:   req.UserId,
 		Page:     page,
 		PageSize: pageSize,
+	}
+
+	// Pass time range filters to billing service
+	if req.StartTime > 0 {
+		ts := timestamppb.New(time.Unix(req.StartTime, 0))
+		billingReq.StartTime = ts
+	}
+	if req.EndTime > 0 {
+		ts := timestamppb.New(time.Unix(req.EndTime, 0))
+		billingReq.EndTime = ts
 	}
 
 	billingResp, err := s.billingClient.ListLedger(ctx, billingReq)
@@ -634,6 +639,11 @@ func (s *AdminService) ListLogs(ctx context.Context, req *adminv1.ListLogsReques
 
 	logs := make([]*adminv1.LogEntry, 0, len(billingResp.Entries))
 	for _, entry := range billingResp.Entries {
+		// Filter by type client-side (billing service doesn't support type filter)
+		if req.Type != "" && entry.Type != req.Type {
+			continue
+		}
+
 		var createdAt int64
 		if entry.CreatedAt != nil {
 			createdAt = entry.CreatedAt.AsTime().Unix()

@@ -15,7 +15,7 @@ var ProviderSet = wire.NewSet(
 	service.NewAdminService,
 )
 
-func InitApp(confPath string) (*admincfg.Config, *kratos.App, func(), error) {
+func InitApp(confPath string) (*kratos.App, func(), error) {
 	panic(wire.Build(
 		loadConfig,
 		newClients,

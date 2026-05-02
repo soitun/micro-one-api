@@ -1,0 +1,405 @@
+# Phase 2 Services: config-service, log-service, monitor-worker, notify-worker
+
+# ────────────── config-service ──────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: config-service
+  namespace: one-api
+  labels:
+    app: config-service
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: config-service
+  template:
+    metadata:
+      labels:
+        app: config-service
+        version: v1
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+        readOnlyRootFilesystem: true
+      containers:
+      - name: config-service
+        image: your-registry/config-service:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 9005
+          protocol: TCP
+          name: grpc
+        - containerPort: 8005
+          protocol: TCP
+          name: http
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          privileged: false
+        env:
+        - name: CONF_PATH
+          value: "configs/config-service.yaml"
+        - name: DATABASE_DSN
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: dsn
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "250m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8005
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8005
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: config-service
+  namespace: one-api
+  labels:
+    app: config-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9005
+    targetPort: 9005
+    protocol: TCP
+    name: grpc
+  - port: 8005
+    targetPort: 8005
+    protocol: TCP
+    name: http
+  selector:
+    app: config-service
+---
+# ────────────── log-service ──────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-service
+  namespace: one-api
+  labels:
+    app: log-service
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-service
+  template:
+    metadata:
+      labels:
+        app: log-service
+        version: v1
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+        readOnlyRootFilesystem: true
+      containers:
+      - name: log-service
+        image: your-registry/log-service:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 9006
+          protocol: TCP
+          name: grpc
+        - containerPort: 8006
+          protocol: TCP
+          name: http
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          privileged: false
+        env:
+        - name: CONF_PATH
+          value: "configs/log-service.yaml"
+        - name: DATABASE_DSN
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: dsn
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8006
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8006
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: log-service
+  namespace: one-api
+  labels:
+    app: log-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9006
+    targetPort: 9006
+    protocol: TCP
+    name: grpc
+  - port: 8006
+    targetPort: 8006
+    protocol: TCP
+    name: http
+  selector:
+    app: log-service
+---
+# ────────────── monitor-worker ──────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitor-worker
+  namespace: one-api
+  labels:
+    app: monitor-worker
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: monitor-worker
+  template:
+    metadata:
+      labels:
+        app: monitor-worker
+        version: v1
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+        readOnlyRootFilesystem: true
+      containers:
+      - name: monitor-worker
+        image: your-registry/monitor-worker:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 9007
+          protocol: TCP
+          name: grpc
+        - containerPort: 8007
+          protocol: TCP
+          name: http
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          privileged: false
+        env:
+        - name: CONF_PATH
+          value: "configs/monitor-worker.yaml"
+        - name: DATABASE_DSN
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: dsn
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "250m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8007
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8007
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitor-worker
+  namespace: one-api
+  labels:
+    app: monitor-worker
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9007
+    targetPort: 9007
+    protocol: TCP
+    name: grpc
+  - port: 8007
+    targetPort: 8007
+    protocol: TCP
+    name: http
+  selector:
+    app: monitor-worker
+---
+# ────────────── notify-worker ──────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notify-worker
+  namespace: one-api
+  labels:
+    app: notify-worker
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notify-worker
+  template:
+    metadata:
+      labels:
+        app: notify-worker
+        version: v1
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+        readOnlyRootFilesystem: true
+      containers:
+      - name: notify-worker
+        image: your-registry/notify-worker:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 9008
+          protocol: TCP
+          name: grpc
+        - containerPort: 8008
+          protocol: TCP
+          name: http
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          privileged: false
+        env:
+        - name: CONF_PATH
+          value: "configs/notify-worker.yaml"
+        - name: DATABASE_DSN
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: dsn
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "250m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8008
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8008
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notify-worker
+  namespace: one-api
+  labels:
+    app: notify-worker
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9008
+    targetPort: 9008
+    protocol: TCP
+    name: grpc
+  - port: 8008
+    targetPort: 8008
+    protocol: TCP
+    name: http
+  selector:
+    app: notify-worker

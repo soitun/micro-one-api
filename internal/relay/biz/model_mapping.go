@@ -3,19 +3,21 @@ package biz
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/bytedance/sonic"
+	"gopkg.in/yaml.v3"
 )
 
 // ModelEntry represents a single model mapping entry.
 type ModelEntry struct {
-	ActualName   string   `json:"actual_name"`
-	Capabilities []string `json:"capabilities"`
+	ActualName   string   `json:"actual_name" yaml:"actual_name"`
+	Capabilities []string `json:"capabilities" yaml:"capabilities"`
 }
 
 // modelsFile is the YAML/JSON structure of models config.
 type modelsFile struct {
-	Models map[string]*ModelEntry `json:"models"`
+	Models map[string]*ModelEntry `json:"models" yaml:"models"`
 }
 
 // KnownCapabilities is the set of valid model capabilities.
@@ -45,8 +47,14 @@ func NewModelMapper(path string) (*ModelMapper, error) {
 	}
 
 	var file modelsFile
-	if err := sonic.Unmarshal(data, &file); err != nil {
-		return nil, fmt.Errorf("failed to parse models config %s: %w", path, err)
+	if isYAMLFile(path) {
+		if err := yaml.Unmarshal(data, &file); err != nil {
+			return nil, fmt.Errorf("failed to parse models config %s: %w", path, err)
+		}
+	} else {
+		if err := sonic.Unmarshal(data, &file); err != nil {
+			return nil, fmt.Errorf("failed to parse models config %s: %w", path, err)
+		}
 	}
 
 	if file.Models == nil {
@@ -94,4 +102,10 @@ func (m *ModelMapper) HasCapability(modelName, capability string) bool {
 // GetEntry returns the full model entry for the given name, or nil if not found.
 func (m *ModelMapper) GetEntry(modelName string) *ModelEntry {
 	return m.models[modelName]
+}
+
+// isYAMLFile checks if a file path has a YAML extension.
+func isYAMLFile(path string) bool {
+	lower := strings.ToLower(path)
+	return strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
 }

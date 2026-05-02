@@ -22,7 +22,7 @@ var ProviderSet = wire.NewSet(
 	server.NewHTTPServer,
 )
 
-func InitApp(confPath string) (*bcfg.Config, *kratos.App, func(), error) {
+func InitApp(confPath string) (*kratos.App, func(), error) {
 	panic(wire.Build(
 		loadConfig,
 		ProviderSet,
