@@ -44,15 +44,20 @@ type abilityModel struct {
 
 func (abilityModel) TableName() string { return "abilities" }
 
-func NewRepositoryFromEnv() (*Repository, error) {
-	dsn := os.Getenv("CHANNEL_SQL_DSN")
-	if dsn == "" {
-		dsn = os.Getenv("SQL_DSN")
+func NewRepositoryFromEnv(dsn ...string) (*Repository, error) {
+	var dbDSN string
+	if len(dsn) > 0 && dsn[0] != "" {
+		dbDSN = dsn[0]
+	} else {
+		dbDSN = os.Getenv("CHANNEL_SQL_DSN")
+		if dbDSN == "" {
+			dbDSN = os.Getenv("SQL_DSN")
+		}
 	}
-	if dsn == "" {
+	if dbDSN == "" {
 		return newMemoryRepository(), nil
 	}
-	db, err := xdb.OpenMySQL(dsn)
+	db, err := xdb.OpenMySQL(dbDSN)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +112,67 @@ func (r *Repository) ListAvailableModels(ctx context.Context, group string) ([]s
 		return r.listAvailableModelsDB(ctx, group)
 	}
 	return r.listAvailableModelsMemory(ctx, group)
+}
+
+func (r *Repository) ListChannels(ctx context.Context, page, pageSize int32, keyword, group string, status, chType int32) ([]*biz.Channel, int64, error) {
+	if r.db != nil {
+		return r.listChannelsDB(ctx, page, pageSize, keyword, group, status, chType)
+	}
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	var result []*biz.Channel
+	for _, ch := range r.channels {
+		result = append(result, ch)
+	}
+	return result, int64(len(result)), nil
+}
+
+func (r *Repository) CreateChannel(ctx context.Context, channel *biz.Channel) error {
+	if r.db != nil {
+		return r.createChannelDB(ctx, channel)
+	}
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	channel.ID = int64(len(r.channels) + 1)
+	r.channels[channel.ID] = channel
+	return nil
+}
+
+func (r *Repository) UpdateChannel(ctx context.Context, channel *biz.Channel) error {
+	if r.db != nil {
+		return r.updateChannelDB(ctx, channel)
+	}
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	if _, ok := r.channels[channel.ID]; !ok {
+		return biz.ErrChannelNotFound
+	}
+	r.channels[channel.ID] = channel
+	return nil
+}
+
+func (r *Repository) DeleteChannel(ctx context.Context, channelID int64) error {
+	if r.db != nil {
+		return r.deleteChannelDB(ctx, channelID)
+	}
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	delete(r.channels, channelID)
+	return nil
+}
+
+func (r *Repository) ChangeStatus(ctx context.Context, channelID int64, status int32) error {
+	if r.db != nil {
+		return r.changeStatusDB(ctx, channelID, status)
+	}
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	ch, ok := r.channels[channelID]
+	if !ok {
+		return biz.ErrChannelNotFound
+	}
+	ch.Status = status
+	return nil
 }
 
 func (r *Repository) findByIDDB(ctx context.Context, channelID int64) (*biz.Channel, error) {
@@ -241,3 +307,100 @@ func (r *Repository) listAvailableModelsMemory(_ context.Context, group string) 
 	sort.Strings(models)
 	return models, nil
 }
+
+func (r *Repository) listChannelsDB(ctx context.Context, page, pageSize int32, keyword, group string, status, chType int32) ([]*biz.Channel, int64, error) {
+	query := r.db.WithContext(ctx).Model(&channelModel{})
+	if keyword != "" {
+		query = query.Where("name LIKE ?", "%"+keyword+"%")
+	}
+	if group != "" {
+		query = query.Where("`group` = ?", group)
+	}
+	if status != 0 {
+		query = query.Where("status = ?", status)
+	}
+	if chType != 0 {
+		query = query.Where("type = ?", chType)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * pageSize
+	var models []channelModel
+	if err := query.Offset(int(offset)).Limit(int(pageSize)).Find(&models).Error; err != nil {
+		return nil, 0, err
+	}
+	result := make([]*biz.Channel, len(models))
+	for i, m := range models {
+		result[i] = r.modelToChannel(&m)
+	}
+	return result, total, nil
+}
+
+func (r *Repository) createChannelDB(ctx context.Context, channel *biz.Channel) error {
+	model := channelToModel(channel)
+	return r.db.WithContext(ctx).Create(model).Error
+}
+
+func (r *Repository) updateChannelDB(ctx context.Context, channel *biz.Channel) error {
+	model := channelToModel(channel)
+	return r.db.WithContext(ctx).Model(&channelModel{}).Where("id = ?", channel.ID).Updates(map[string]interface{}{
+		"name":     model.Name,
+		"base_url": model.BaseURL,
+		"key":      model.Key,
+		"models":   model.Models,
+		"group":    model.Group,
+		"priority": model.Priority,
+		"config":   model.Config,
+	}).Error
+}
+
+func (r *Repository) deleteChannelDB(ctx context.Context, channelID int64) error {
+	return r.db.WithContext(ctx).Where("id = ?", channelID).Delete(&channelModel{}).Error
+}
+
+func (r *Repository) changeStatusDB(ctx context.Context, channelID int64, status int32) error {
+	return r.db.WithContext(ctx).Model(&channelModel{}).Where("id = ?", channelID).Update("status", status).Error
+}
+
+func (r *Repository) modelToChannel(m *channelModel) *biz.Channel {
+	baseURL := ""
+	if m.BaseURL != nil {
+		baseURL = *m.BaseURL
+	}
+	priority := int64(0)
+	if m.Priority != nil {
+		priority = *m.Priority
+	}
+	return &biz.Channel{
+		ID:       m.ID,
+		Type:     m.Type,
+		Name:     m.Name,
+		Status:   m.Status,
+		BaseURL:  baseURL,
+		Group:    m.Group,
+		Models:   biz.SplitCSV(m.Models),
+		Priority: priority,
+		Key:      m.Key,
+		Config:   biz.DecodeChannelConfig(m.Config),
+	}
+}
+
+func channelToModel(ch *biz.Channel) *channelModel {
+	return &channelModel{
+		ID:      ch.ID,
+		Type:    ch.Type,
+		Name:    ch.Name,
+		Status:  ch.Status,
+		BaseURL: strPtr(ch.BaseURL),
+		Models:  ch.ModelsCSV(),
+		Group:   ch.Group,
+		Priority: int64Ptr(ch.Priority),
+		Key:     ch.Key,
+		Config:  "{}",
+	}
+}
+
+func strPtr(s string) *string { return &s }
+func int64Ptr(i int64) *int64 { return &i }

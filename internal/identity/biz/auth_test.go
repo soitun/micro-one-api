@@ -28,6 +28,45 @@ func (m *mockIdentityRepo) FindUserByID(ctx context.Context, userID int64) (*Use
 	return user, nil
 }
 
+func (m *mockIdentityRepo) FindUserByUsername(ctx context.Context, username string) (*User, error) {
+	for _, u := range m.users {
+		if u.Username == username {
+			return u, nil
+		}
+	}
+	return nil, ErrUserNotFound
+}
+
+func (m *mockIdentityRepo) CreateUser(ctx context.Context, user *User) error {
+	user.ID = int64(len(m.users) + 1)
+	m.users[user.ID] = user
+	return nil
+}
+
+func (m *mockIdentityRepo) UpdateUser(ctx context.Context, user *User) error {
+	m.users[user.ID] = user
+	return nil
+}
+
+func (m *mockIdentityRepo) DeleteUser(ctx context.Context, userID int64) error {
+	delete(m.users, userID)
+	return nil
+}
+
+func (m *mockIdentityRepo) CreateToken(ctx context.Context, token *Token) error {
+	token.ID = int64(len(m.tokens) + 1)
+	m.tokens[token.Key] = token
+	return nil
+}
+
+func (m *mockIdentityRepo) ListUsers(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*User, int64, error) {
+	var result []*User
+	for _, u := range m.users {
+		result = append(result, u)
+	}
+	return result, int64(len(result)), nil
+}
+
 func TestIdentityUsecase_ValidateToken_ValidToken(t *testing.T) {
 	repo := &mockIdentityRepo{
 		tokens: map[string]*Token{

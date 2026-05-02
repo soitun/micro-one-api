@@ -1,67 +1,31 @@
 package main
 
 import (
-	"context"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
-	"micro-one-api/internal/billing/biz"
-	"micro-one-api/internal/billing/data"
-	"micro-one-api/internal/billing/server"
-	"micro-one-api/internal/billing/service"
+	"github.com/go-kratos/kratos/v2/log"
 
-	"github.com/go-kratos/kratos/v2"
+	_ "github.com/go-kratos/kratos/v2/config/file"
 )
 
 func main() {
-	grpcAddr := os.Getenv("BILLING_GRPC_ADDR")
-	if grpcAddr == "" {
-		grpcAddr = ":9004"
+	confPath := os.Getenv("CONF_PATH")
+	if confPath == "" {
+		confPath = "configs/billing-service.yaml"
 	}
 
-	httpAddr := os.Getenv("BILLING_HTTP_ADDR")
-	if httpAddr == "" {
-		httpAddr = ":8004"
-	}
+	logger := log.NewStdLogger(os.Stdout)
+	log := log.NewHelper(logger)
 
-	d, err := data.NewData()
+	app, cleanup, err := InitApp(confPath)
 	if err != nil {
-		panic(err)
+		log.Errorf("failed to create app: %v", err)
+		os.Exit(1)
 	}
-
-	uc := biz.NewBillingUsecase(
-		d.AccountRepo(),
-		d.ReservationRepo(),
-		d.LedgerRepo(),
-		d.RedeemRepo(),
-	)
-	svc := service.NewBillingService(uc)
-
-	grpcSrv := server.NewGRPCServer(grpcAddr, svc)
-	httpSrv := server.NewHTTPServer(httpAddr, svc)
-
-	app := kratos.New(
-		kratos.Name("billing-service"),
-		kratos.Server(grpcSrv, httpSrv),
-	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	cleanupJob := biz.NewCleanupJob(uc, 1*time.Minute)
-	go cleanupJob.Start(ctx)
-
-	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
-		cancel()
-		cleanupJob.Stop()
-	}()
+	defer cleanup()
 
 	if err := app.Run(); err != nil {
-		panic(err)
+		log.Errorf("failed to run app: %v", err)
+		os.Exit(1)
 	}
 }

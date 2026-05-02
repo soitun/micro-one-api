@@ -7,6 +7,9 @@ import (
 
 	adminv1 "micro-one-api/api/admin/v1"
 	billingv1 "micro-one-api/api/billing/v1"
+	channelv1 "micro-one-api/api/channel/v1"
+	identityv1 "micro-one-api/api/identity/v1"
+	commonv1 "micro-one-api/api/common/v1"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -14,13 +17,22 @@ import (
 
 // AdminService is the transport layer entry for admin-api.
 type AdminService struct {
-	billingClient billingv1.BillingServiceClient
+	adminv1.UnimplementedAdminServiceServer
+	billingClient  billingv1.BillingServiceClient
+	identityClient identityv1.IdentityServiceClient
+	channelClient  channelv1.ChannelServiceClient
 }
 
 // NewAdminService creates a new admin service
-func NewAdminService(billingClient billingv1.BillingServiceClient) *AdminService {
+func NewAdminService(
+	billingClient billingv1.BillingServiceClient,
+	identityClient identityv1.IdentityServiceClient,
+	channelClient channelv1.ChannelServiceClient,
+) *AdminService {
 	return &AdminService{
-		billingClient: billingClient,
+		billingClient:  billingClient,
+		identityClient: identityClient,
+		channelClient:  channelClient,
 	}
 }
 
@@ -50,7 +62,7 @@ func (s *AdminService) TopUpQuota(ctx context.Context, req *adminv1.TopUpQuotaRe
 
 	return &adminv1.TopUpQuotaResponse{
 		Success:    true,
-		NewBalance: resp.NewQuota,
+		NewQuota:   resp.NewQuota,
 	}, nil
 }
 
@@ -116,7 +128,7 @@ func (s *AdminService) CreateRedeemCodesBatch(ctx context.Context, req *adminv1.
 }
 
 // GetRedeemCode 获取兑换码
-func (s *AdminService) GetRedeemCode(ctx context.Context, req *adminv1.GetRedeemCodeRequest) (*adminv1.GetRedeemCodeResponse, error) {
+func (s *AdminService) GetRedeemCode(ctx context.Context, req *adminv1.GetRedeemCodeRequest) (*adminv1.RedeemCodeResponse, error) {
 	billingReq := &billingv1.GetRedeemCodeRequest{
 		Code: req.Code,
 	}
@@ -126,7 +138,7 @@ func (s *AdminService) GetRedeemCode(ctx context.Context, req *adminv1.GetRedeem
 		st, ok := status.FromError(err)
 		if ok {
 			if st.Code() == codes.NotFound {
-				return &adminv1.GetRedeemCodeResponse{
+				return &adminv1.RedeemCodeResponse{
 					ErrorMessage: "redeem code not found",
 				}, nil
 			}
@@ -145,7 +157,7 @@ func (s *AdminService) GetRedeemCode(ctx context.Context, req *adminv1.GetRedeem
 		CreatedAt: resp.RedeemCode.CreatedAt.AsTime().Unix(),
 	}
 
-	return &adminv1.GetRedeemCodeResponse{
+	return &adminv1.RedeemCodeResponse{
 		RedeemCode: redeemCodeInfo,
 	}, nil
 }
@@ -185,14 +197,14 @@ func (s *AdminService) ListRedeemCodes(ctx context.Context, req *adminv1.ListRed
 }
 
 // SearchRedeemCodes 搜索兑换码
-func (s *AdminService) SearchRedeemCodes(ctx context.Context, req *adminv1.SearchRedeemCodesRequest) (*adminv1.SearchRedeemCodesResponse, error) {
+func (s *AdminService) SearchRedeemCodes(ctx context.Context, req *adminv1.SearchRedeemCodesRequest) (*adminv1.RedeemCodesSearchResponse, error) {
 	billingReq := &billingv1.SearchRedeemCodesRequest{
 		Keyword: req.Keyword,
 	}
 
 	resp, err := s.billingClient.SearchRedeemCodes(ctx, billingReq)
 	if err != nil {
-		return &adminv1.SearchRedeemCodesResponse{
+		return &adminv1.RedeemCodesSearchResponse{
 			Codes: []*adminv1.RedeemCodeInfo{},
 		}, nil
 	}
@@ -210,7 +222,7 @@ func (s *AdminService) SearchRedeemCodes(ctx context.Context, req *adminv1.Searc
 		}
 	}
 
-	return &adminv1.SearchRedeemCodesResponse{
+	return &adminv1.RedeemCodesSearchResponse{
 		Codes: codes,
 	}, nil
 }
@@ -271,7 +283,7 @@ func (s *AdminService) DeleteRedeemCode(ctx context.Context, req *adminv1.Delete
 }
 
 // ListUserLedger 查询用户流水
-func (s *AdminService) ListUserLedger(ctx context.Context, req *adminv1.ListUserLedgerRequest) (*adminv1.ListUserLedgerResponse, error) {
+func (s *AdminService) ListUserLedger(ctx context.Context, req *adminv1.ListUserLedgerRequest) (*adminv1.UserLedgerResponse, error) {
 	billingReq := &billingv1.ListLedgerRequest{
 		UserId:   req.UserId,
 		Page:     req.Page,
@@ -283,8 +295,8 @@ func (s *AdminService) ListUserLedger(ctx context.Context, req *adminv1.ListUser
 		st, ok := status.FromError(err)
 		if ok {
 			if st.Code() == codes.NotFound {
-				return &adminv1.ListUserLedgerResponse{
-					Ledgers: []*adminv1.LedgerInfo{},
+				return &adminv1.UserLedgerResponse{
+					Ledgers: []*commonv1.LedgerInfo{},
 					Total:   0,
 				}, nil
 			}
@@ -293,10 +305,10 @@ func (s *AdminService) ListUserLedger(ctx context.Context, req *adminv1.ListUser
 		return nil, err
 	}
 
-	ledgers := make([]*adminv1.LedgerInfo, len(resp.Entries))
+	ledgers := make([]*commonv1.LedgerInfo, len(resp.Entries))
 	for i, ledger := range resp.Entries {
-		ledgers[i] = &adminv1.LedgerInfo{
-			Id:           0, // LedgerEntry 的 id 是 string 类型，需要转换
+		ledgers[i] = &commonv1.LedgerInfo{
+			Id:           0,
 			UserId:       ledger.UserId,
 			Amount:       ledger.Amount,
 			BalanceAfter: ledger.BalanceAfter,
@@ -307,14 +319,14 @@ func (s *AdminService) ListUserLedger(ctx context.Context, req *adminv1.ListUser
 		}
 	}
 
-	return &adminv1.ListUserLedgerResponse{
+	return &adminv1.UserLedgerResponse{
 		Ledgers: ledgers,
 		Total:   resp.Total,
 	}, nil
 }
 
 // GetAccountSnapshot 获取账户快照
-func (s *AdminService) GetAccountSnapshot(ctx context.Context, req *adminv1.GetAccountSnapshotRequest) (*adminv1.GetAccountSnapshotResponse, error) {
+func (s *AdminService) GetAccountSnapshot(ctx context.Context, req *adminv1.GetAccountSnapshotRequest) (*adminv1.AdminAccountSnapshotResponse, error) {
 	billingReq := &billingv1.GetAccountSnapshotRequest{
 		UserId: req.UserId,
 	}
@@ -331,18 +343,198 @@ func (s *AdminService) GetAccountSnapshot(ctx context.Context, req *adminv1.GetA
 		return nil, err
 	}
 
-	return &adminv1.GetAccountSnapshotResponse{
-		Account: &adminv1.AccountInfo{
+	return &adminv1.AdminAccountSnapshotResponse{
+		Account: &commonv1.AccountInfo{
 			UserId:       resp.Snapshot.UserId,
-			Username:     "", // AccountSnapshot 没有 username 字段
-			DisplayName:  "", // AccountSnapshot 没有 display_name 字段
+			Username:     "",
+			DisplayName:  "",
 			Group:        resp.Snapshot.Group,
 			Quota:        resp.Snapshot.Quota,
 			UsedQuota:    resp.Snapshot.UsedQuota,
 			RequestCount: resp.Snapshot.RequestCount,
 			FrozenQuota:  resp.Snapshot.FrozenQuota,
-			Status:       0, // AccountSnapshot 没有 status 字段
+			Status:       0,
 		},
+	}, nil
+}
+
+// ========== 用户管理 ==========
+
+func (s *AdminService) ListUsers(ctx context.Context, req *adminv1.AdminListUsersRequest) (*adminv1.AdminListUsersResponse, error) {
+	resp, err := s.identityClient.ListUsers(ctx, &identityv1.ListUsersRequest{
+		Page:     req.Page,
+		PageSize: req.PageSize,
+		Keyword:  req.Keyword,
+		Group:    req.Group,
+		Status:   req.Status,
+	})
+	if err != nil {
+		return &adminv1.AdminListUsersResponse{Users: []*commonv1.UserInfo{}, Total: 0}, nil
+	}
+	return &adminv1.AdminListUsersResponse{
+		Users: resp.Users,
+		Total: resp.Total,
+	}, nil
+}
+
+func (s *AdminService) CreateUser(ctx context.Context, req *adminv1.AdminCreateUserRequest) (*adminv1.AdminCreateUserResponse, error) {
+	resp, err := s.identityClient.CreateUser(ctx, &identityv1.CreateUserRequest{
+		Username:    req.Username,
+		DisplayName: req.DisplayName,
+		Email:       req.Email,
+		Password:   req.Password,
+		Group:      req.Group,
+		Quota:       req.Quota,
+	})
+	if err != nil {
+		return &adminv1.AdminCreateUserResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &adminv1.AdminCreateUserResponse{
+		Success: resp.Success,
+		Message: resp.Message,
+		UserId:  resp.UserId,
+	}, nil
+}
+
+func (s *AdminService) UpdateUser(ctx context.Context, req *adminv1.AdminUpdateUserRequest) (*adminv1.AdminUpdateUserResponse, error) {
+	resp, err := s.identityClient.UpdateUser(ctx, &identityv1.UpdateUserRequest{
+		UserId:      req.UserId,
+		DisplayName: req.DisplayName,
+		Email:       req.Email,
+		Group:       req.Group,
+		Status:      req.Status,
+	})
+	if err != nil {
+		return &adminv1.AdminUpdateUserResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &adminv1.AdminUpdateUserResponse{Success: resp.Success, Message: resp.Message}, nil
+}
+
+func (s *AdminService) DeleteUser(ctx context.Context, req *adminv1.AdminDeleteUserRequest) (*adminv1.AdminDeleteUserResponse, error) {
+	resp, err := s.identityClient.DeleteUser(ctx, &identityv1.DeleteUserRequest{UserId: req.UserId})
+	if err != nil {
+		return &adminv1.AdminDeleteUserResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &adminv1.AdminDeleteUserResponse{Success: resp.Success, Message: resp.Message}, nil
+}
+
+func (s *AdminService) ResetUserQuota(ctx context.Context, req *adminv1.ResetUserQuotaRequest) (*adminv1.ResetUserQuotaResponse, error) {
+	// Reset quota via TopUpQuota (set quota to absolute value)
+	_, err := s.billingClient.TopUpQuota(ctx, &billingv1.TopUpQuotaRequest{
+		UserId:     fmt.Sprintf("%d", req.UserId),
+		Amount:     req.NewQuota,
+		OperatorId: req.OperatorId,
+		Remark:     req.Remark,
+	})
+	if err != nil {
+		return &adminv1.ResetUserQuotaResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &adminv1.ResetUserQuotaResponse{Success: true, Message: "ok"}, nil
+}
+
+// ========== 渠道管理 ==========
+
+func (s *AdminService) ListChannels(ctx context.Context, req *adminv1.AdminListChannelsRequest) (*adminv1.AdminListChannelsResponse, error) {
+	resp, err := s.channelClient.ListChannels(ctx, &channelv1.ListChannelsRequest{
+		Page:     req.Page,
+		PageSize: req.PageSize,
+		Keyword:  req.Keyword,
+		Group:    req.Group,
+		Status:   req.Status,
+		Type:     req.Type,
+	})
+	if err != nil {
+		return &adminv1.AdminListChannelsResponse{Channels: []*commonv1.ChannelSummary{}, Total: 0}, nil
+	}
+	return &adminv1.AdminListChannelsResponse{
+		Channels: resp.Channels,
+		Total:    resp.Total,
+	}, nil
+}
+
+func (s *AdminService) CreateChannel(ctx context.Context, req *adminv1.AdminCreateChannelRequest) (*adminv1.AdminCreateChannelResponse, error) {
+	resp, err := s.channelClient.CreateChannel(ctx, &channelv1.CreateChannelRequest{
+		Name:    req.Name,
+		Type:    req.Type,
+		BaseUrl: req.BaseUrl,
+		Key:     req.Key,
+		Models:  req.Models,
+		Group:   req.Group,
+		Priority: req.Priority,
+		Config:  req.Config,
+	})
+	if err != nil {
+		return &adminv1.AdminCreateChannelResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &adminv1.AdminCreateChannelResponse{
+		Success:   resp.Success,
+		Message:   resp.Message,
+		ChannelId: resp.ChannelId,
+	}, nil
+}
+
+func (s *AdminService) UpdateChannel(ctx context.Context, req *adminv1.AdminUpdateChannelRequest) (*adminv1.AdminUpdateChannelResponse, error) {
+	resp, err := s.channelClient.UpdateChannel(ctx, &channelv1.UpdateChannelRequest{
+		ChannelId: req.ChannelId,
+		Name:      req.Name,
+		BaseUrl:  req.BaseUrl,
+		Key:      req.Key,
+		Models:   req.Models,
+		Group:    req.Group,
+		Priority: req.Priority,
+		Config:   req.Config,
+	})
+	if err != nil {
+		return &adminv1.AdminUpdateChannelResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &adminv1.AdminUpdateChannelResponse{
+		Success: resp.Success,
+		Message: resp.Message,
+	}, nil
+}
+
+func (s *AdminService) DeleteChannel(ctx context.Context, req *adminv1.AdminDeleteChannelRequest) (*adminv1.AdminDeleteChannelResponse, error) {
+	resp, err := s.channelClient.DeleteChannel(ctx, &channelv1.DeleteChannelRequest{
+		ChannelId: req.ChannelId,
+	})
+	if err != nil {
+		return &adminv1.AdminDeleteChannelResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &adminv1.AdminDeleteChannelResponse{
+		Success: resp.Success,
+		Message: resp.Message,
+	}, nil
+}
+
+func (s *AdminService) ChangeChannelStatus(ctx context.Context, req *adminv1.AdminChangeChannelStatusRequest) (*adminv1.AdminChangeChannelStatusResponse, error) {
+	resp, err := s.channelClient.ChangeChannelStatus(ctx, &channelv1.ChangeChannelStatusRequest{
+		ChannelId: req.ChannelId,
+		Status:    req.Status,
+	})
+	if err != nil {
+		return &adminv1.AdminChangeChannelStatusResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &adminv1.AdminChangeChannelStatusResponse{
+		Success: resp.Success,
+		Message: resp.Message,
+	}, nil
+}
+
+// ========== 系统配置 ==========
+
+func (s *AdminService) GetSystemOptions(ctx context.Context, req *adminv1.GetSystemOptionsRequest) (*adminv1.GetSystemOptionsResponse, error) {
+	return &adminv1.GetSystemOptionsResponse{
+		Options: &commonv1.SystemOptions{
+			SiteTitle:             "One-API",
+			RegistrationEnabled:   true,
+		},
+	}, nil
+}
+
+func (s *AdminService) UpdateSystemOptions(ctx context.Context, req *adminv1.UpdateSystemOptionsRequest) (*adminv1.UpdateSystemOptionsResponse, error) {
+	return &adminv1.UpdateSystemOptionsResponse{
+		Success: false,
+		Message: "not implemented",
 	}, nil
 }
 

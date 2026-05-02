@@ -19,13 +19,19 @@ type Data struct {
 	redeemRepo      biz.RedeemRepo
 }
 
-func NewData() (*Data, error) {
-	dsn := os.Getenv("BILLING_SQL_DSN")
-	if dsn == "" {
-		dsn = os.Getenv("SQL_DSN")
+func NewData(dsn ...string) (*Data, error) {
+	// If DSN is provided via config, use it; otherwise fall back to env vars.
+	var dbDSN string
+	if len(dsn) > 0 && dsn[0] != "" {
+		dbDSN = dsn[0]
+	} else {
+		dbDSN = os.Getenv("BILLING_SQL_DSN")
+		if dbDSN == "" {
+			dbDSN = os.Getenv("SQL_DSN")
+		}
 	}
 
-	db, err := xdb.OpenMySQL(dsn)
+	db, err := xdb.OpenMySQL(dbDSN)
 	if err != nil {
 		return nil, err
 	}
@@ -57,4 +63,15 @@ func (d *Data) LedgerRepo() biz.LedgerRepo {
 
 func (d *Data) RedeemRepo() biz.RedeemRepo {
 	return d.redeemRepo
+}
+
+func (d *Data) Close() error {
+	if d.db != nil {
+		sqlDB, err := d.db.DB()
+		if err != nil {
+			return err
+		}
+		return sqlDB.Close()
+	}
+	return nil
 }

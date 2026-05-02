@@ -37,11 +37,12 @@ endif
 # generate api proto
 api:
 ifneq ($(strip $(API_PROTO_FILES)),)
-	protoc --proto_path=./api \
+	protoc \
+		--proto_path=. \
 		--proto_path=./third_party \
-		--go_out=paths=source_relative:./api \
-		--go-http_out=paths=source_relative:./api \
-		--go-grpc_out=paths=source_relative,require_unimplemented_servers=false:./api \
+		--go_out=paths=source_relative:. \
+		--go-http_out=paths=source_relative:. \
+		--go-grpc_out=paths=source_relative,require_unimplemented_servers=false:. \
 		$(API_PROTO_FILES)
 else
 	@echo "no api proto files"

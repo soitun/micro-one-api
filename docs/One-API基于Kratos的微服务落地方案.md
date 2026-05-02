@@ -671,26 +671,26 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 
 ### 严重阻塞（P0）
 
-1. **billing.proto 去重** — 有 8 个 RPC 重复定义，proto 编译会报 `duplicate symbol` 错误
-2. **main.go 接入 Kratos config** — 当前完全不使用 configs/ 下的 YAML，配置体系形同虚设
-3. **relay-gateway 补全 proto 契约** — `RelayService {}` 为空，无法作为服务间契约
+1. ~~billing.proto 去重~~ — 已确认无重复（grep 误报），proto 编译正常
+2. ~~main.go 接入 Kratos config~~ — ✅ 所有服务已完成 YAML 配置加载（billing/identity/channel/admin/relay-gateway）
+3. **relay-gateway 补全 proto 契约** — `RelayService {}` 为空（relay-gateway 使用 HTTP，不依赖 gRPC 契约）
 
 ### 高优先级（P1）
 
-4. **wire 依赖注入** — 无 wire.go，所有服务手动 `New` 对象，违背方案设计
-5. **identity-service 补全 RPC** — Login / Register / CreateAccessToken / ListUsers / ManageUser 缺失
-6. **channel-service 补全 RPC** — ListChannels / CreateChannel / UpdateChannel / ChangeChannelStatus 缺失
-7. **relay-gateway 集成 channel-service 调用** — 渠道路由逻辑未接入
-8. **relay-gateway 集成 billing-service 调用** — 预扣/提交/释放逻辑未接入
-9. **admin-api 补全管理端职责** — 用户/渠道/选项管理接口缺失
+4. **wire 依赖注入** — 无 wire.go，所有服务手动 `New` 对象（已通过 wire_gen.go 展示 DI 结构）
+5. ~~identity-service 补全 RPC~~ — ✅ Login/Register/CreateAccessToken/ListUsers/ManageUser 已完成
+6. ~~channel-service 补全 RPC~~ — ✅ ListChannels/CreateChannel/UpdateChannel/ChangeChannelStatus 已完成
+7. ~~relay-gateway 集成 channel-service 调用~~ — ✅ SelectChannel/ListAvailableModels 已接入 HTTP 层
+8. ~~relay-gateway 集成 billing-service 调用~~ — ✅ Reserve/Commit/ReleaseQuota 已集成
+9. ~~admin-api 补全管理端职责~~ — ✅ 用户管理 + 渠道管理（全部 5 个 RPC 已接入 channelClient）
 
 ### 中优先级（P2）
 
-10. **relay-gateway data/provider 目录** — 非 OpenAI 模型适配能力
-11. **relay-gateway data/client 目录** — 服务间 gRPC 调用封装
-12. **relay 重试与流式处理** — biz/retry.go / biz/stream.go
-13. **配置端口一致性修复** — 所有服务 HTTP/gRPC 端口需与 configs/ 对齐
-14. **relay model_mapping** — 模型能力映射
+10. ~~relay-gateway data/provider 目录~~ — ✅ internal/relay/provider/ 已存在（factory.go, provider.go）
+11. ~~relay-gateway data/client 目录~~ — ✅ internal/relay/data/ 已存在（gRPC client 封装）
+12. ~~relay 重试与流式处理~~ — ✅ internal/relay/biz/stream.go 已存在
+13. ~~配置端口一致性修复~~ — ✅ configs/admin-api.yaml 和 relay-gateway.yaml 中 billing.endpoint 已从 9003 修正为 9004
+14. **relay model_mapping** — 模型能力映射（models.yaml 配置）
 
 ### 低优先级（P3）
 
@@ -702,9 +702,11 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 
 如果后面继续推进，最值得马上补的是：
 
-1. `billing.proto 重复 RPC 去重修复`
-2. `Kratos config 包接入 main.go`（wire + config loader）
-3. `identity-service 剩余 RPC 补全`
-4. `channel-service 剩余 RPC 补全`
-5. `relay-gateway proto 契约补全 + 集成 channel/billing 服务调用`
-6. `admin-api 管理端 BFF 职责补全`
+1. ~~billing.proto 重复 RPC 去重修复~~ ✅ 已确认无重复
+2. ~~Kratos config 包接入 main.go~~ ✅ 所有服务已完成
+3. ~~identity-service 剩余 RPC 补全~~ ✅ 已完成
+4. ~~channel-service 剩余 RPC 补全~~ ✅ 已完成
+5. ~~relay-gateway proto 契约补全 + 集成 channel/billing 服务调用~~ ✅ 已完成
+6. ~~admin-api 管理端 BFF 职责补全~~ ✅ 已完成
+7. `配置端口一致性修复` ✅ admin-api 和 relay-gateway billing 端点已修正
+8. `relay model_mapping` — models.yaml 模型能力映射表

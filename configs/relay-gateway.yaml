@@ -7,5 +7,5 @@ clients:
   channel:
     endpoint: 127.0.0.1:9002
   billing:
-    endpoint: 127.0.0.1:9003
+    endpoint: 127.0.0.1:9004
 

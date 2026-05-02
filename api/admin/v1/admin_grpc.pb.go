@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.1
-// source: admin/v1/admin.proto
+// source: api/admin/v1/admin.proto
 
 package adminv1
 
@@ -29,32 +29,50 @@ const (
 	AdminService_DeleteRedeemCode_FullMethodName       = "/api.admin.v1.AdminService/DeleteRedeemCode"
 	AdminService_ListUserLedger_FullMethodName         = "/api.admin.v1.AdminService/ListUserLedger"
 	AdminService_GetAccountSnapshot_FullMethodName     = "/api.admin.v1.AdminService/GetAccountSnapshot"
+	AdminService_ListUsers_FullMethodName              = "/api.admin.v1.AdminService/ListUsers"
+	AdminService_CreateUser_FullMethodName             = "/api.admin.v1.AdminService/CreateUser"
+	AdminService_UpdateUser_FullMethodName             = "/api.admin.v1.AdminService/UpdateUser"
+	AdminService_DeleteUser_FullMethodName             = "/api.admin.v1.AdminService/DeleteUser"
+	AdminService_ResetUserQuota_FullMethodName         = "/api.admin.v1.AdminService/ResetUserQuota"
+	AdminService_ListChannels_FullMethodName           = "/api.admin.v1.AdminService/ListChannels"
+	AdminService_CreateChannel_FullMethodName          = "/api.admin.v1.AdminService/CreateChannel"
+	AdminService_UpdateChannel_FullMethodName          = "/api.admin.v1.AdminService/UpdateChannel"
+	AdminService_DeleteChannel_FullMethodName          = "/api.admin.v1.AdminService/DeleteChannel"
+	AdminService_ChangeChannelStatus_FullMethodName    = "/api.admin.v1.AdminService/ChangeChannelStatus"
+	AdminService_GetSystemOptions_FullMethodName       = "/api.admin.v1.AdminService/GetSystemOptions"
+	AdminService_UpdateSystemOptions_FullMethodName    = "/api.admin.v1.AdminService/UpdateSystemOptions"
 )
 
 // AdminServiceClient is the client API for AdminService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AdminServiceClient interface {
-	// 充值接口
+	// ========== 账务相关（透传 billing-service）==========
 	TopUpQuota(ctx context.Context, in *TopUpQuotaRequest, opts ...grpc.CallOption) (*TopUpQuotaResponse, error)
-	// 创建兑换码
 	CreateRedeemCode(ctx context.Context, in *CreateRedeemCodeRequest, opts ...grpc.CallOption) (*CreateRedeemCodeResponse, error)
-	// 批量创建兑换码
 	CreateRedeemCodesBatch(ctx context.Context, in *CreateRedeemCodesBatchRequest, opts ...grpc.CallOption) (*CreateRedeemCodesBatchResponse, error)
-	// 获取兑换码
-	GetRedeemCode(ctx context.Context, in *GetRedeemCodeRequest, opts ...grpc.CallOption) (*GetRedeemCodeResponse, error)
-	// 获取兑换码列表
+	GetRedeemCode(ctx context.Context, in *GetRedeemCodeRequest, opts ...grpc.CallOption) (*RedeemCodeResponse, error)
 	ListRedeemCodes(ctx context.Context, in *ListRedeemCodesRequest, opts ...grpc.CallOption) (*ListRedeemCodesResponse, error)
-	// 搜索兑换码
-	SearchRedeemCodes(ctx context.Context, in *SearchRedeemCodesRequest, opts ...grpc.CallOption) (*SearchRedeemCodesResponse, error)
-	// 更新兑换码
+	SearchRedeemCodes(ctx context.Context, in *SearchRedeemCodesRequest, opts ...grpc.CallOption) (*RedeemCodesSearchResponse, error)
 	UpdateRedeemCode(ctx context.Context, in *UpdateRedeemCodeRequest, opts ...grpc.CallOption) (*UpdateRedeemCodeResponse, error)
-	// 删除兑换码
 	DeleteRedeemCode(ctx context.Context, in *DeleteRedeemCodeRequest, opts ...grpc.CallOption) (*DeleteRedeemCodeResponse, error)
-	// 查询用户流水
-	ListUserLedger(ctx context.Context, in *ListUserLedgerRequest, opts ...grpc.CallOption) (*ListUserLedgerResponse, error)
-	// 获取账户快照
-	GetAccountSnapshot(ctx context.Context, in *GetAccountSnapshotRequest, opts ...grpc.CallOption) (*GetAccountSnapshotResponse, error)
+	ListUserLedger(ctx context.Context, in *ListUserLedgerRequest, opts ...grpc.CallOption) (*UserLedgerResponse, error)
+	GetAccountSnapshot(ctx context.Context, in *GetAccountSnapshotRequest, opts ...grpc.CallOption) (*AdminAccountSnapshotResponse, error)
+	// ========== 用户管理（透传 identity-service）==========
+	ListUsers(ctx context.Context, in *AdminListUsersRequest, opts ...grpc.CallOption) (*AdminListUsersResponse, error)
+	CreateUser(ctx context.Context, in *AdminCreateUserRequest, opts ...grpc.CallOption) (*AdminCreateUserResponse, error)
+	UpdateUser(ctx context.Context, in *AdminUpdateUserRequest, opts ...grpc.CallOption) (*AdminUpdateUserResponse, error)
+	DeleteUser(ctx context.Context, in *AdminDeleteUserRequest, opts ...grpc.CallOption) (*AdminDeleteUserResponse, error)
+	ResetUserQuota(ctx context.Context, in *ResetUserQuotaRequest, opts ...grpc.CallOption) (*ResetUserQuotaResponse, error)
+	// ========== 渠道管理（透传 channel-service）==========
+	ListChannels(ctx context.Context, in *AdminListChannelsRequest, opts ...grpc.CallOption) (*AdminListChannelsResponse, error)
+	CreateChannel(ctx context.Context, in *AdminCreateChannelRequest, opts ...grpc.CallOption) (*AdminCreateChannelResponse, error)
+	UpdateChannel(ctx context.Context, in *AdminUpdateChannelRequest, opts ...grpc.CallOption) (*AdminUpdateChannelResponse, error)
+	DeleteChannel(ctx context.Context, in *AdminDeleteChannelRequest, opts ...grpc.CallOption) (*AdminDeleteChannelResponse, error)
+	ChangeChannelStatus(ctx context.Context, in *AdminChangeChannelStatusRequest, opts ...grpc.CallOption) (*AdminChangeChannelStatusResponse, error)
+	// ========== 系统配置管理 ==========
+	GetSystemOptions(ctx context.Context, in *GetSystemOptionsRequest, opts ...grpc.CallOption) (*GetSystemOptionsResponse, error)
+	UpdateSystemOptions(ctx context.Context, in *UpdateSystemOptionsRequest, opts ...grpc.CallOption) (*UpdateSystemOptionsResponse, error)
 }
 
 type adminServiceClient struct {
@@ -95,9 +113,9 @@ func (c *adminServiceClient) CreateRedeemCodesBatch(ctx context.Context, in *Cre
 	return out, nil
 }
 
-func (c *adminServiceClient) GetRedeemCode(ctx context.Context, in *GetRedeemCodeRequest, opts ...grpc.CallOption) (*GetRedeemCodeResponse, error) {
+func (c *adminServiceClient) GetRedeemCode(ctx context.Context, in *GetRedeemCodeRequest, opts ...grpc.CallOption) (*RedeemCodeResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetRedeemCodeResponse)
+	out := new(RedeemCodeResponse)
 	err := c.cc.Invoke(ctx, AdminService_GetRedeemCode_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -115,9 +133,9 @@ func (c *adminServiceClient) ListRedeemCodes(ctx context.Context, in *ListRedeem
 	return out, nil
 }
 
-func (c *adminServiceClient) SearchRedeemCodes(ctx context.Context, in *SearchRedeemCodesRequest, opts ...grpc.CallOption) (*SearchRedeemCodesResponse, error) {
+func (c *adminServiceClient) SearchRedeemCodes(ctx context.Context, in *SearchRedeemCodesRequest, opts ...grpc.CallOption) (*RedeemCodesSearchResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SearchRedeemCodesResponse)
+	out := new(RedeemCodesSearchResponse)
 	err := c.cc.Invoke(ctx, AdminService_SearchRedeemCodes_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -145,9 +163,9 @@ func (c *adminServiceClient) DeleteRedeemCode(ctx context.Context, in *DeleteRed
 	return out, nil
 }
 
-func (c *adminServiceClient) ListUserLedger(ctx context.Context, in *ListUserLedgerRequest, opts ...grpc.CallOption) (*ListUserLedgerResponse, error) {
+func (c *adminServiceClient) ListUserLedger(ctx context.Context, in *ListUserLedgerRequest, opts ...grpc.CallOption) (*UserLedgerResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListUserLedgerResponse)
+	out := new(UserLedgerResponse)
 	err := c.cc.Invoke(ctx, AdminService_ListUserLedger_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -155,10 +173,130 @@ func (c *adminServiceClient) ListUserLedger(ctx context.Context, in *ListUserLed
 	return out, nil
 }
 
-func (c *adminServiceClient) GetAccountSnapshot(ctx context.Context, in *GetAccountSnapshotRequest, opts ...grpc.CallOption) (*GetAccountSnapshotResponse, error) {
+func (c *adminServiceClient) GetAccountSnapshot(ctx context.Context, in *GetAccountSnapshotRequest, opts ...grpc.CallOption) (*AdminAccountSnapshotResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetAccountSnapshotResponse)
+	out := new(AdminAccountSnapshotResponse)
 	err := c.cc.Invoke(ctx, AdminService_GetAccountSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) ListUsers(ctx context.Context, in *AdminListUsersRequest, opts ...grpc.CallOption) (*AdminListUsersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminListUsersResponse)
+	err := c.cc.Invoke(ctx, AdminService_ListUsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) CreateUser(ctx context.Context, in *AdminCreateUserRequest, opts ...grpc.CallOption) (*AdminCreateUserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminCreateUserResponse)
+	err := c.cc.Invoke(ctx, AdminService_CreateUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) UpdateUser(ctx context.Context, in *AdminUpdateUserRequest, opts ...grpc.CallOption) (*AdminUpdateUserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminUpdateUserResponse)
+	err := c.cc.Invoke(ctx, AdminService_UpdateUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) DeleteUser(ctx context.Context, in *AdminDeleteUserRequest, opts ...grpc.CallOption) (*AdminDeleteUserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminDeleteUserResponse)
+	err := c.cc.Invoke(ctx, AdminService_DeleteUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) ResetUserQuota(ctx context.Context, in *ResetUserQuotaRequest, opts ...grpc.CallOption) (*ResetUserQuotaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetUserQuotaResponse)
+	err := c.cc.Invoke(ctx, AdminService_ResetUserQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) ListChannels(ctx context.Context, in *AdminListChannelsRequest, opts ...grpc.CallOption) (*AdminListChannelsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminListChannelsResponse)
+	err := c.cc.Invoke(ctx, AdminService_ListChannels_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) CreateChannel(ctx context.Context, in *AdminCreateChannelRequest, opts ...grpc.CallOption) (*AdminCreateChannelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminCreateChannelResponse)
+	err := c.cc.Invoke(ctx, AdminService_CreateChannel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) UpdateChannel(ctx context.Context, in *AdminUpdateChannelRequest, opts ...grpc.CallOption) (*AdminUpdateChannelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminUpdateChannelResponse)
+	err := c.cc.Invoke(ctx, AdminService_UpdateChannel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) DeleteChannel(ctx context.Context, in *AdminDeleteChannelRequest, opts ...grpc.CallOption) (*AdminDeleteChannelResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminDeleteChannelResponse)
+	err := c.cc.Invoke(ctx, AdminService_DeleteChannel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) ChangeChannelStatus(ctx context.Context, in *AdminChangeChannelStatusRequest, opts ...grpc.CallOption) (*AdminChangeChannelStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminChangeChannelStatusResponse)
+	err := c.cc.Invoke(ctx, AdminService_ChangeChannelStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) GetSystemOptions(ctx context.Context, in *GetSystemOptionsRequest, opts ...grpc.CallOption) (*GetSystemOptionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSystemOptionsResponse)
+	err := c.cc.Invoke(ctx, AdminService_GetSystemOptions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) UpdateSystemOptions(ctx context.Context, in *UpdateSystemOptionsRequest, opts ...grpc.CallOption) (*UpdateSystemOptionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateSystemOptionsResponse)
+	err := c.cc.Invoke(ctx, AdminService_UpdateSystemOptions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -169,26 +307,32 @@ func (c *adminServiceClient) GetAccountSnapshot(ctx context.Context, in *GetAcco
 // All implementations should embed UnimplementedAdminServiceServer
 // for forward compatibility.
 type AdminServiceServer interface {
-	// 充值接口
+	// ========== 账务相关（透传 billing-service）==========
 	TopUpQuota(context.Context, *TopUpQuotaRequest) (*TopUpQuotaResponse, error)
-	// 创建兑换码
 	CreateRedeemCode(context.Context, *CreateRedeemCodeRequest) (*CreateRedeemCodeResponse, error)
-	// 批量创建兑换码
 	CreateRedeemCodesBatch(context.Context, *CreateRedeemCodesBatchRequest) (*CreateRedeemCodesBatchResponse, error)
-	// 获取兑换码
-	GetRedeemCode(context.Context, *GetRedeemCodeRequest) (*GetRedeemCodeResponse, error)
-	// 获取兑换码列表
+	GetRedeemCode(context.Context, *GetRedeemCodeRequest) (*RedeemCodeResponse, error)
 	ListRedeemCodes(context.Context, *ListRedeemCodesRequest) (*ListRedeemCodesResponse, error)
-	// 搜索兑换码
-	SearchRedeemCodes(context.Context, *SearchRedeemCodesRequest) (*SearchRedeemCodesResponse, error)
-	// 更新兑换码
+	SearchRedeemCodes(context.Context, *SearchRedeemCodesRequest) (*RedeemCodesSearchResponse, error)
 	UpdateRedeemCode(context.Context, *UpdateRedeemCodeRequest) (*UpdateRedeemCodeResponse, error)
-	// 删除兑换码
 	DeleteRedeemCode(context.Context, *DeleteRedeemCodeRequest) (*DeleteRedeemCodeResponse, error)
-	// 查询用户流水
-	ListUserLedger(context.Context, *ListUserLedgerRequest) (*ListUserLedgerResponse, error)
-	// 获取账户快照
-	GetAccountSnapshot(context.Context, *GetAccountSnapshotRequest) (*GetAccountSnapshotResponse, error)
+	ListUserLedger(context.Context, *ListUserLedgerRequest) (*UserLedgerResponse, error)
+	GetAccountSnapshot(context.Context, *GetAccountSnapshotRequest) (*AdminAccountSnapshotResponse, error)
+	// ========== 用户管理（透传 identity-service）==========
+	ListUsers(context.Context, *AdminListUsersRequest) (*AdminListUsersResponse, error)
+	CreateUser(context.Context, *AdminCreateUserRequest) (*AdminCreateUserResponse, error)
+	UpdateUser(context.Context, *AdminUpdateUserRequest) (*AdminUpdateUserResponse, error)
+	DeleteUser(context.Context, *AdminDeleteUserRequest) (*AdminDeleteUserResponse, error)
+	ResetUserQuota(context.Context, *ResetUserQuotaRequest) (*ResetUserQuotaResponse, error)
+	// ========== 渠道管理（透传 channel-service）==========
+	ListChannels(context.Context, *AdminListChannelsRequest) (*AdminListChannelsResponse, error)
+	CreateChannel(context.Context, *AdminCreateChannelRequest) (*AdminCreateChannelResponse, error)
+	UpdateChannel(context.Context, *AdminUpdateChannelRequest) (*AdminUpdateChannelResponse, error)
+	DeleteChannel(context.Context, *AdminDeleteChannelRequest) (*AdminDeleteChannelResponse, error)
+	ChangeChannelStatus(context.Context, *AdminChangeChannelStatusRequest) (*AdminChangeChannelStatusResponse, error)
+	// ========== 系统配置管理 ==========
+	GetSystemOptions(context.Context, *GetSystemOptionsRequest) (*GetSystemOptionsResponse, error)
+	UpdateSystemOptions(context.Context, *UpdateSystemOptionsRequest) (*UpdateSystemOptionsResponse, error)
 }
 
 // UnimplementedAdminServiceServer should be embedded to have
@@ -207,13 +351,13 @@ func (UnimplementedAdminServiceServer) CreateRedeemCode(context.Context, *Create
 func (UnimplementedAdminServiceServer) CreateRedeemCodesBatch(context.Context, *CreateRedeemCodesBatchRequest) (*CreateRedeemCodesBatchResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateRedeemCodesBatch not implemented")
 }
-func (UnimplementedAdminServiceServer) GetRedeemCode(context.Context, *GetRedeemCodeRequest) (*GetRedeemCodeResponse, error) {
+func (UnimplementedAdminServiceServer) GetRedeemCode(context.Context, *GetRedeemCodeRequest) (*RedeemCodeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRedeemCode not implemented")
 }
 func (UnimplementedAdminServiceServer) ListRedeemCodes(context.Context, *ListRedeemCodesRequest) (*ListRedeemCodesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListRedeemCodes not implemented")
 }
-func (UnimplementedAdminServiceServer) SearchRedeemCodes(context.Context, *SearchRedeemCodesRequest) (*SearchRedeemCodesResponse, error) {
+func (UnimplementedAdminServiceServer) SearchRedeemCodes(context.Context, *SearchRedeemCodesRequest) (*RedeemCodesSearchResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SearchRedeemCodes not implemented")
 }
 func (UnimplementedAdminServiceServer) UpdateRedeemCode(context.Context, *UpdateRedeemCodeRequest) (*UpdateRedeemCodeResponse, error) {
@@ -222,11 +366,47 @@ func (UnimplementedAdminServiceServer) UpdateRedeemCode(context.Context, *Update
 func (UnimplementedAdminServiceServer) DeleteRedeemCode(context.Context, *DeleteRedeemCodeRequest) (*DeleteRedeemCodeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteRedeemCode not implemented")
 }
-func (UnimplementedAdminServiceServer) ListUserLedger(context.Context, *ListUserLedgerRequest) (*ListUserLedgerResponse, error) {
+func (UnimplementedAdminServiceServer) ListUserLedger(context.Context, *ListUserLedgerRequest) (*UserLedgerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListUserLedger not implemented")
 }
-func (UnimplementedAdminServiceServer) GetAccountSnapshot(context.Context, *GetAccountSnapshotRequest) (*GetAccountSnapshotResponse, error) {
+func (UnimplementedAdminServiceServer) GetAccountSnapshot(context.Context, *GetAccountSnapshotRequest) (*AdminAccountSnapshotResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAccountSnapshot not implemented")
+}
+func (UnimplementedAdminServiceServer) ListUsers(context.Context, *AdminListUsersRequest) (*AdminListUsersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListUsers not implemented")
+}
+func (UnimplementedAdminServiceServer) CreateUser(context.Context, *AdminCreateUserRequest) (*AdminCreateUserResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateUser not implemented")
+}
+func (UnimplementedAdminServiceServer) UpdateUser(context.Context, *AdminUpdateUserRequest) (*AdminUpdateUserResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateUser not implemented")
+}
+func (UnimplementedAdminServiceServer) DeleteUser(context.Context, *AdminDeleteUserRequest) (*AdminDeleteUserResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteUser not implemented")
+}
+func (UnimplementedAdminServiceServer) ResetUserQuota(context.Context, *ResetUserQuotaRequest) (*ResetUserQuotaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetUserQuota not implemented")
+}
+func (UnimplementedAdminServiceServer) ListChannels(context.Context, *AdminListChannelsRequest) (*AdminListChannelsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListChannels not implemented")
+}
+func (UnimplementedAdminServiceServer) CreateChannel(context.Context, *AdminCreateChannelRequest) (*AdminCreateChannelResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateChannel not implemented")
+}
+func (UnimplementedAdminServiceServer) UpdateChannel(context.Context, *AdminUpdateChannelRequest) (*AdminUpdateChannelResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateChannel not implemented")
+}
+func (UnimplementedAdminServiceServer) DeleteChannel(context.Context, *AdminDeleteChannelRequest) (*AdminDeleteChannelResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteChannel not implemented")
+}
+func (UnimplementedAdminServiceServer) ChangeChannelStatus(context.Context, *AdminChangeChannelStatusRequest) (*AdminChangeChannelStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ChangeChannelStatus not implemented")
+}
+func (UnimplementedAdminServiceServer) GetSystemOptions(context.Context, *GetSystemOptionsRequest) (*GetSystemOptionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSystemOptions not implemented")
+}
+func (UnimplementedAdminServiceServer) UpdateSystemOptions(context.Context, *UpdateSystemOptionsRequest) (*UpdateSystemOptionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateSystemOptions not implemented")
 }
 func (UnimplementedAdminServiceServer) testEmbeddedByValue() {}
 
@@ -428,6 +608,222 @@ func _AdminService_GetAccountSnapshot_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AdminService_ListUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminListUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).ListUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_ListUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).ListUsers(ctx, req.(*AdminListUsersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_CreateUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminCreateUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).CreateUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_CreateUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).CreateUser(ctx, req.(*AdminCreateUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_UpdateUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminUpdateUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).UpdateUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_UpdateUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).UpdateUser(ctx, req.(*AdminUpdateUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_DeleteUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminDeleteUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).DeleteUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_DeleteUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).DeleteUser(ctx, req.(*AdminDeleteUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_ResetUserQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetUserQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).ResetUserQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_ResetUserQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).ResetUserQuota(ctx, req.(*ResetUserQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_ListChannels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminListChannelsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).ListChannels(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_ListChannels_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).ListChannels(ctx, req.(*AdminListChannelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_CreateChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminCreateChannelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).CreateChannel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_CreateChannel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).CreateChannel(ctx, req.(*AdminCreateChannelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_UpdateChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminUpdateChannelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).UpdateChannel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_UpdateChannel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).UpdateChannel(ctx, req.(*AdminUpdateChannelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_DeleteChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminDeleteChannelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).DeleteChannel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_DeleteChannel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).DeleteChannel(ctx, req.(*AdminDeleteChannelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_ChangeChannelStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminChangeChannelStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).ChangeChannelStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_ChangeChannelStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).ChangeChannelStatus(ctx, req.(*AdminChangeChannelStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_GetSystemOptions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSystemOptionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).GetSystemOptions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_GetSystemOptions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).GetSystemOptions(ctx, req.(*GetSystemOptionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_UpdateSystemOptions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateSystemOptionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).UpdateSystemOptions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_UpdateSystemOptions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).UpdateSystemOptions(ctx, req.(*UpdateSystemOptionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AdminService_ServiceDesc is the grpc.ServiceDesc for AdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -475,7 +871,55 @@ var AdminService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetAccountSnapshot",
 			Handler:    _AdminService_GetAccountSnapshot_Handler,
 		},
+		{
+			MethodName: "ListUsers",
+			Handler:    _AdminService_ListUsers_Handler,
+		},
+		{
+			MethodName: "CreateUser",
+			Handler:    _AdminService_CreateUser_Handler,
+		},
+		{
+			MethodName: "UpdateUser",
+			Handler:    _AdminService_UpdateUser_Handler,
+		},
+		{
+			MethodName: "DeleteUser",
+			Handler:    _AdminService_DeleteUser_Handler,
+		},
+		{
+			MethodName: "ResetUserQuota",
+			Handler:    _AdminService_ResetUserQuota_Handler,
+		},
+		{
+			MethodName: "ListChannels",
+			Handler:    _AdminService_ListChannels_Handler,
+		},
+		{
+			MethodName: "CreateChannel",
+			Handler:    _AdminService_CreateChannel_Handler,
+		},
+		{
+			MethodName: "UpdateChannel",
+			Handler:    _AdminService_UpdateChannel_Handler,
+		},
+		{
+			MethodName: "DeleteChannel",
+			Handler:    _AdminService_DeleteChannel_Handler,
+		},
+		{
+			MethodName: "ChangeChannelStatus",
+			Handler:    _AdminService_ChangeChannelStatus_Handler,
+		},
+		{
+			MethodName: "GetSystemOptions",
+			Handler:    _AdminService_GetSystemOptions_Handler,
+		},
+		{
+			MethodName: "UpdateSystemOptions",
+			Handler:    _AdminService_UpdateSystemOptions_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "admin/v1/admin.proto",
+	Metadata: "api/admin/v1/admin.proto",
 }

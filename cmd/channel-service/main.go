@@ -3,31 +3,29 @@ package main
 import (
 	"os"
 
-	"micro-one-api/internal/channel/biz"
-	"micro-one-api/internal/channel/data"
-	"micro-one-api/internal/channel/server"
-	"micro-one-api/internal/channel/service"
+	"github.com/go-kratos/kratos/v2/log"
 
-	"github.com/go-kratos/kratos/v2"
+	_ "github.com/go-kratos/kratos/v2/config/file"
 )
 
 func main() {
-	addr := os.Getenv("CHANNEL_GRPC_ADDR")
-	if addr == "" {
-		addr = ":9002"
+	confPath := os.Getenv("CONF_PATH")
+	if confPath == "" {
+		confPath = "configs/channel-service.yaml"
 	}
-	repo, err := data.NewRepositoryFromEnv()
+
+	logger := log.NewStdLogger(os.Stdout)
+	helper := log.NewHelper(logger)
+
+	app, cleanup, err := InitApp(confPath)
 	if err != nil {
-		panic(err)
+		helper.Errorf("failed to create app: %v", err)
+		os.Exit(1)
 	}
-	uc := biz.NewChannelUsecase(repo)
-	svc := service.NewChannelService(uc)
-	grpcSrv := server.NewGRPCServer(addr, svc)
-	app := kratos.New(
-		kratos.Name("channel-service"),
-		kratos.Server(grpcSrv),
-	)
+	defer cleanup()
+
 	if err := app.Run(); err != nil {
-		panic(err)
+		helper.Errorf("failed to run app: %v", err)
+		os.Exit(1)
 	}
 }

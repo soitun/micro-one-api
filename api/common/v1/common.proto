@@ -1,0 +1,171 @@
+syntax = "proto3";
+
+package api.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "micro-one-api/api/common/v1;commonv1";
+
+// ========== 用户信息 ==========
+
+message UserInfo {
+  int64 id = 1;
+  string username = 2;
+  string display_name = 3;
+  string email = 4;
+  string group = 5;
+  int32 status = 6;
+  int64 quota = 7;
+  int64 used_quota = 8;
+  int64 frozen_quota = 9;
+  int64 created_at = 10;
+  int64 last_login_at = 11;
+}
+
+// ========== 渠道摘要 ==========
+
+message ChannelSummary {
+  int64 id = 1;
+  string name = 2;
+  int32 type = 3;
+  string group = 4;
+  int32 status = 5;
+  int64 priority = 6;
+  int64 created_at = 7;
+  string models = 8;
+}
+
+// ========== 渠道配置 ==========
+
+message ChannelConfig {
+  string api_version = 1;
+  string region = 2;
+  string library_id = 3;
+  string plugin = 4;
+  string vertex_ai_project_id = 5;
+}
+
+// ========== 渠道完整信息 ==========
+
+message ChannelInfo {
+  int64 id = 1;
+  int32 type = 2;
+  string name = 3;
+  int32 status = 4;
+  string base_url = 5;
+  string group = 6;
+  string models = 7;
+  int64 priority = 8;
+  string key = 9;
+  ChannelConfig config = 10;
+}
+
+// ========== 账户快照 ==========
+
+message AccountSnapshot {
+  string user_id = 1;
+  int64 quota = 2;
+  int64 used_quota = 3;
+  int64 request_count = 4;
+  string group = 5;
+  double group_ratio = 6;
+  int64 frozen_quota = 7;
+}
+
+// ========== 账户信息（管理端视图）==========
+
+message AccountInfo {
+  string user_id = 1;
+  string username = 2;
+  string display_name = 3;
+  string group = 4;
+  int64 quota = 5;
+  int64 used_quota = 6;
+  int64 request_count = 7;
+  int64 frozen_quota = 8;
+  int32 status = 9;
+}
+
+// ========== 兑换码 ==========
+
+message RedeemCode {
+  string code = 1;
+  string name = 2;
+  int64 amount = 3;
+  int32 count = 4;
+  int32 status = 5;
+  string created_by = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// ========== 兑换码信息（管理端视图）==========
+
+message RedeemCodeInfo {
+  string code = 1;
+  string name = 2;
+  int64 amount = 3;
+  int32 count = 4;
+  int32 status = 5;
+  string created_by = 6;
+  int64 created_at = 7;
+}
+
+// ========== 流水记录 ==========
+
+message LedgerEntry {
+  string id = 1;
+  string user_id = 2;
+  int64 amount = 3;
+  int64 balance_after = 4;
+  string type = 5;
+  string reference_id = 6;
+  string remark = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+// ========== 流水信息（管理端视图）==========
+
+message LedgerInfo {
+  uint64 id = 1;
+  string user_id = 2;
+  int64 amount = 3;
+  int64 balance_after = 4;
+  string type = 5;
+  string reference_id = 6;
+  string remark = 7;
+  int64 created_at = 8;
+}
+
+// ========== 系统选项 ==========
+
+message SystemOptions {
+  string site_title = 1;
+  string site_description = 2;
+  bool registration_enabled = 3;
+  bool chat_history_enabled = 4;
+  string theme = 5;
+  string notice = 6;
+  int64 max_token_per_user = 7;
+  double default_ratio = 8;
+}
+
+// ========== 分页 ==========
+
+message PaginationRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message PaginationResponse {
+  int64 total = 1;
+}
+
+// ========== 通用响应 ==========
+
+message Empty {}
+
+message Error {
+  string code = 1;
+  string message = 2;
+}

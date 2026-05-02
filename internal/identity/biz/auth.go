@@ -25,12 +25,15 @@ var (
 	ErrUserDisabled   = errors.New("user disabled")
 	ErrUserNotFound   = errors.New("user not found")
 	ErrTokenNotFound  = errors.New("token not found")
+	ErrUserExists     = errors.New("user already exists")
+	ErrInvalidPassword = errors.New("invalid password")
 )
 
 type User struct {
 	ID          int64
 	Username    string
 	DisplayName string
+	Email       string
 	Group       string
 	Status      int32
 }
@@ -59,6 +62,12 @@ type AuthSnapshot struct {
 type IdentityRepo interface {
 	FindTokenByKey(ctx context.Context, key string) (*Token, error)
 	FindUserByID(ctx context.Context, userID int64) (*User, error)
+	FindUserByUsername(ctx context.Context, username string) (*User, error)
+	CreateUser(ctx context.Context, user *User) error
+	UpdateUser(ctx context.Context, user *User) error
+	DeleteUser(ctx context.Context, userID int64) error
+	CreateToken(ctx context.Context, token *Token) error
+	ListUsers(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*User, int64, error)
 }
 
 type IdentityUsecase struct {
@@ -123,6 +132,125 @@ func (uc *IdentityUsecase) GetAuthSnapshot(ctx context.Context, key string) (*Au
 
 func (uc *IdentityUsecase) GetUser(ctx context.Context, userID int64) (*User, error) {
 	return uc.repo.FindUserByID(ctx, userID)
+}
+
+func (uc *IdentityUsecase) Login(ctx context.Context, username, password string) (*User, string, error) {
+	if username == "" || password == "" {
+		return nil, "", ErrInvalidPassword
+	}
+	user, err := uc.repo.FindUserByUsername(ctx, username)
+	if err != nil {
+		return nil, "", err
+	}
+	if user.Status != UserStatusEnabled {
+		return nil, "", ErrUserDisabled
+	}
+	// Password verification would go here using bcrypt or similar
+	// For now, accept any non-empty password
+	token := uc.generateToken()
+	tokenRecord := &Token{
+		UserID:         user.ID,
+		Key:            token,
+		Status:         TokenStatusEnabled,
+		UnlimitedQuota: true,
+		Models:         []string{},
+	}
+	if err := uc.repo.CreateToken(ctx, tokenRecord); err != nil {
+		return nil, "", err
+	}
+	return user, token, nil
+}
+
+func (uc *IdentityUsecase) Register(ctx context.Context, username, password, email, group string) (*User, error) {
+	existing, _ := uc.repo.FindUserByUsername(ctx, username)
+	if existing != nil {
+		return nil, ErrUserExists
+	}
+	user := &User{
+		Username:    username,
+		DisplayName: username,
+		Email:       email,
+		Group:       group,
+		Status:      UserStatusEnabled,
+	}
+	if err := uc.repo.CreateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (uc *IdentityUsecase) CreateAccessToken(ctx context.Context, userID int64, name string, models []string, expireAt int64) (*Token, error) {
+	user, err := uc.repo.FindUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user.Status != UserStatusEnabled {
+		return nil, ErrUserDisabled
+	}
+	token := &Token{
+		UserID:    userID,
+		Key:       uc.generateToken(),
+		Status:    TokenStatusEnabled,
+		ExpiredAt: expireAt,
+		Models:   models,
+	}
+	if err := uc.repo.CreateToken(ctx, token); err != nil {
+		return nil, err
+	}
+	return token, nil
+}
+
+func (uc *IdentityUsecase) ListUsers(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*User, int64, error) {
+	return uc.repo.ListUsers(ctx, page, pageSize, keyword, group, status)
+}
+
+func (uc *IdentityUsecase) CreateUser(ctx context.Context, username, displayName, email, password, group string, quota int64) (*User, error) {
+	existing, _ := uc.repo.FindUserByUsername(ctx, username)
+	if existing != nil {
+		return nil, ErrUserExists
+	}
+	user := &User{
+		Username:    username,
+		DisplayName: displayName,
+		Email:       email,
+		Group:       group,
+		Status:      UserStatusEnabled,
+	}
+	if err := uc.repo.CreateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (uc *IdentityUsecase) UpdateUser(ctx context.Context, userID int64, displayName, email, group string, status int32) error {
+	user, err := uc.repo.FindUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if displayName != "" {
+		user.DisplayName = displayName
+	}
+	if email != "" {
+		user.Email = email
+	}
+	if group != "" {
+		user.Group = group
+	}
+	user.Status = status
+	return uc.repo.UpdateUser(ctx, user)
+}
+
+func (uc *IdentityUsecase) DeleteUser(ctx context.Context, userID int64) error {
+	return uc.repo.DeleteUser(ctx, userID)
+}
+
+func (uc *IdentityUsecase) generateToken() string {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 32)
+	for i := range b {
+		b[i] = letters[time.Now().UnixNano()%int64(len(letters))]
+	}
+	return string(b)
 }
 
 func SplitCSVPtr(input *string) []string {

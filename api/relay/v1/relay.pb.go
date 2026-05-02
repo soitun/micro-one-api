@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.34.1
-// source: relay/v1/relay.proto
+// source: api/relay/v1/relay.proto
 
 package relayv1
 
@@ -20,15 +20,15 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-var File_relay_v1_relay_proto protoreflect.FileDescriptor
+var File_api_relay_v1_relay_proto protoreflect.FileDescriptor
 
-const file_relay_v1_relay_proto_rawDesc = "" +
+const file_api_relay_v1_relay_proto_rawDesc = "" +
 	"\n" +
-	"\x14relay/v1/relay.proto\x12\fapi.relay.v12\x0e\n" +
+	"\x18api/relay/v1/relay.proto\x12\fapi.relay.v12\x0e\n" +
 	"\fRelayServiceB$Z\"micro-one-api/api/relay/v1;relayv1b\x06proto3"
 
-var file_relay_v1_relay_proto_goTypes = []any{}
-var file_relay_v1_relay_proto_depIdxs = []int32{
+var file_api_relay_v1_relay_proto_goTypes = []any{}
+var file_api_relay_v1_relay_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
 	0, // [0:0] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -36,25 +36,25 @@ var file_relay_v1_relay_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_relay_v1_relay_proto_init() }
-func file_relay_v1_relay_proto_init() {
-	if File_relay_v1_relay_proto != nil {
+func init() { file_api_relay_v1_relay_proto_init() }
+func file_api_relay_v1_relay_proto_init() {
+	if File_api_relay_v1_relay_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_relay_v1_relay_proto_rawDesc), len(file_relay_v1_relay_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_relay_v1_relay_proto_rawDesc), len(file_api_relay_v1_relay_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   0,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_relay_v1_relay_proto_goTypes,
-		DependencyIndexes: file_relay_v1_relay_proto_depIdxs,
+		GoTypes:           file_api_relay_v1_relay_proto_goTypes,
+		DependencyIndexes: file_api_relay_v1_relay_proto_depIdxs,
 	}.Build()
-	File_relay_v1_relay_proto = out.File
-	file_relay_v1_relay_proto_goTypes = nil
-	file_relay_v1_relay_proto_depIdxs = nil
+	File_api_relay_v1_relay_proto = out.File
+	file_api_relay_v1_relay_proto_goTypes = nil
+	file_api_relay_v1_relay_proto_depIdxs = nil
 }

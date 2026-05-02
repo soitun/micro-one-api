@@ -207,6 +207,45 @@ func (m *testIdentityRepo) FindUserByID(ctx context.Context, userID int64) (*ide
 	return user, nil
 }
 
+func (m *testIdentityRepo) FindUserByUsername(ctx context.Context, username string) (*identitybiz.User, error) {
+	for _, u := range m.users {
+		if u.Username == username {
+			return u, nil
+		}
+	}
+	return nil, identitybiz.ErrUserNotFound
+}
+
+func (m *testIdentityRepo) CreateUser(ctx context.Context, user *identitybiz.User) error {
+	user.ID = int64(len(m.users) + 1)
+	m.users[user.ID] = user
+	return nil
+}
+
+func (m *testIdentityRepo) UpdateUser(ctx context.Context, user *identitybiz.User) error {
+	m.users[user.ID] = user
+	return nil
+}
+
+func (m *testIdentityRepo) DeleteUser(ctx context.Context, userID int64) error {
+	delete(m.users, userID)
+	return nil
+}
+
+func (m *testIdentityRepo) CreateToken(ctx context.Context, token *identitybiz.Token) error {
+	token.ID = int64(len(m.tokens) + 1)
+	m.tokens[token.Key] = token
+	return nil
+}
+
+func (m *testIdentityRepo) ListUsers(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*identitybiz.User, int64, error) {
+	var result []*identitybiz.User
+	for _, u := range m.users {
+		result = append(result, u)
+	}
+	return result, int64(len(result)), nil
+}
+
 type testChannelRepo struct {
 	channels  map[int64]*channelbiz.Channel
 	abilities map[string][]channelbiz.Ability
@@ -251,4 +290,35 @@ func (m *testChannelRepo) ListAvailableModels(ctx context.Context, group string)
 		models = append(models, model)
 	}
 	return models, nil
+}
+
+func (m *testChannelRepo) ListChannels(ctx context.Context, page, pageSize int32, keyword, group string, status, chType int32) ([]*channelbiz.Channel, int64, error) {
+	var result []*channelbiz.Channel
+	for _, ch := range m.channels {
+		result = append(result, ch)
+	}
+	return result, int64(len(result)), nil
+}
+
+func (m *testChannelRepo) CreateChannel(ctx context.Context, channel *channelbiz.Channel) error {
+	channel.ID = int64(len(m.channels) + 1)
+	m.channels[channel.ID] = channel
+	return nil
+}
+
+func (m *testChannelRepo) UpdateChannel(ctx context.Context, channel *channelbiz.Channel) error {
+	m.channels[channel.ID] = channel
+	return nil
+}
+
+func (m *testChannelRepo) DeleteChannel(ctx context.Context, channelID int64) error {
+	delete(m.channels, channelID)
+	return nil
+}
+
+func (m *testChannelRepo) ChangeStatus(ctx context.Context, channelID int64, status int32) error {
+	if ch, ok := m.channels[channelID]; ok {
+		ch.Status = status
+	}
+	return nil
 }

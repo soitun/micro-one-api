@@ -50,6 +50,11 @@ type ChannelRepo interface {
 	FindByID(ctx context.Context, channelID int64) (*Channel, error)
 	ListAbilitiesByGroupAndModel(ctx context.Context, group, model string) ([]Ability, error)
 	ListAvailableModels(ctx context.Context, group string) ([]string, error)
+	ListChannels(ctx context.Context, page, pageSize int32, keyword, group string, status, chType int32) ([]*Channel, int64, error)
+	CreateChannel(ctx context.Context, channel *Channel) error
+	UpdateChannel(ctx context.Context, channel *Channel) error
+	DeleteChannel(ctx context.Context, channelID int64) error
+	ChangeStatus(ctx context.Context, channelID int64, status int32) error
 }
 
 type ChannelUsecase struct {
@@ -110,6 +115,26 @@ func (uc *ChannelUsecase) GetChannel(ctx context.Context, channelID int64) (*Cha
 
 func (uc *ChannelUsecase) ListAvailableModels(ctx context.Context, group string) ([]string, error) {
 	return uc.repo.ListAvailableModels(ctx, group)
+}
+
+func (uc *ChannelUsecase) ListChannels(ctx context.Context, page, pageSize int32, keyword, group string, status, chType int32) ([]*Channel, int64, error) {
+	return uc.repo.ListChannels(ctx, page, pageSize, keyword, group, status, chType)
+}
+
+func (uc *ChannelUsecase) CreateChannel(ctx context.Context, channel *Channel) error {
+	return uc.repo.CreateChannel(ctx, channel)
+}
+
+func (uc *ChannelUsecase) UpdateChannel(ctx context.Context, channel *Channel) error {
+	return uc.repo.UpdateChannel(ctx, channel)
+}
+
+func (uc *ChannelUsecase) DeleteChannel(ctx context.Context, channelID int64) error {
+	return uc.repo.DeleteChannel(ctx, channelID)
+}
+
+func (uc *ChannelUsecase) ChangeChannelStatus(ctx context.Context, channelID int64, status int32) error {
+	return uc.repo.ChangeStatus(ctx, channelID, status)
 }
 
 func SplitCSV(input string) []string {

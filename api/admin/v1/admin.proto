@@ -2,41 +2,44 @@ syntax = "proto3";
 
 package api.admin.v1;
 
+import "api/common/v1/common.proto";
+
 option go_package = "micro-one-api/api/admin/v1;adminv1";
 
 service AdminService {
-  // 充值接口
+  // ========== 账务相关（透传 billing-service）==========
   rpc TopUpQuota(TopUpQuotaRequest) returns (TopUpQuotaResponse);
-
-  // 创建兑换码
   rpc CreateRedeemCode(CreateRedeemCodeRequest) returns (CreateRedeemCodeResponse);
-
-  // 批量创建兑换码
   rpc CreateRedeemCodesBatch(CreateRedeemCodesBatchRequest) returns (CreateRedeemCodesBatchResponse);
-
-  // 获取兑换码
-  rpc GetRedeemCode(GetRedeemCodeRequest) returns (GetRedeemCodeResponse);
-
-  // 获取兑换码列表
+  rpc GetRedeemCode(GetRedeemCodeRequest) returns (RedeemCodeResponse);
   rpc ListRedeemCodes(ListRedeemCodesRequest) returns (ListRedeemCodesResponse);
-
-  // 搜索兑换码
-  rpc SearchRedeemCodes(SearchRedeemCodesRequest) returns (SearchRedeemCodesResponse);
-
-  // 更新兑换码
+  rpc SearchRedeemCodes(SearchRedeemCodesRequest) returns (RedeemCodesSearchResponse);
   rpc UpdateRedeemCode(UpdateRedeemCodeRequest) returns (UpdateRedeemCodeResponse);
-
-  // 删除兑换码
   rpc DeleteRedeemCode(DeleteRedeemCodeRequest) returns (DeleteRedeemCodeResponse);
+  rpc ListUserLedger(ListUserLedgerRequest) returns (UserLedgerResponse);
+  rpc GetAccountSnapshot(GetAccountSnapshotRequest) returns (AdminAccountSnapshotResponse);
 
-  // 查询用户流水
-  rpc ListUserLedger(ListUserLedgerRequest) returns (ListUserLedgerResponse);
+  // ========== 用户管理（透传 identity-service）==========
+  rpc ListUsers(AdminListUsersRequest) returns (AdminListUsersResponse);
+  rpc CreateUser(AdminCreateUserRequest) returns (AdminCreateUserResponse);
+  rpc UpdateUser(AdminUpdateUserRequest) returns (AdminUpdateUserResponse);
+  rpc DeleteUser(AdminDeleteUserRequest) returns (AdminDeleteUserResponse);
+  rpc ResetUserQuota(ResetUserQuotaRequest) returns (ResetUserQuotaResponse);
 
-  // 获取账户快照
-  rpc GetAccountSnapshot(GetAccountSnapshotRequest) returns (GetAccountSnapshotResponse);
+  // ========== 渠道管理（透传 channel-service）==========
+  rpc ListChannels(AdminListChannelsRequest) returns (AdminListChannelsResponse);
+  rpc CreateChannel(AdminCreateChannelRequest) returns (AdminCreateChannelResponse);
+  rpc UpdateChannel(AdminUpdateChannelRequest) returns (AdminUpdateChannelResponse);
+  rpc DeleteChannel(AdminDeleteChannelRequest) returns (AdminDeleteChannelResponse);
+  rpc ChangeChannelStatus(AdminChangeChannelStatusRequest) returns (AdminChangeChannelStatusResponse);
+
+  // ========== 系统配置管理 ==========
+  rpc GetSystemOptions(GetSystemOptionsRequest) returns (GetSystemOptionsResponse);
+  rpc UpdateSystemOptions(UpdateSystemOptionsRequest) returns (UpdateSystemOptionsResponse);
 }
 
-// 充值请求
+// ========== 账务：充值 ==========
+
 message TopUpQuotaRequest {
   string user_id = 1;
   int64 amount = 2;
@@ -44,14 +47,14 @@ message TopUpQuotaRequest {
   string remark = 4;
 }
 
-// 充值响应
 message TopUpQuotaResponse {
   bool success = 1;
-  int64 new_balance = 2;
+  int64 new_quota = 2;
   string error_message = 3;
 }
 
-// 创建兑换码请求
+// ========== 账务：兑换码 ==========
+
 message CreateRedeemCodeRequest {
   string code = 1;
   string name = 2;
@@ -60,13 +63,11 @@ message CreateRedeemCodeRequest {
   string operator_id = 5;
 }
 
-// 创建兑换码响应
 message CreateRedeemCodeResponse {
   bool success = 1;
   string error_message = 2;
 }
 
-// 批量创建兑换码请求
 message CreateRedeemCodesBatchRequest {
   string name = 1;
   int64 amount = 2;
@@ -75,66 +76,21 @@ message CreateRedeemCodesBatchRequest {
   string operator_id = 5;
 }
 
-// 批量创建兑换码响应
 message CreateRedeemCodesBatchResponse {
   bool success = 1;
   repeated string codes = 2;
   string error_message = 3;
 }
 
-// 获取兑换码请求
 message GetRedeemCodeRequest {
   string code = 1;
 }
 
-// 获取兑换码响应
-message GetRedeemCodeResponse {
+message RedeemCodeResponse {
   RedeemCodeInfo redeem_code = 1;
   string error_message = 2;
 }
 
-// 搜索兑换码请求
-message SearchRedeemCodesRequest {
-  string keyword = 1;
-}
-
-// 搜索兑换码响应
-message SearchRedeemCodesResponse {
-  repeated RedeemCodeInfo codes = 1;
-}
-
-// 更新兑换码请求
-message UpdateRedeemCodeRequest {
-  string code = 1;
-  string name = 2;
-  int64 amount = 3;
-  int32 status = 4;
-}
-
-// 更新兑换码响应
-message UpdateRedeemCodeResponse {
-  bool success = 1;
-  string error_message = 2;
-}
-
-// 删除兑换码请求
-message DeleteRedeemCodeRequest {
-  string code = 1;
-}
-
-// 删除兑换码响应
-message DeleteRedeemCodeResponse {
-  bool success = 1;
-  string error_message = 2;
-}
-
-// 兑换码列表请求
-message ListRedeemCodesRequest {
-  int32 page = 1;
-  int32 page_size = 2;
-}
-
-// 兑换码信息
 message RedeemCodeInfo {
   string code = 1;
   string name = 2;
@@ -145,57 +101,218 @@ message RedeemCodeInfo {
   int64 created_at = 7;
 }
 
-// 兑换码列表响应
+message ListRedeemCodesRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
 message ListRedeemCodesResponse {
   repeated RedeemCodeInfo codes = 1;
   int64 total = 2;
 }
 
-// 用户流水列表请求
+message SearchRedeemCodesRequest {
+  string keyword = 1;
+}
+
+message RedeemCodesSearchResponse {
+  repeated RedeemCodeInfo codes = 1;
+}
+
+message UpdateRedeemCodeRequest {
+  string code = 1;
+  string name = 2;
+  int64 amount = 3;
+  int32 status = 4;
+}
+
+message UpdateRedeemCodeResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message DeleteRedeemCodeRequest {
+  string code = 1;
+}
+
+message DeleteRedeemCodeResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+// ========== 账务：流水 ==========
+
 message ListUserLedgerRequest {
   string user_id = 1;
   int32 page = 2;
   int32 page_size = 3;
 }
 
-// 流水信息
-message LedgerInfo {
-  uint64 id = 1;
-  string user_id = 2;
-  int64 amount = 3;
-  int64 balance_after = 4;
-  string type = 5;
-  string reference_id = 6;
-  string remark = 7;
-  int64 created_at = 8;
-}
-
-// 用户流水列表响应
-message ListUserLedgerResponse {
-  repeated LedgerInfo ledgers = 1;
+message UserLedgerResponse {
+  repeated common.v1.LedgerInfo ledgers = 1;
   int64 total = 2;
 }
 
-// 获取账户快照请求
+// ========== 账务：账户快照（admin 视图）==========
+
+message GetAdminAccountSnapshotRequest {
+  string user_id = 1;
+}
+
 message GetAccountSnapshotRequest {
   string user_id = 1;
 }
 
-// 账户信息
-message AccountInfo {
-  string user_id = 1;
-  string username = 2;
-  string display_name = 3;
+message AdminAccountSnapshotResponse {
+  common.v1.AccountInfo account = 1;
+}
+
+// ========== 用户管理 ==========
+
+message AdminListUsersRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string keyword = 3;
   string group = 4;
-  int64 quota = 5;
-  int64 used_quota = 6;
-  int64 request_count = 7;
-  int64 frozen_quota = 8;
-  int32 status = 9;
+  int32 status = 5;
 }
 
-// 获取账户快照响应
-message GetAccountSnapshotResponse {
-  AccountInfo account = 1;
+message AdminListUsersResponse {
+  repeated common.v1.UserInfo users = 1;
+  int64 total = 2;
 }
 
+message AdminCreateUserRequest {
+  string username = 1;
+  string display_name = 2;
+  string email = 3;
+  string password = 4;
+  string group = 5;
+  int64 quota = 6;
+}
+
+message AdminCreateUserResponse {
+  bool success = 1;
+  string message = 2;
+  int64 user_id = 3;
+}
+
+message AdminUpdateUserRequest {
+  int64 user_id = 1;
+  string display_name = 2;
+  string email = 3;
+  string group = 4;
+  int32 status = 5;
+  int64 quota = 6;
+}
+
+message AdminUpdateUserResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message AdminDeleteUserRequest {
+  int64 user_id = 1;
+}
+
+message AdminDeleteUserResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ResetUserQuotaRequest {
+  int64 user_id = 1;
+  int64 new_quota = 2;
+  string operator_id = 3;
+  string remark = 4;
+}
+
+message ResetUserQuotaResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ========== 渠道管理 ==========
+
+message AdminListChannelsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string keyword = 3;
+  string group = 4;
+  int32 status = 5;
+  int32 type = 6;
+}
+
+message AdminListChannelsResponse {
+  repeated common.v1.ChannelSummary channels = 1;
+  int64 total = 2;
+}
+
+message AdminCreateChannelRequest {
+  string name = 1;
+  int32 type = 2;
+  string base_url = 3;
+  string key = 4;
+  string models = 5;
+  string group = 6;
+  int64 priority = 7;
+  common.v1.ChannelConfig config = 8;
+}
+
+message AdminCreateChannelResponse {
+  bool success = 1;
+  string message = 2;
+  int64 channel_id = 3;
+}
+
+message AdminUpdateChannelRequest {
+  int64 channel_id = 1;
+  string name = 2;
+  string base_url = 3;
+  string key = 4;
+  string models = 5;
+  string group = 6;
+  int64 priority = 7;
+  common.v1.ChannelConfig config = 8;
+}
+
+message AdminUpdateChannelResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message AdminDeleteChannelRequest {
+  int64 channel_id = 1;
+}
+
+message AdminDeleteChannelResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message AdminChangeChannelStatusRequest {
+  int64 channel_id = 1;
+  int32 status = 2;
+}
+
+message AdminChangeChannelStatusResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ========== 系统配置 ==========
+
+message GetSystemOptionsRequest {}
+
+message GetSystemOptionsResponse {
+  common.v1.SystemOptions options = 1;
+}
+
+message UpdateSystemOptionsRequest {
+  common.v1.SystemOptions options = 1;
+}
+
+message UpdateSystemOptionsResponse {
+  bool success = 1;
+  string message = 2;
+}

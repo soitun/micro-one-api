@@ -3,31 +3,29 @@ package main
 import (
 	"os"
 
-	"micro-one-api/internal/identity/biz"
-	"micro-one-api/internal/identity/data"
-	"micro-one-api/internal/identity/server"
-	"micro-one-api/internal/identity/service"
+	"github.com/go-kratos/kratos/v2/log"
 
-	"github.com/go-kratos/kratos/v2"
+	_ "github.com/go-kratos/kratos/v2/config/file"
 )
 
 func main() {
-	addr := os.Getenv("IDENTITY_GRPC_ADDR")
-	if addr == "" {
-		addr = ":9001"
+	confPath := os.Getenv("CONF_PATH")
+	if confPath == "" {
+		confPath = "configs/identity-service.yaml"
 	}
-	repo, err := data.NewRepositoryFromEnv()
+
+	logger := log.NewStdLogger(os.Stdout)
+	helper := log.NewHelper(logger)
+
+	app, cleanup, err := InitApp(confPath)
 	if err != nil {
-		panic(err)
+		helper.Errorf("failed to create app: %v", err)
+		os.Exit(1)
 	}
-	uc := biz.NewIdentityUsecase(repo)
-	svc := service.NewIdentityService(uc)
-	grpcSrv := server.NewGRPCServer(addr, svc)
-	app := kratos.New(
-		kratos.Name("identity-service"),
-		kratos.Server(grpcSrv),
-	)
+	defer cleanup()
+
 	if err := app.Run(); err != nil {
-		panic(err)
+		helper.Errorf("failed to run app: %v", err)
+		os.Exit(1)
 	}
 }

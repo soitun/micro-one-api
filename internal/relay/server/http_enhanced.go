@@ -14,6 +14,7 @@ import (
 
 	"micro-one-api/api/identity/v1"
 	channelv1 "micro-one-api/api/channel/v1"
+	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/internal/pkg/errors"
 	applogger "micro-one-api/internal/pkg/logger"
 	appmiddleware "micro-one-api/internal/pkg/middleware"
@@ -335,7 +336,7 @@ func (s *EnhancedHTTPServer) getAuthSnapshot(ctx context.Context, token string) 
 	return s.identityClient.GetAuthSnapshot(ctx, req)
 }
 
-func (s *EnhancedHTTPServer) selectChannel(ctx context.Context, group, model string) (*channelv1.ChannelInfo, error) {
+func (s *EnhancedHTTPServer) selectChannel(ctx context.Context, group, model string) (*commonv1.ChannelInfo, error) {
 	req := &channelv1.SelectChannelRequest{
 		Group:               group,
 		Model:               model,

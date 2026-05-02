@@ -6,6 +6,7 @@ import (
 	"time"
 
 	billingv1 "micro-one-api/api/billing/v1"
+	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/internal/billing/biz"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -73,7 +74,7 @@ func (s *BillingService) GetAccountSnapshot(ctx context.Context, req *billingv1.
 	}
 
 	return &billingv1.GetAccountSnapshotResponse{
-		Snapshot: &billingv1.AccountSnapshot{
+		Snapshot: &commonv1.AccountSnapshot{
 			UserId:       account.UserID,
 			Quota:        account.Quota,
 			UsedQuota:    account.UsedQuota,
@@ -138,7 +139,7 @@ func (s *BillingService) GetRedeemCode(ctx context.Context, req *billingv1.GetRe
 	}
 
 	return &billingv1.GetRedeemCodeResponse{
-		RedeemCode: &billingv1.RedeemCode{
+		RedeemCode: &commonv1.RedeemCode{
 			Code:      code.Code,
 			Name:      code.Name,
 			Amount:    code.Amount,
@@ -157,9 +158,9 @@ func (s *BillingService) ListRedeemCodes(ctx context.Context, req *billingv1.Lis
 		return nil, err
 	}
 
-	redeemCodes := make([]*billingv1.RedeemCode, len(codes))
+	redeemCodes := make([]*commonv1.RedeemCode, len(codes))
 	for i, code := range codes {
-		redeemCodes[i] = &billingv1.RedeemCode{
+		redeemCodes[i] = &commonv1.RedeemCode{
 			Code:      code.Code,
 			Name:      code.Name,
 			Amount:    code.Amount,
@@ -183,9 +184,9 @@ func (s *BillingService) SearchRedeemCodes(ctx context.Context, req *billingv1.S
 		return nil, err
 	}
 
-	redeemCodes := make([]*billingv1.RedeemCode, len(codes))
+	redeemCodes := make([]*commonv1.RedeemCode, len(codes))
 	for i, code := range codes {
-		redeemCodes[i] = &billingv1.RedeemCode{
+		redeemCodes[i] = &commonv1.RedeemCode{
 			Code:      code.Code,
 			Name:      code.Name,
 			Amount:    code.Amount,
@@ -261,9 +262,9 @@ func (s *BillingService) ListLedger(ctx context.Context, req *billingv1.ListLedg
 		return nil, err
 	}
 
-	entries := make([]*billingv1.LedgerEntry, len(ledgers))
+	entries := make([]*commonv1.LedgerEntry, len(ledgers))
 	for i, ledger := range ledgers {
-		entries[i] = &billingv1.LedgerEntry{
+		entries[i] = &commonv1.LedgerEntry{
 			Id:           fmt.Sprintf("%d", ledger.ID),
 			UserId:       ledger.UserID,
 			Amount:       ledger.Amount,

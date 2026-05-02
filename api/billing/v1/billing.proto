@@ -3,6 +3,7 @@ syntax = "proto3";
 package api.billing.v1;
 
 import "google/protobuf/timestamp.proto";
+import "api/common/v1/common.proto";
 
 option go_package = "micro-one-api/api/billing/v1;billingv1";
 
@@ -22,6 +23,8 @@ service BillingService {
   rpc DeleteRedeemCode(DeleteRedeemCodeRequest) returns (DeleteRedeemCodeResponse);
   rpc ListLedger(ListLedgerRequest) returns (ListLedgerResponse);
 }
+
+// ========== 配额预扣 ==========
 
 message ReserveQuotaRequest {
   string user_id = 1;
@@ -63,23 +66,17 @@ message ReleaseQuotaResponse {
   string error_message = 3;
 }
 
-message AccountSnapshot {
-  string user_id = 1;
-  int64 quota = 2;
-  int64 used_quota = 3;
-  int64 request_count = 4;
-  string group = 5;
-  double group_ratio = 6;
-  int64 frozen_quota = 7;
-}
+// ========== 账户快照 ==========
 
 message GetAccountSnapshotRequest {
   string user_id = 1;
 }
 
 message GetAccountSnapshotResponse {
-  AccountSnapshot snapshot = 1;
+  common.v1.AccountSnapshot snapshot = 1;
 }
+
+// ========== 充值 ==========
 
 message TopUpQuotaRequest {
   string user_id = 1;
@@ -94,16 +91,7 @@ message TopUpQuotaResponse {
   string error_message = 3;
 }
 
-message RedeemCode {
-  string code = 1;
-  string name = 2;
-  int64 amount = 3;
-  int32 count = 4;
-  int32 status = 5;
-  string created_by = 6;
-  google.protobuf.Timestamp created_at = 7;
-  google.protobuf.Timestamp updated_at = 8;
-}
+// ========== 兑换码 ==========
 
 message CreateRedeemCodeRequest {
   string code = 1;
@@ -132,12 +120,24 @@ message CreateRedeemCodesBatchResponse {
   string error_message = 3;
 }
 
+message RedeemCodeRequest {
+  string user_id = 1;
+  string code = 2;
+}
+
+message RedeemCodeResponse {
+  bool success = 1;
+  int64 amount = 2;
+  int64 new_quota = 3;
+  string error_message = 4;
+}
+
 message GetRedeemCodeRequest {
   string code = 1;
 }
 
 message GetRedeemCodeResponse {
-  RedeemCode redeem_code = 1;
+  common.v1.RedeemCode redeem_code = 1;
   string error_message = 2;
 }
 
@@ -147,7 +147,7 @@ message ListRedeemCodesRequest {
 }
 
 message ListRedeemCodesResponse {
-  repeated RedeemCode codes = 1;
+  repeated common.v1.RedeemCode codes = 1;
   int64 total = 2;
 }
 
@@ -156,7 +156,7 @@ message SearchRedeemCodesRequest {
 }
 
 message SearchRedeemCodesResponse {
-  repeated RedeemCode codes = 1;
+  repeated common.v1.RedeemCode codes = 1;
 }
 
 message UpdateRedeemCodeRequest {
@@ -180,28 +180,7 @@ message DeleteRedeemCodeResponse {
   string error_message = 2;
 }
 
-message RedeemCodeRequest {
-  string user_id = 1;
-  string code = 2;
-}
-
-message RedeemCodeResponse {
-  bool success = 1;
-  int64 amount = 2;
-  int64 new_quota = 3;
-  string error_message = 4;
-}
-
-message LedgerEntry {
-  string id = 1;
-  string user_id = 2;
-  int64 amount = 3;
-  int64 balance_after = 4;
-  string type = 5;
-  string reference_id = 6;
-  string remark = 7;
-  google.protobuf.Timestamp created_at = 8;
-}
+// ========== 流水 ==========
 
 message ListLedgerRequest {
   string user_id = 1;
@@ -212,7 +191,6 @@ message ListLedgerRequest {
 }
 
 message ListLedgerResponse {
-  repeated LedgerEntry entries = 1;
+  repeated common.v1.LedgerEntry entries = 1;
   int64 total = 2;
 }
-

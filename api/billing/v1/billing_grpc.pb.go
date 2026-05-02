@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.1
-// source: billing/v1/billing.proto
+// source: api/billing/v1/billing.proto
 
 package billingv1
 
@@ -609,5 +609,5 @@ var BillingService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "billing/v1/billing.proto",
+	Metadata: "api/billing/v1/billing.proto",
 }

@@ -51,6 +51,37 @@ func (m *mockChannelRepo) ListAvailableModels(ctx context.Context, group string)
 	return models, nil
 }
 
+func (m *mockChannelRepo) ListChannels(ctx context.Context, page, pageSize int32, keyword, group string, status, chType int32) ([]*Channel, int64, error) {
+	var result []*Channel
+	for _, ch := range m.channels {
+		result = append(result, ch)
+	}
+	return result, int64(len(result)), nil
+}
+
+func (m *mockChannelRepo) CreateChannel(ctx context.Context, channel *Channel) error {
+	channel.ID = int64(len(m.channels) + 1)
+	m.channels[channel.ID] = channel
+	return nil
+}
+
+func (m *mockChannelRepo) UpdateChannel(ctx context.Context, channel *Channel) error {
+	m.channels[channel.ID] = channel
+	return nil
+}
+
+func (m *mockChannelRepo) DeleteChannel(ctx context.Context, channelID int64) error {
+	delete(m.channels, channelID)
+	return nil
+}
+
+func (m *mockChannelRepo) ChangeStatus(ctx context.Context, channelID int64, status int32) error {
+	if ch, ok := m.channels[channelID]; ok {
+		ch.Status = status
+	}
+	return nil
+}
+
 func TestChannelUsecase_SelectChannel_SingleChannel(t *testing.T) {
 	repo := &mockChannelRepo{
 		channels: map[int64]*Channel{
