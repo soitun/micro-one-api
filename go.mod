@@ -3,9 +3,9 @@ module micro-one-api
 go 1.26
 
 require (
+	github.com/bytedance/sonic v1.15.1
 	github.com/go-kratos/kratos/v2 v2.9.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/google/wire v0.7.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/zap v1.28.0
 	google.golang.org/grpc v1.80.0
@@ -18,7 +18,6 @@ require (
 require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
-	github.com/bytedance/sonic v1.15.1 // indirect
 	github.com/bytedance/sonic/loader v0.5.1 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
