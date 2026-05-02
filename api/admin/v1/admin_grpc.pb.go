@@ -7,7 +7,10 @@
 package adminv1
 
 import (
+	context "context"
 	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -15,10 +18,43 @@ import (
 // Requires gRPC-Go v1.64.0 or later.
 const _ = grpc.SupportPackageIsVersion9
 
+const (
+	AdminService_TopUpQuota_FullMethodName             = "/api.admin.v1.AdminService/TopUpQuota"
+	AdminService_CreateRedeemCode_FullMethodName       = "/api.admin.v1.AdminService/CreateRedeemCode"
+	AdminService_CreateRedeemCodesBatch_FullMethodName = "/api.admin.v1.AdminService/CreateRedeemCodesBatch"
+	AdminService_GetRedeemCode_FullMethodName          = "/api.admin.v1.AdminService/GetRedeemCode"
+	AdminService_ListRedeemCodes_FullMethodName        = "/api.admin.v1.AdminService/ListRedeemCodes"
+	AdminService_SearchRedeemCodes_FullMethodName      = "/api.admin.v1.AdminService/SearchRedeemCodes"
+	AdminService_UpdateRedeemCode_FullMethodName       = "/api.admin.v1.AdminService/UpdateRedeemCode"
+	AdminService_DeleteRedeemCode_FullMethodName       = "/api.admin.v1.AdminService/DeleteRedeemCode"
+	AdminService_ListUserLedger_FullMethodName         = "/api.admin.v1.AdminService/ListUserLedger"
+	AdminService_GetAccountSnapshot_FullMethodName     = "/api.admin.v1.AdminService/GetAccountSnapshot"
+)
+
 // AdminServiceClient is the client API for AdminService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AdminServiceClient interface {
+	// 充值接口
+	TopUpQuota(ctx context.Context, in *TopUpQuotaRequest, opts ...grpc.CallOption) (*TopUpQuotaResponse, error)
+	// 创建兑换码
+	CreateRedeemCode(ctx context.Context, in *CreateRedeemCodeRequest, opts ...grpc.CallOption) (*CreateRedeemCodeResponse, error)
+	// 批量创建兑换码
+	CreateRedeemCodesBatch(ctx context.Context, in *CreateRedeemCodesBatchRequest, opts ...grpc.CallOption) (*CreateRedeemCodesBatchResponse, error)
+	// 获取兑换码
+	GetRedeemCode(ctx context.Context, in *GetRedeemCodeRequest, opts ...grpc.CallOption) (*GetRedeemCodeResponse, error)
+	// 获取兑换码列表
+	ListRedeemCodes(ctx context.Context, in *ListRedeemCodesRequest, opts ...grpc.CallOption) (*ListRedeemCodesResponse, error)
+	// 搜索兑换码
+	SearchRedeemCodes(ctx context.Context, in *SearchRedeemCodesRequest, opts ...grpc.CallOption) (*SearchRedeemCodesResponse, error)
+	// 更新兑换码
+	UpdateRedeemCode(ctx context.Context, in *UpdateRedeemCodeRequest, opts ...grpc.CallOption) (*UpdateRedeemCodeResponse, error)
+	// 删除兑换码
+	DeleteRedeemCode(ctx context.Context, in *DeleteRedeemCodeRequest, opts ...grpc.CallOption) (*DeleteRedeemCodeResponse, error)
+	// 查询用户流水
+	ListUserLedger(ctx context.Context, in *ListUserLedgerRequest, opts ...grpc.CallOption) (*ListUserLedgerResponse, error)
+	// 获取账户快照
+	GetAccountSnapshot(ctx context.Context, in *GetAccountSnapshotRequest, opts ...grpc.CallOption) (*GetAccountSnapshotResponse, error)
 }
 
 type adminServiceClient struct {
@@ -29,10 +65,130 @@ func NewAdminServiceClient(cc grpc.ClientConnInterface) AdminServiceClient {
 	return &adminServiceClient{cc}
 }
 
+func (c *adminServiceClient) TopUpQuota(ctx context.Context, in *TopUpQuotaRequest, opts ...grpc.CallOption) (*TopUpQuotaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TopUpQuotaResponse)
+	err := c.cc.Invoke(ctx, AdminService_TopUpQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) CreateRedeemCode(ctx context.Context, in *CreateRedeemCodeRequest, opts ...grpc.CallOption) (*CreateRedeemCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateRedeemCodeResponse)
+	err := c.cc.Invoke(ctx, AdminService_CreateRedeemCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) CreateRedeemCodesBatch(ctx context.Context, in *CreateRedeemCodesBatchRequest, opts ...grpc.CallOption) (*CreateRedeemCodesBatchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateRedeemCodesBatchResponse)
+	err := c.cc.Invoke(ctx, AdminService_CreateRedeemCodesBatch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) GetRedeemCode(ctx context.Context, in *GetRedeemCodeRequest, opts ...grpc.CallOption) (*GetRedeemCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRedeemCodeResponse)
+	err := c.cc.Invoke(ctx, AdminService_GetRedeemCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) ListRedeemCodes(ctx context.Context, in *ListRedeemCodesRequest, opts ...grpc.CallOption) (*ListRedeemCodesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRedeemCodesResponse)
+	err := c.cc.Invoke(ctx, AdminService_ListRedeemCodes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) SearchRedeemCodes(ctx context.Context, in *SearchRedeemCodesRequest, opts ...grpc.CallOption) (*SearchRedeemCodesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchRedeemCodesResponse)
+	err := c.cc.Invoke(ctx, AdminService_SearchRedeemCodes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) UpdateRedeemCode(ctx context.Context, in *UpdateRedeemCodeRequest, opts ...grpc.CallOption) (*UpdateRedeemCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateRedeemCodeResponse)
+	err := c.cc.Invoke(ctx, AdminService_UpdateRedeemCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) DeleteRedeemCode(ctx context.Context, in *DeleteRedeemCodeRequest, opts ...grpc.CallOption) (*DeleteRedeemCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteRedeemCodeResponse)
+	err := c.cc.Invoke(ctx, AdminService_DeleteRedeemCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) ListUserLedger(ctx context.Context, in *ListUserLedgerRequest, opts ...grpc.CallOption) (*ListUserLedgerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListUserLedgerResponse)
+	err := c.cc.Invoke(ctx, AdminService_ListUserLedger_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminServiceClient) GetAccountSnapshot(ctx context.Context, in *GetAccountSnapshotRequest, opts ...grpc.CallOption) (*GetAccountSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAccountSnapshotResponse)
+	err := c.cc.Invoke(ctx, AdminService_GetAccountSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminServiceServer is the server API for AdminService service.
 // All implementations should embed UnimplementedAdminServiceServer
 // for forward compatibility.
 type AdminServiceServer interface {
+	// 充值接口
+	TopUpQuota(context.Context, *TopUpQuotaRequest) (*TopUpQuotaResponse, error)
+	// 创建兑换码
+	CreateRedeemCode(context.Context, *CreateRedeemCodeRequest) (*CreateRedeemCodeResponse, error)
+	// 批量创建兑换码
+	CreateRedeemCodesBatch(context.Context, *CreateRedeemCodesBatchRequest) (*CreateRedeemCodesBatchResponse, error)
+	// 获取兑换码
+	GetRedeemCode(context.Context, *GetRedeemCodeRequest) (*GetRedeemCodeResponse, error)
+	// 获取兑换码列表
+	ListRedeemCodes(context.Context, *ListRedeemCodesRequest) (*ListRedeemCodesResponse, error)
+	// 搜索兑换码
+	SearchRedeemCodes(context.Context, *SearchRedeemCodesRequest) (*SearchRedeemCodesResponse, error)
+	// 更新兑换码
+	UpdateRedeemCode(context.Context, *UpdateRedeemCodeRequest) (*UpdateRedeemCodeResponse, error)
+	// 删除兑换码
+	DeleteRedeemCode(context.Context, *DeleteRedeemCodeRequest) (*DeleteRedeemCodeResponse, error)
+	// 查询用户流水
+	ListUserLedger(context.Context, *ListUserLedgerRequest) (*ListUserLedgerResponse, error)
+	// 获取账户快照
+	GetAccountSnapshot(context.Context, *GetAccountSnapshotRequest) (*GetAccountSnapshotResponse, error)
 }
 
 // UnimplementedAdminServiceServer should be embedded to have
@@ -42,6 +198,36 @@ type AdminServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAdminServiceServer struct{}
 
+func (UnimplementedAdminServiceServer) TopUpQuota(context.Context, *TopUpQuotaRequest) (*TopUpQuotaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TopUpQuota not implemented")
+}
+func (UnimplementedAdminServiceServer) CreateRedeemCode(context.Context, *CreateRedeemCodeRequest) (*CreateRedeemCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateRedeemCode not implemented")
+}
+func (UnimplementedAdminServiceServer) CreateRedeemCodesBatch(context.Context, *CreateRedeemCodesBatchRequest) (*CreateRedeemCodesBatchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateRedeemCodesBatch not implemented")
+}
+func (UnimplementedAdminServiceServer) GetRedeemCode(context.Context, *GetRedeemCodeRequest) (*GetRedeemCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRedeemCode not implemented")
+}
+func (UnimplementedAdminServiceServer) ListRedeemCodes(context.Context, *ListRedeemCodesRequest) (*ListRedeemCodesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListRedeemCodes not implemented")
+}
+func (UnimplementedAdminServiceServer) SearchRedeemCodes(context.Context, *SearchRedeemCodesRequest) (*SearchRedeemCodesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchRedeemCodes not implemented")
+}
+func (UnimplementedAdminServiceServer) UpdateRedeemCode(context.Context, *UpdateRedeemCodeRequest) (*UpdateRedeemCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateRedeemCode not implemented")
+}
+func (UnimplementedAdminServiceServer) DeleteRedeemCode(context.Context, *DeleteRedeemCodeRequest) (*DeleteRedeemCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteRedeemCode not implemented")
+}
+func (UnimplementedAdminServiceServer) ListUserLedger(context.Context, *ListUserLedgerRequest) (*ListUserLedgerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListUserLedger not implemented")
+}
+func (UnimplementedAdminServiceServer) GetAccountSnapshot(context.Context, *GetAccountSnapshotRequest) (*GetAccountSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAccountSnapshot not implemented")
+}
 func (UnimplementedAdminServiceServer) testEmbeddedByValue() {}
 
 // UnsafeAdminServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -62,13 +248,234 @@ func RegisterAdminServiceServer(s grpc.ServiceRegistrar, srv AdminServiceServer)
 	s.RegisterService(&AdminService_ServiceDesc, srv)
 }
 
+func _AdminService_TopUpQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TopUpQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).TopUpQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_TopUpQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).TopUpQuota(ctx, req.(*TopUpQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_CreateRedeemCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateRedeemCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).CreateRedeemCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_CreateRedeemCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).CreateRedeemCode(ctx, req.(*CreateRedeemCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_CreateRedeemCodesBatch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateRedeemCodesBatchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).CreateRedeemCodesBatch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_CreateRedeemCodesBatch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).CreateRedeemCodesBatch(ctx, req.(*CreateRedeemCodesBatchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_GetRedeemCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRedeemCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).GetRedeemCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_GetRedeemCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).GetRedeemCode(ctx, req.(*GetRedeemCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_ListRedeemCodes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRedeemCodesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).ListRedeemCodes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_ListRedeemCodes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).ListRedeemCodes(ctx, req.(*ListRedeemCodesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_SearchRedeemCodes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchRedeemCodesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).SearchRedeemCodes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_SearchRedeemCodes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).SearchRedeemCodes(ctx, req.(*SearchRedeemCodesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_UpdateRedeemCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateRedeemCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).UpdateRedeemCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_UpdateRedeemCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).UpdateRedeemCode(ctx, req.(*UpdateRedeemCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_DeleteRedeemCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteRedeemCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).DeleteRedeemCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_DeleteRedeemCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).DeleteRedeemCode(ctx, req.(*DeleteRedeemCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_ListUserLedger_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListUserLedgerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).ListUserLedger(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_ListUserLedger_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).ListUserLedger(ctx, req.(*ListUserLedgerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminService_GetAccountSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAccountSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).GetAccountSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_GetAccountSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).GetAccountSnapshot(ctx, req.(*GetAccountSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AdminService_ServiceDesc is the grpc.ServiceDesc for AdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var AdminService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "api.admin.v1.AdminService",
 	HandlerType: (*AdminServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
-	Streams:     []grpc.StreamDesc{},
-	Metadata:    "admin/v1/admin.proto",
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "TopUpQuota",
+			Handler:    _AdminService_TopUpQuota_Handler,
+		},
+		{
+			MethodName: "CreateRedeemCode",
+			Handler:    _AdminService_CreateRedeemCode_Handler,
+		},
+		{
+			MethodName: "CreateRedeemCodesBatch",
+			Handler:    _AdminService_CreateRedeemCodesBatch_Handler,
+		},
+		{
+			MethodName: "GetRedeemCode",
+			Handler:    _AdminService_GetRedeemCode_Handler,
+		},
+		{
+			MethodName: "ListRedeemCodes",
+			Handler:    _AdminService_ListRedeemCodes_Handler,
+		},
+		{
+			MethodName: "SearchRedeemCodes",
+			Handler:    _AdminService_SearchRedeemCodes_Handler,
+		},
+		{
+			MethodName: "UpdateRedeemCode",
+			Handler:    _AdminService_UpdateRedeemCode_Handler,
+		},
+		{
+			MethodName: "DeleteRedeemCode",
+			Handler:    _AdminService_DeleteRedeemCode_Handler,
+		},
+		{
+			MethodName: "ListUserLedger",
+			Handler:    _AdminService_ListUserLedger_Handler,
+		},
+		{
+			MethodName: "GetAccountSnapshot",
+			Handler:    _AdminService_GetAccountSnapshot_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "admin/v1/admin.proto",
 }

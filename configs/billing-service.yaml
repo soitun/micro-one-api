@@ -1,12 +1,17 @@
 server:
   http:
-    addr: 0.0.0.0:8003
+    addr: 0.0.0.0:8004
   grpc:
-    addr: 0.0.0.0:9003
+    addr: 0.0.0.0:9004
 data:
   database:
     driver: mysql
     source: ${DATABASE_DSN:-root:password@tcp(127.0.0.1:3306)/oneapi}
   redis:
     addr: ${REDIS_ADDR:-127.0.0.1:6379}
-
+billing:
+  reservation_timeout: 5m
+  group_ratios:
+    default: 1.0
+    vip: 1.0
+    svip: 1.0

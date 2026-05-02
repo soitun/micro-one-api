@@ -19,20 +19,40 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	BillingService_ReserveQuota_FullMethodName       = "/api.billing.v1.BillingService/ReserveQuota"
-	BillingService_CommitQuota_FullMethodName        = "/api.billing.v1.BillingService/CommitQuota"
-	BillingService_ReleaseQuota_FullMethodName       = "/api.billing.v1.BillingService/ReleaseQuota"
-	BillingService_GetAccountSnapshot_FullMethodName = "/api.billing.v1.BillingService/GetAccountSnapshot"
+	BillingService_ReserveQuota_FullMethodName           = "/api.billing.v1.BillingService/ReserveQuota"
+	BillingService_CommitQuota_FullMethodName            = "/api.billing.v1.BillingService/CommitQuota"
+	BillingService_ReleaseQuota_FullMethodName           = "/api.billing.v1.BillingService/ReleaseQuota"
+	BillingService_GetAccountSnapshot_FullMethodName     = "/api.billing.v1.BillingService/GetAccountSnapshot"
+	BillingService_TopUpQuota_FullMethodName             = "/api.billing.v1.BillingService/TopUpQuota"
+	BillingService_CreateRedeemCode_FullMethodName       = "/api.billing.v1.BillingService/CreateRedeemCode"
+	BillingService_CreateRedeemCodesBatch_FullMethodName = "/api.billing.v1.BillingService/CreateRedeemCodesBatch"
+	BillingService_RedeemCode_FullMethodName             = "/api.billing.v1.BillingService/RedeemCode"
+	BillingService_GetRedeemCode_FullMethodName          = "/api.billing.v1.BillingService/GetRedeemCode"
+	BillingService_ListRedeemCodes_FullMethodName        = "/api.billing.v1.BillingService/ListRedeemCodes"
+	BillingService_SearchRedeemCodes_FullMethodName      = "/api.billing.v1.BillingService/SearchRedeemCodes"
+	BillingService_UpdateRedeemCode_FullMethodName       = "/api.billing.v1.BillingService/UpdateRedeemCode"
+	BillingService_DeleteRedeemCode_FullMethodName       = "/api.billing.v1.BillingService/DeleteRedeemCode"
+	BillingService_ListLedger_FullMethodName             = "/api.billing.v1.BillingService/ListLedger"
 )
 
 // BillingServiceClient is the client API for BillingService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type BillingServiceClient interface {
-	ReserveQuota(ctx context.Context, in *ReserveQuotaRequest, opts ...grpc.CallOption) (*ReserveQuotaReply, error)
-	CommitQuota(ctx context.Context, in *CommitQuotaRequest, opts ...grpc.CallOption) (*CommitQuotaReply, error)
-	ReleaseQuota(ctx context.Context, in *ReleaseQuotaRequest, opts ...grpc.CallOption) (*ReleaseQuotaReply, error)
-	GetAccountSnapshot(ctx context.Context, in *GetAccountSnapshotRequest, opts ...grpc.CallOption) (*GetAccountSnapshotReply, error)
+	ReserveQuota(ctx context.Context, in *ReserveQuotaRequest, opts ...grpc.CallOption) (*ReserveQuotaResponse, error)
+	CommitQuota(ctx context.Context, in *CommitQuotaRequest, opts ...grpc.CallOption) (*CommitQuotaResponse, error)
+	ReleaseQuota(ctx context.Context, in *ReleaseQuotaRequest, opts ...grpc.CallOption) (*ReleaseQuotaResponse, error)
+	GetAccountSnapshot(ctx context.Context, in *GetAccountSnapshotRequest, opts ...grpc.CallOption) (*GetAccountSnapshotResponse, error)
+	TopUpQuota(ctx context.Context, in *TopUpQuotaRequest, opts ...grpc.CallOption) (*TopUpQuotaResponse, error)
+	CreateRedeemCode(ctx context.Context, in *CreateRedeemCodeRequest, opts ...grpc.CallOption) (*CreateRedeemCodeResponse, error)
+	CreateRedeemCodesBatch(ctx context.Context, in *CreateRedeemCodesBatchRequest, opts ...grpc.CallOption) (*CreateRedeemCodesBatchResponse, error)
+	RedeemCode(ctx context.Context, in *RedeemCodeRequest, opts ...grpc.CallOption) (*RedeemCodeResponse, error)
+	GetRedeemCode(ctx context.Context, in *GetRedeemCodeRequest, opts ...grpc.CallOption) (*GetRedeemCodeResponse, error)
+	ListRedeemCodes(ctx context.Context, in *ListRedeemCodesRequest, opts ...grpc.CallOption) (*ListRedeemCodesResponse, error)
+	SearchRedeemCodes(ctx context.Context, in *SearchRedeemCodesRequest, opts ...grpc.CallOption) (*SearchRedeemCodesResponse, error)
+	UpdateRedeemCode(ctx context.Context, in *UpdateRedeemCodeRequest, opts ...grpc.CallOption) (*UpdateRedeemCodeResponse, error)
+	DeleteRedeemCode(ctx context.Context, in *DeleteRedeemCodeRequest, opts ...grpc.CallOption) (*DeleteRedeemCodeResponse, error)
+	ListLedger(ctx context.Context, in *ListLedgerRequest, opts ...grpc.CallOption) (*ListLedgerResponse, error)
 }
 
 type billingServiceClient struct {
@@ -43,9 +63,9 @@ func NewBillingServiceClient(cc grpc.ClientConnInterface) BillingServiceClient {
 	return &billingServiceClient{cc}
 }
 
-func (c *billingServiceClient) ReserveQuota(ctx context.Context, in *ReserveQuotaRequest, opts ...grpc.CallOption) (*ReserveQuotaReply, error) {
+func (c *billingServiceClient) ReserveQuota(ctx context.Context, in *ReserveQuotaRequest, opts ...grpc.CallOption) (*ReserveQuotaResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ReserveQuotaReply)
+	out := new(ReserveQuotaResponse)
 	err := c.cc.Invoke(ctx, BillingService_ReserveQuota_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -53,9 +73,9 @@ func (c *billingServiceClient) ReserveQuota(ctx context.Context, in *ReserveQuot
 	return out, nil
 }
 
-func (c *billingServiceClient) CommitQuota(ctx context.Context, in *CommitQuotaRequest, opts ...grpc.CallOption) (*CommitQuotaReply, error) {
+func (c *billingServiceClient) CommitQuota(ctx context.Context, in *CommitQuotaRequest, opts ...grpc.CallOption) (*CommitQuotaResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CommitQuotaReply)
+	out := new(CommitQuotaResponse)
 	err := c.cc.Invoke(ctx, BillingService_CommitQuota_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -63,9 +83,9 @@ func (c *billingServiceClient) CommitQuota(ctx context.Context, in *CommitQuotaR
 	return out, nil
 }
 
-func (c *billingServiceClient) ReleaseQuota(ctx context.Context, in *ReleaseQuotaRequest, opts ...grpc.CallOption) (*ReleaseQuotaReply, error) {
+func (c *billingServiceClient) ReleaseQuota(ctx context.Context, in *ReleaseQuotaRequest, opts ...grpc.CallOption) (*ReleaseQuotaResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ReleaseQuotaReply)
+	out := new(ReleaseQuotaResponse)
 	err := c.cc.Invoke(ctx, BillingService_ReleaseQuota_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -73,10 +93,110 @@ func (c *billingServiceClient) ReleaseQuota(ctx context.Context, in *ReleaseQuot
 	return out, nil
 }
 
-func (c *billingServiceClient) GetAccountSnapshot(ctx context.Context, in *GetAccountSnapshotRequest, opts ...grpc.CallOption) (*GetAccountSnapshotReply, error) {
+func (c *billingServiceClient) GetAccountSnapshot(ctx context.Context, in *GetAccountSnapshotRequest, opts ...grpc.CallOption) (*GetAccountSnapshotResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetAccountSnapshotReply)
+	out := new(GetAccountSnapshotResponse)
 	err := c.cc.Invoke(ctx, BillingService_GetAccountSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) TopUpQuota(ctx context.Context, in *TopUpQuotaRequest, opts ...grpc.CallOption) (*TopUpQuotaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TopUpQuotaResponse)
+	err := c.cc.Invoke(ctx, BillingService_TopUpQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) CreateRedeemCode(ctx context.Context, in *CreateRedeemCodeRequest, opts ...grpc.CallOption) (*CreateRedeemCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateRedeemCodeResponse)
+	err := c.cc.Invoke(ctx, BillingService_CreateRedeemCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) CreateRedeemCodesBatch(ctx context.Context, in *CreateRedeemCodesBatchRequest, opts ...grpc.CallOption) (*CreateRedeemCodesBatchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateRedeemCodesBatchResponse)
+	err := c.cc.Invoke(ctx, BillingService_CreateRedeemCodesBatch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) RedeemCode(ctx context.Context, in *RedeemCodeRequest, opts ...grpc.CallOption) (*RedeemCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RedeemCodeResponse)
+	err := c.cc.Invoke(ctx, BillingService_RedeemCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) GetRedeemCode(ctx context.Context, in *GetRedeemCodeRequest, opts ...grpc.CallOption) (*GetRedeemCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRedeemCodeResponse)
+	err := c.cc.Invoke(ctx, BillingService_GetRedeemCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) ListRedeemCodes(ctx context.Context, in *ListRedeemCodesRequest, opts ...grpc.CallOption) (*ListRedeemCodesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRedeemCodesResponse)
+	err := c.cc.Invoke(ctx, BillingService_ListRedeemCodes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) SearchRedeemCodes(ctx context.Context, in *SearchRedeemCodesRequest, opts ...grpc.CallOption) (*SearchRedeemCodesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchRedeemCodesResponse)
+	err := c.cc.Invoke(ctx, BillingService_SearchRedeemCodes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) UpdateRedeemCode(ctx context.Context, in *UpdateRedeemCodeRequest, opts ...grpc.CallOption) (*UpdateRedeemCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateRedeemCodeResponse)
+	err := c.cc.Invoke(ctx, BillingService_UpdateRedeemCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) DeleteRedeemCode(ctx context.Context, in *DeleteRedeemCodeRequest, opts ...grpc.CallOption) (*DeleteRedeemCodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteRedeemCodeResponse)
+	err := c.cc.Invoke(ctx, BillingService_DeleteRedeemCode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *billingServiceClient) ListLedger(ctx context.Context, in *ListLedgerRequest, opts ...grpc.CallOption) (*ListLedgerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListLedgerResponse)
+	err := c.cc.Invoke(ctx, BillingService_ListLedger_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,10 +207,20 @@ func (c *billingServiceClient) GetAccountSnapshot(ctx context.Context, in *GetAc
 // All implementations should embed UnimplementedBillingServiceServer
 // for forward compatibility.
 type BillingServiceServer interface {
-	ReserveQuota(context.Context, *ReserveQuotaRequest) (*ReserveQuotaReply, error)
-	CommitQuota(context.Context, *CommitQuotaRequest) (*CommitQuotaReply, error)
-	ReleaseQuota(context.Context, *ReleaseQuotaRequest) (*ReleaseQuotaReply, error)
-	GetAccountSnapshot(context.Context, *GetAccountSnapshotRequest) (*GetAccountSnapshotReply, error)
+	ReserveQuota(context.Context, *ReserveQuotaRequest) (*ReserveQuotaResponse, error)
+	CommitQuota(context.Context, *CommitQuotaRequest) (*CommitQuotaResponse, error)
+	ReleaseQuota(context.Context, *ReleaseQuotaRequest) (*ReleaseQuotaResponse, error)
+	GetAccountSnapshot(context.Context, *GetAccountSnapshotRequest) (*GetAccountSnapshotResponse, error)
+	TopUpQuota(context.Context, *TopUpQuotaRequest) (*TopUpQuotaResponse, error)
+	CreateRedeemCode(context.Context, *CreateRedeemCodeRequest) (*CreateRedeemCodeResponse, error)
+	CreateRedeemCodesBatch(context.Context, *CreateRedeemCodesBatchRequest) (*CreateRedeemCodesBatchResponse, error)
+	RedeemCode(context.Context, *RedeemCodeRequest) (*RedeemCodeResponse, error)
+	GetRedeemCode(context.Context, *GetRedeemCodeRequest) (*GetRedeemCodeResponse, error)
+	ListRedeemCodes(context.Context, *ListRedeemCodesRequest) (*ListRedeemCodesResponse, error)
+	SearchRedeemCodes(context.Context, *SearchRedeemCodesRequest) (*SearchRedeemCodesResponse, error)
+	UpdateRedeemCode(context.Context, *UpdateRedeemCodeRequest) (*UpdateRedeemCodeResponse, error)
+	DeleteRedeemCode(context.Context, *DeleteRedeemCodeRequest) (*DeleteRedeemCodeResponse, error)
+	ListLedger(context.Context, *ListLedgerRequest) (*ListLedgerResponse, error)
 }
 
 // UnimplementedBillingServiceServer should be embedded to have
@@ -100,17 +230,47 @@ type BillingServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedBillingServiceServer struct{}
 
-func (UnimplementedBillingServiceServer) ReserveQuota(context.Context, *ReserveQuotaRequest) (*ReserveQuotaReply, error) {
+func (UnimplementedBillingServiceServer) ReserveQuota(context.Context, *ReserveQuotaRequest) (*ReserveQuotaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReserveQuota not implemented")
 }
-func (UnimplementedBillingServiceServer) CommitQuota(context.Context, *CommitQuotaRequest) (*CommitQuotaReply, error) {
+func (UnimplementedBillingServiceServer) CommitQuota(context.Context, *CommitQuotaRequest) (*CommitQuotaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CommitQuota not implemented")
 }
-func (UnimplementedBillingServiceServer) ReleaseQuota(context.Context, *ReleaseQuotaRequest) (*ReleaseQuotaReply, error) {
+func (UnimplementedBillingServiceServer) ReleaseQuota(context.Context, *ReleaseQuotaRequest) (*ReleaseQuotaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReleaseQuota not implemented")
 }
-func (UnimplementedBillingServiceServer) GetAccountSnapshot(context.Context, *GetAccountSnapshotRequest) (*GetAccountSnapshotReply, error) {
+func (UnimplementedBillingServiceServer) GetAccountSnapshot(context.Context, *GetAccountSnapshotRequest) (*GetAccountSnapshotResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAccountSnapshot not implemented")
+}
+func (UnimplementedBillingServiceServer) TopUpQuota(context.Context, *TopUpQuotaRequest) (*TopUpQuotaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TopUpQuota not implemented")
+}
+func (UnimplementedBillingServiceServer) CreateRedeemCode(context.Context, *CreateRedeemCodeRequest) (*CreateRedeemCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateRedeemCode not implemented")
+}
+func (UnimplementedBillingServiceServer) CreateRedeemCodesBatch(context.Context, *CreateRedeemCodesBatchRequest) (*CreateRedeemCodesBatchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateRedeemCodesBatch not implemented")
+}
+func (UnimplementedBillingServiceServer) RedeemCode(context.Context, *RedeemCodeRequest) (*RedeemCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RedeemCode not implemented")
+}
+func (UnimplementedBillingServiceServer) GetRedeemCode(context.Context, *GetRedeemCodeRequest) (*GetRedeemCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRedeemCode not implemented")
+}
+func (UnimplementedBillingServiceServer) ListRedeemCodes(context.Context, *ListRedeemCodesRequest) (*ListRedeemCodesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListRedeemCodes not implemented")
+}
+func (UnimplementedBillingServiceServer) SearchRedeemCodes(context.Context, *SearchRedeemCodesRequest) (*SearchRedeemCodesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchRedeemCodes not implemented")
+}
+func (UnimplementedBillingServiceServer) UpdateRedeemCode(context.Context, *UpdateRedeemCodeRequest) (*UpdateRedeemCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateRedeemCode not implemented")
+}
+func (UnimplementedBillingServiceServer) DeleteRedeemCode(context.Context, *DeleteRedeemCodeRequest) (*DeleteRedeemCodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteRedeemCode not implemented")
+}
+func (UnimplementedBillingServiceServer) ListLedger(context.Context, *ListLedgerRequest) (*ListLedgerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListLedger not implemented")
 }
 func (UnimplementedBillingServiceServer) testEmbeddedByValue() {}
 
@@ -204,6 +364,186 @@ func _BillingService_GetAccountSnapshot_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BillingService_TopUpQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TopUpQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).TopUpQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_TopUpQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).TopUpQuota(ctx, req.(*TopUpQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_CreateRedeemCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateRedeemCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).CreateRedeemCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_CreateRedeemCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).CreateRedeemCode(ctx, req.(*CreateRedeemCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_CreateRedeemCodesBatch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateRedeemCodesBatchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).CreateRedeemCodesBatch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_CreateRedeemCodesBatch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).CreateRedeemCodesBatch(ctx, req.(*CreateRedeemCodesBatchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_RedeemCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RedeemCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).RedeemCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_RedeemCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).RedeemCode(ctx, req.(*RedeemCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_GetRedeemCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRedeemCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).GetRedeemCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_GetRedeemCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).GetRedeemCode(ctx, req.(*GetRedeemCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_ListRedeemCodes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRedeemCodesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).ListRedeemCodes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_ListRedeemCodes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).ListRedeemCodes(ctx, req.(*ListRedeemCodesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_SearchRedeemCodes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchRedeemCodesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).SearchRedeemCodes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_SearchRedeemCodes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).SearchRedeemCodes(ctx, req.(*SearchRedeemCodesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_UpdateRedeemCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateRedeemCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).UpdateRedeemCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_UpdateRedeemCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).UpdateRedeemCode(ctx, req.(*UpdateRedeemCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_DeleteRedeemCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteRedeemCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).DeleteRedeemCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_DeleteRedeemCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).DeleteRedeemCode(ctx, req.(*DeleteRedeemCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BillingService_ListLedger_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLedgerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).ListLedger(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_ListLedger_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).ListLedger(ctx, req.(*ListLedgerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // BillingService_ServiceDesc is the grpc.ServiceDesc for BillingService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -226,6 +566,46 @@ var BillingService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAccountSnapshot",
 			Handler:    _BillingService_GetAccountSnapshot_Handler,
+		},
+		{
+			MethodName: "TopUpQuota",
+			Handler:    _BillingService_TopUpQuota_Handler,
+		},
+		{
+			MethodName: "CreateRedeemCode",
+			Handler:    _BillingService_CreateRedeemCode_Handler,
+		},
+		{
+			MethodName: "CreateRedeemCodesBatch",
+			Handler:    _BillingService_CreateRedeemCodesBatch_Handler,
+		},
+		{
+			MethodName: "RedeemCode",
+			Handler:    _BillingService_RedeemCode_Handler,
+		},
+		{
+			MethodName: "GetRedeemCode",
+			Handler:    _BillingService_GetRedeemCode_Handler,
+		},
+		{
+			MethodName: "ListRedeemCodes",
+			Handler:    _BillingService_ListRedeemCodes_Handler,
+		},
+		{
+			MethodName: "SearchRedeemCodes",
+			Handler:    _BillingService_SearchRedeemCodes_Handler,
+		},
+		{
+			MethodName: "UpdateRedeemCode",
+			Handler:    _BillingService_UpdateRedeemCode_Handler,
+		},
+		{
+			MethodName: "DeleteRedeemCode",
+			Handler:    _BillingService_DeleteRedeemCode_Handler,
+		},
+		{
+			MethodName: "ListLedger",
+			Handler:    _BillingService_ListLedger_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

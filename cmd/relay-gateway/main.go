@@ -11,6 +11,7 @@ import (
 
 	"micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
+	billingv1 "micro-one-api/api/billing/v1"
 	appauth "micro-one-api/internal/pkg/auth"
 	apptls "micro-one-api/internal/pkg/tls"
 	relayprovider "micro-one-api/internal/relay/provider"
@@ -24,6 +25,7 @@ func main() {
 	// Load environment variables
 	identityEndpoint := getEnvWithDefault("IDENTITY_GRPC_ENDPOINT", "127.0.0.1:9001")
 	channelEndpoint := getEnvWithDefault("CHANNEL_GRPC_ENDPOINT", "127.0.0.1:9002")
+	billingEndpoint := getEnvWithDefault("BILLING_GRPC_ENDPOINT", "127.0.0.1:9004")
 	httpAddr := getEnvWithDefault("RELAY_HTTP_ADDR", ":8080")
 	enableTLS := os.Getenv("TLS_ENABLED") == "true"
 	enableAuth := os.Getenv("ENABLE_AUTH") == "true"
@@ -43,9 +45,10 @@ func main() {
 	}
 
 	// Create gRPC connections with TLS and authentication
-	var identityConn, channelConn *grpc.ClientConn
+	var identityConn, channelConn, billingConn *grpc.ClientConn
 	var identityClient identityv1.IdentityServiceClient
 	var channelClient channelv1.ChannelServiceClient
+	var billingClient billingv1.BillingServiceClient
 
 	if enableTLS {
 		// Create authenticated connections with TLS
@@ -61,8 +64,15 @@ func main() {
 		}
 		defer channelConn.Close()
 
+		billingConn, err = createAuthenticatedClient(billingEndpoint, tlsConfig, serviceAuth)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create billing client with TLS: %v", err))
+		}
+		defer billingConn.Close()
+
 		identityClient = identityv1.NewIdentityServiceClient(identityConn)
 		channelClient = channelv1.NewChannelServiceClient(channelConn)
+		billingClient = billingv1.NewBillingServiceClient(billingConn)
 	} else {
 		// Create insecure connections for development
 		identityConn, err = grpc.Dial(identityEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -77,8 +87,15 @@ func main() {
 		}
 		defer channelConn.Close()
 
+		billingConn, err = grpc.Dial(billingEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			panic(fmt.Sprintf("failed to connect to billing service: %v", err))
+		}
+		defer billingConn.Close()
+
 		identityClient = identityv1.NewIdentityServiceClient(identityConn)
 		channelClient = channelv1.NewChannelServiceClient(channelConn)
+		billingClient = billingv1.NewBillingServiceClient(billingConn)
 	}
 
 	// Create provider factory with timeout
@@ -92,7 +109,7 @@ func main() {
 	providerFactory := relayprovider.NewProviderFactory(providerTimeout)
 
 	// Create HTTP server
-	httpServer := server.NewHTTPServer(identityClient, channelClient, providerFactory)
+	httpServer := server.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory)
 
 	// Create Kratos HTTP server
 	srv := khttp.NewServer(

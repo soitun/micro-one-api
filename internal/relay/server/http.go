@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -13,6 +14,7 @@ import (
 
 	"micro-one-api/api/identity/v1"
 	channelv1 "micro-one-api/api/channel/v1"
+	billingv1 "micro-one-api/api/billing/v1"
 	"micro-one-api/internal/pkg/errors"
 	applogger "micro-one-api/internal/pkg/logger"
 	relayprovider "micro-one-api/internal/relay/provider"
@@ -24,6 +26,7 @@ import (
 type HTTPServer struct {
 	identityClient  identityv1.IdentityServiceClient
 	channelClient  channelv1.ChannelServiceClient
+	billingClient  billingv1.BillingServiceClient
 	providerFactory *relayprovider.ProviderFactory
 }
 
@@ -31,11 +34,13 @@ type HTTPServer struct {
 func NewHTTPServer(
 	identityClient identityv1.IdentityServiceClient,
 	channelClient channelv1.ChannelServiceClient,
+	billingClient billingv1.BillingServiceClient,
 	providerFactory *relayprovider.ProviderFactory,
 ) *HTTPServer {
 	return &HTTPServer{
 		identityClient:  identityClient,
 		channelClient:   channelClient,
+		billingClient:   billingClient,
 		providerFactory: providerFactory,
 	}
 }
@@ -98,35 +103,56 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// 预扣配额
+	requestID := generateRequestID()
+	estimatedTokens := s.estimateTokens(&req)
+	reservation, err := s.reserveQuota(r.Context(), fmt.Sprintf("%d", authSnapshot.UserId), requestID, estimatedTokens, req.Model, fmt.Sprintf("%d", channel.Id))
+	if err != nil {
+		s.handleBillingError(w, err)
+		return
+	}
+
 	provider, err := s.providerFactory.CreateProvider(channel.Type, channel.BaseUrl, channel.Key)
 	if err != nil {
+		// 创建 provider 失败，释放预扣配额
+		_ = s.releaseQuota(r.Context(), reservation.ReservationId, "failed to create provider")
 		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create provider: %v", err))
 		return
 	}
 
 	if req.Stream {
-		s.handleStreamingResponse(w, r, provider, &req)
+		s.handleStreamingResponse(w, r, provider, &req, reservation)
 		return
 	}
 
 	resp, err := provider.ChatCompletions(r.Context(), &req)
 	if err != nil {
+		// 请求失败，释放预扣配额
+		_ = s.releaseQuota(r.Context(), reservation.ReservationId, "upstream error")
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("upstream error: %v", err))
 		return
 	}
 
+	// 请求成功，提交配额
+	actualTokens := s.calculateActualTokens(resp)
+	_ = s.commitQuota(r.Context(), reservation.ReservationId, actualTokens, true)
+
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Request, provider relayprovider.Provider, req *relayprovider.ChatCompletionsRequest) {
+func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Request, provider relayprovider.Provider, req *relayprovider.ChatCompletionsRequest, reservation *billingv1.ReserveQuotaResponse) {
 	chunkChan, err := provider.ChatCompletionsStream(r.Context(), req)
 	if err != nil {
+		// 流式请求失败，释放预扣配额
+		_ = s.releaseQuota(r.Context(), reservation.ReservationId, "upstream stream error")
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("upstream stream error: %v", err))
 		return
 	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		// 流式不支持，释放预扣配额
+		_ = s.releaseQuota(r.Context(), reservation.ReservationId, "streaming not supported")
 		s.writeError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
@@ -136,7 +162,16 @@ func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Transfer-Encoding", "chunked")
 
+	totalTokens := int64(0)
+	streamError := false
+
 	for chunk := range chunkChan {
+		// StreamChunk 没有 Usage 字段，我们需要估算 tokens
+		// 这里简单使用字符数除以 4 来估算
+		for _, choice := range chunk.Choices {
+			totalTokens += int64(len(choice.Delta.Content) / 4)
+		}
+
 		jsonData, err := json.Marshal(chunk)
 		if err != nil {
 			applogger.Log.Warn("failed to marshal chunk", zap.Error(err))
@@ -149,6 +184,13 @@ func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Requ
 
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
+
+	// 流式请求完成，提交配额
+	if !streamError {
+		_ = s.commitQuota(r.Context(), reservation.ReservationId, totalTokens, true)
+	} else {
+		_ = s.releaseQuota(r.Context(), reservation.ReservationId, "stream error")
+	}
 }
 
 func (s *HTTPServer) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -318,6 +360,25 @@ func (s *HTTPServer) handleChannelError(w http.ResponseWriter, err error) {
 	s.writeError(w, http.StatusInternalServerError, err.Error())
 }
 
+func (s *HTTPServer) handleBillingError(w http.ResponseWriter, err error) {
+	// 处理计费服务错误
+	st, ok := status.FromError(err)
+	if ok {
+		switch st.Code() {
+		case codes.ResourceExhausted:
+			// 配额不足
+			s.writeError(w, http.StatusPaymentRequired, "insufficient quota")
+		case codes.Unavailable:
+			// 计费服务不可用
+			s.writeError(w, http.StatusServiceUnavailable, "billing service unavailable")
+		default:
+			s.writeError(w, http.StatusInternalServerError, st.Message())
+		}
+		return
+	}
+	s.writeError(w, http.StatusInternalServerError, err.Error())
+}
+
 func (s *HTTPServer) writeError(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
@@ -332,4 +393,65 @@ func (s *HTTPServer) writeJSON(w http.ResponseWriter, statusCode int, data inter
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(data)
+}
+
+// 配额管理方法
+
+func (s *HTTPServer) reserveQuota(ctx context.Context, userID, requestID string, estimatedTokens int64, model, channelID string) (*billingv1.ReserveQuotaResponse, error) {
+	req := &billingv1.ReserveQuotaRequest{
+		UserId:         userID,
+		RequestId:      requestID,
+		EstimatedTokens: estimatedTokens,
+		Model:          model,
+		ChannelId:      channelID,
+	}
+	return s.billingClient.ReserveQuota(ctx, req)
+}
+
+func (s *HTTPServer) commitQuota(ctx context.Context, reservationID string, actualTokens int64, success bool) error {
+	req := &billingv1.CommitQuotaRequest{
+		ReservationId: reservationID,
+		ActualTokens:  actualTokens,
+		Success:       success,
+	}
+	_, err := s.billingClient.CommitQuota(ctx, req)
+	return err
+}
+
+func (s *HTTPServer) releaseQuota(ctx context.Context, reservationID, reason string) error {
+	req := &billingv1.ReleaseQuotaRequest{
+		ReservationId: reservationID,
+		Reason:        reason,
+	}
+	_, err := s.billingClient.ReleaseQuota(ctx, req)
+	return err
+}
+
+func (s *HTTPServer) estimateTokens(req *relayprovider.ChatCompletionsRequest) int64 {
+	// 简单的 token 估算逻辑
+	// 实际应用中可以使用更精确的 tokenizer
+	tokens := int64(0)
+
+	// 估算输入 tokens
+	for _, msg := range req.Messages {
+		tokens += int64(len(msg.Content) / 4) // 假设平均每个 token 4 个字符
+	}
+
+	// 估算输出 tokens (基于 max_tokens 或默认值)
+	if req.MaxTokens != nil && *req.MaxTokens > 0 {
+		tokens += int64(*req.MaxTokens)
+	} else {
+		tokens += 1000 // 默认输出 tokens
+	}
+
+	return tokens
+}
+
+func (s *HTTPServer) calculateActualTokens(resp *relayprovider.ChatCompletionsResponse) int64 {
+	// resp.Usage 不是指针，是值类型
+	return int64(resp.Usage.TotalTokens)
+}
+
+func generateRequestID() string {
+	return fmt.Sprintf("req_%d", time.Now().UnixNano())
 }

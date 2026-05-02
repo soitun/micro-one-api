@@ -9,6 +9,7 @@ package billingv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -22,14 +23,14 @@ const (
 )
 
 type ReserveQuotaRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	UserId        int64                  `protobuf:"varint,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	TokenId       int64                  `protobuf:"varint,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
-	Quota         int64                  `protobuf:"varint,4,opt,name=quota,proto3" json:"quota,omitempty"`
-	Model         string                 `protobuf:"bytes,5,opt,name=model,proto3" json:"model,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	UserId          string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	RequestId       string                 `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	EstimatedTokens int64                  `protobuf:"varint,3,opt,name=estimated_tokens,json=estimatedTokens,proto3" json:"estimated_tokens,omitempty"`
+	Model           string                 `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
+	ChannelId       string                 `protobuf:"bytes,5,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ReserveQuotaRequest) Reset() {
@@ -62,6 +63,13 @@ func (*ReserveQuotaRequest) Descriptor() ([]byte, []int) {
 	return file_billing_v1_billing_proto_rawDescGZIP(), []int{0}
 }
 
+func (x *ReserveQuotaRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
 func (x *ReserveQuotaRequest) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
@@ -69,23 +77,9 @@ func (x *ReserveQuotaRequest) GetRequestId() string {
 	return ""
 }
 
-func (x *ReserveQuotaRequest) GetUserId() int64 {
+func (x *ReserveQuotaRequest) GetEstimatedTokens() int64 {
 	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *ReserveQuotaRequest) GetTokenId() int64 {
-	if x != nil {
-		return x.TokenId
-	}
-	return 0
-}
-
-func (x *ReserveQuotaRequest) GetQuota() int64 {
-	if x != nil {
-		return x.Quota
+		return x.EstimatedTokens
 	}
 	return 0
 }
@@ -97,29 +91,37 @@ func (x *ReserveQuotaRequest) GetModel() string {
 	return ""
 }
 
-type ReserveQuotaReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ReservationId string                 `protobuf:"bytes,1,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
-	Reserved      bool                   `protobuf:"varint,2,opt,name=reserved,proto3" json:"reserved,omitempty"`
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+func (x *ReserveQuotaRequest) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
 }
 
-func (x *ReserveQuotaReply) Reset() {
-	*x = ReserveQuotaReply{}
+type ReserveQuotaResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Success        bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ReservationId  string                 `protobuf:"bytes,2,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	ReservedAmount int64                  `protobuf:"varint,3,opt,name=reserved_amount,json=reservedAmount,proto3" json:"reserved_amount,omitempty"`
+	ErrorMessage   string                 `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ReserveQuotaResponse) Reset() {
+	*x = ReserveQuotaResponse{}
 	mi := &file_billing_v1_billing_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ReserveQuotaReply) String() string {
+func (x *ReserveQuotaResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ReserveQuotaReply) ProtoMessage() {}
+func (*ReserveQuotaResponse) ProtoMessage() {}
 
-func (x *ReserveQuotaReply) ProtoReflect() protoreflect.Message {
+func (x *ReserveQuotaResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_billing_v1_billing_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -131,37 +133,45 @@ func (x *ReserveQuotaReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReserveQuotaReply.ProtoReflect.Descriptor instead.
-func (*ReserveQuotaReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use ReserveQuotaResponse.ProtoReflect.Descriptor instead.
+func (*ReserveQuotaResponse) Descriptor() ([]byte, []int) {
 	return file_billing_v1_billing_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *ReserveQuotaReply) GetReservationId() string {
+func (x *ReserveQuotaResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReserveQuotaResponse) GetReservationId() string {
 	if x != nil {
 		return x.ReservationId
 	}
 	return ""
 }
 
-func (x *ReserveQuotaReply) GetReserved() bool {
+func (x *ReserveQuotaResponse) GetReservedAmount() int64 {
 	if x != nil {
-		return x.Reserved
+		return x.ReservedAmount
 	}
-	return false
+	return 0
 }
 
-func (x *ReserveQuotaReply) GetMessage() string {
+func (x *ReserveQuotaResponse) GetErrorMessage() string {
 	if x != nil {
-		return x.Message
+		return x.ErrorMessage
 	}
 	return ""
 }
 
 type CommitQuotaRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	ReservationId string                 `protobuf:"bytes,2,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
-	ActualQuota   int64                  `protobuf:"varint,3,opt,name=actual_quota,json=actualQuota,proto3" json:"actual_quota,omitempty"`
+	ReservationId string                 `protobuf:"bytes,1,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	ActualTokens  int64                  `protobuf:"varint,2,opt,name=actual_tokens,json=actualTokens,proto3" json:"actual_tokens,omitempty"`
+	ActualCost    int64                  `protobuf:"varint,3,opt,name=actual_cost,json=actualCost,proto3" json:"actual_cost,omitempty"`
+	Success       bool                   `protobuf:"varint,4,opt,name=success,proto3" json:"success,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -196,13 +206,6 @@ func (*CommitQuotaRequest) Descriptor() ([]byte, []int) {
 	return file_billing_v1_billing_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *CommitQuotaRequest) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
 func (x *CommitQuotaRequest) GetReservationId() string {
 	if x != nil {
 		return x.ReservationId
@@ -210,35 +213,51 @@ func (x *CommitQuotaRequest) GetReservationId() string {
 	return ""
 }
 
-func (x *CommitQuotaRequest) GetActualQuota() int64 {
+func (x *CommitQuotaRequest) GetActualTokens() int64 {
 	if x != nil {
-		return x.ActualQuota
+		return x.ActualTokens
 	}
 	return 0
 }
 
-type CommitQuotaReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Committed     bool                   `protobuf:"varint,1,opt,name=committed,proto3" json:"committed,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+func (x *CommitQuotaRequest) GetActualCost() int64 {
+	if x != nil {
+		return x.ActualCost
+	}
+	return 0
 }
 
-func (x *CommitQuotaReply) Reset() {
-	*x = CommitQuotaReply{}
+func (x *CommitQuotaRequest) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+type CommitQuotaResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Success         bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	CommittedAmount int64                  `protobuf:"varint,2,opt,name=committed_amount,json=committedAmount,proto3" json:"committed_amount,omitempty"`
+	RefundAmount    int64                  `protobuf:"varint,3,opt,name=refund_amount,json=refundAmount,proto3" json:"refund_amount,omitempty"`
+	ErrorMessage    string                 `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CommitQuotaResponse) Reset() {
+	*x = CommitQuotaResponse{}
 	mi := &file_billing_v1_billing_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CommitQuotaReply) String() string {
+func (x *CommitQuotaResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CommitQuotaReply) ProtoMessage() {}
+func (*CommitQuotaResponse) ProtoMessage() {}
 
-func (x *CommitQuotaReply) ProtoReflect() protoreflect.Message {
+func (x *CommitQuotaResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_billing_v1_billing_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -250,29 +269,43 @@ func (x *CommitQuotaReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CommitQuotaReply.ProtoReflect.Descriptor instead.
-func (*CommitQuotaReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use CommitQuotaResponse.ProtoReflect.Descriptor instead.
+func (*CommitQuotaResponse) Descriptor() ([]byte, []int) {
 	return file_billing_v1_billing_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *CommitQuotaReply) GetCommitted() bool {
+func (x *CommitQuotaResponse) GetSuccess() bool {
 	if x != nil {
-		return x.Committed
+		return x.Success
 	}
 	return false
 }
 
-func (x *CommitQuotaReply) GetMessage() string {
+func (x *CommitQuotaResponse) GetCommittedAmount() int64 {
 	if x != nil {
-		return x.Message
+		return x.CommittedAmount
+	}
+	return 0
+}
+
+func (x *CommitQuotaResponse) GetRefundAmount() int64 {
+	if x != nil {
+		return x.RefundAmount
+	}
+	return 0
+}
+
+func (x *CommitQuotaResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
 	}
 	return ""
 }
 
 type ReleaseQuotaRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	ReservationId string                 `protobuf:"bytes,2,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	ReservationId string                 `protobuf:"bytes,1,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -307,13 +340,6 @@ func (*ReleaseQuotaRequest) Descriptor() ([]byte, []int) {
 	return file_billing_v1_billing_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *ReleaseQuotaRequest) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
 func (x *ReleaseQuotaRequest) GetReservationId() string {
 	if x != nil {
 		return x.ReservationId
@@ -321,28 +347,36 @@ func (x *ReleaseQuotaRequest) GetReservationId() string {
 	return ""
 }
 
-type ReleaseQuotaReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Released      bool                   `protobuf:"varint,1,opt,name=released,proto3" json:"released,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+func (x *ReleaseQuotaRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
 }
 
-func (x *ReleaseQuotaReply) Reset() {
-	*x = ReleaseQuotaReply{}
+type ReleaseQuotaResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Success        bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ReleasedAmount int64                  `protobuf:"varint,2,opt,name=released_amount,json=releasedAmount,proto3" json:"released_amount,omitempty"`
+	ErrorMessage   string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ReleaseQuotaResponse) Reset() {
+	*x = ReleaseQuotaResponse{}
 	mi := &file_billing_v1_billing_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ReleaseQuotaReply) String() string {
+func (x *ReleaseQuotaResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ReleaseQuotaReply) ProtoMessage() {}
+func (*ReleaseQuotaResponse) ProtoMessage() {}
 
-func (x *ReleaseQuotaReply) ProtoReflect() protoreflect.Message {
+func (x *ReleaseQuotaResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_billing_v1_billing_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -354,36 +388,134 @@ func (x *ReleaseQuotaReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReleaseQuotaReply.ProtoReflect.Descriptor instead.
-func (*ReleaseQuotaReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use ReleaseQuotaResponse.ProtoReflect.Descriptor instead.
+func (*ReleaseQuotaResponse) Descriptor() ([]byte, []int) {
 	return file_billing_v1_billing_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *ReleaseQuotaReply) GetReleased() bool {
+func (x *ReleaseQuotaResponse) GetSuccess() bool {
 	if x != nil {
-		return x.Released
+		return x.Success
 	}
 	return false
 }
 
-func (x *ReleaseQuotaReply) GetMessage() string {
+func (x *ReleaseQuotaResponse) GetReleasedAmount() int64 {
 	if x != nil {
-		return x.Message
+		return x.ReleasedAmount
+	}
+	return 0
+}
+
+func (x *ReleaseQuotaResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
 	}
 	return ""
 }
 
+type AccountSnapshot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Quota         int64                  `protobuf:"varint,2,opt,name=quota,proto3" json:"quota,omitempty"`
+	UsedQuota     int64                  `protobuf:"varint,3,opt,name=used_quota,json=usedQuota,proto3" json:"used_quota,omitempty"`
+	RequestCount  int64                  `protobuf:"varint,4,opt,name=request_count,json=requestCount,proto3" json:"request_count,omitempty"`
+	Group         string                 `protobuf:"bytes,5,opt,name=group,proto3" json:"group,omitempty"`
+	GroupRatio    float64                `protobuf:"fixed64,6,opt,name=group_ratio,json=groupRatio,proto3" json:"group_ratio,omitempty"`
+	FrozenQuota   int64                  `protobuf:"varint,7,opt,name=frozen_quota,json=frozenQuota,proto3" json:"frozen_quota,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountSnapshot) Reset() {
+	*x = AccountSnapshot{}
+	mi := &file_billing_v1_billing_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountSnapshot) ProtoMessage() {}
+
+func (x *AccountSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountSnapshot.ProtoReflect.Descriptor instead.
+func (*AccountSnapshot) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AccountSnapshot) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AccountSnapshot) GetQuota() int64 {
+	if x != nil {
+		return x.Quota
+	}
+	return 0
+}
+
+func (x *AccountSnapshot) GetUsedQuota() int64 {
+	if x != nil {
+		return x.UsedQuota
+	}
+	return 0
+}
+
+func (x *AccountSnapshot) GetRequestCount() int64 {
+	if x != nil {
+		return x.RequestCount
+	}
+	return 0
+}
+
+func (x *AccountSnapshot) GetGroup() string {
+	if x != nil {
+		return x.Group
+	}
+	return ""
+}
+
+func (x *AccountSnapshot) GetGroupRatio() float64 {
+	if x != nil {
+		return x.GroupRatio
+	}
+	return 0
+}
+
+func (x *AccountSnapshot) GetFrozenQuota() int64 {
+	if x != nil {
+		return x.FrozenQuota
+	}
+	return 0
+}
+
 type GetAccountSnapshotRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	TokenId       int64                  `protobuf:"varint,2,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetAccountSnapshotRequest) Reset() {
 	*x = GetAccountSnapshotRequest{}
-	mi := &file_billing_v1_billing_proto_msgTypes[6]
+	mi := &file_billing_v1_billing_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -395,7 +527,7 @@ func (x *GetAccountSnapshotRequest) String() string {
 func (*GetAccountSnapshotRequest) ProtoMessage() {}
 
 func (x *GetAccountSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_billing_v1_billing_proto_msgTypes[6]
+	mi := &file_billing_v1_billing_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -408,47 +540,38 @@ func (x *GetAccountSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAccountSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*GetAccountSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_billing_v1_billing_proto_rawDescGZIP(), []int{6}
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *GetAccountSnapshotRequest) GetUserId() int64 {
+func (x *GetAccountSnapshotRequest) GetUserId() string {
 	if x != nil {
 		return x.UserId
 	}
-	return 0
+	return ""
 }
 
-func (x *GetAccountSnapshotRequest) GetTokenId() int64 {
-	if x != nil {
-		return x.TokenId
-	}
-	return 0
-}
-
-type GetAccountSnapshotReply struct {
+type GetAccountSnapshotResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserQuota     int64                  `protobuf:"varint,1,opt,name=user_quota,json=userQuota,proto3" json:"user_quota,omitempty"`
-	TokenQuota    int64                  `protobuf:"varint,2,opt,name=token_quota,json=tokenQuota,proto3" json:"token_quota,omitempty"`
-	Unlimited     bool                   `protobuf:"varint,3,opt,name=unlimited,proto3" json:"unlimited,omitempty"`
+	Snapshot      *AccountSnapshot       `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GetAccountSnapshotReply) Reset() {
-	*x = GetAccountSnapshotReply{}
-	mi := &file_billing_v1_billing_proto_msgTypes[7]
+func (x *GetAccountSnapshotResponse) Reset() {
+	*x = GetAccountSnapshotResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GetAccountSnapshotReply) String() string {
+func (x *GetAccountSnapshotResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetAccountSnapshotReply) ProtoMessage() {}
+func (*GetAccountSnapshotResponse) ProtoMessage() {}
 
-func (x *GetAccountSnapshotReply) ProtoReflect() protoreflect.Message {
-	mi := &file_billing_v1_billing_proto_msgTypes[7]
+func (x *GetAccountSnapshotResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -459,77 +582,1533 @@ func (x *GetAccountSnapshotReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetAccountSnapshotReply.ProtoReflect.Descriptor instead.
-func (*GetAccountSnapshotReply) Descriptor() ([]byte, []int) {
-	return file_billing_v1_billing_proto_rawDescGZIP(), []int{7}
+// Deprecated: Use GetAccountSnapshotResponse.ProtoReflect.Descriptor instead.
+func (*GetAccountSnapshotResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *GetAccountSnapshotReply) GetUserQuota() int64 {
+func (x *GetAccountSnapshotResponse) GetSnapshot() *AccountSnapshot {
 	if x != nil {
-		return x.UserQuota
+		return x.Snapshot
+	}
+	return nil
+}
+
+type TopUpQuotaRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Amount        int64                  `protobuf:"varint,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	OperatorId    string                 `protobuf:"bytes,3,opt,name=operator_id,json=operatorId,proto3" json:"operator_id,omitempty"`
+	Remark        string                 `protobuf:"bytes,4,opt,name=remark,proto3" json:"remark,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TopUpQuotaRequest) Reset() {
+	*x = TopUpQuotaRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TopUpQuotaRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TopUpQuotaRequest) ProtoMessage() {}
+
+func (x *TopUpQuotaRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TopUpQuotaRequest.ProtoReflect.Descriptor instead.
+func (*TopUpQuotaRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TopUpQuotaRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *TopUpQuotaRequest) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
 	}
 	return 0
 }
 
-func (x *GetAccountSnapshotReply) GetTokenQuota() int64 {
+func (x *TopUpQuotaRequest) GetOperatorId() string {
 	if x != nil {
-		return x.TokenQuota
+		return x.OperatorId
 	}
-	return 0
+	return ""
 }
 
-func (x *GetAccountSnapshotReply) GetUnlimited() bool {
+func (x *TopUpQuotaRequest) GetRemark() string {
 	if x != nil {
-		return x.Unlimited
+		return x.Remark
+	}
+	return ""
+}
+
+type TopUpQuotaResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	NewQuota      int64                  `protobuf:"varint,2,opt,name=new_quota,json=newQuota,proto3" json:"new_quota,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TopUpQuotaResponse) Reset() {
+	*x = TopUpQuotaResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TopUpQuotaResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TopUpQuotaResponse) ProtoMessage() {}
+
+func (x *TopUpQuotaResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TopUpQuotaResponse.ProtoReflect.Descriptor instead.
+func (*TopUpQuotaResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TopUpQuotaResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
 	}
 	return false
+}
+
+func (x *TopUpQuotaResponse) GetNewQuota() int64 {
+	if x != nil {
+		return x.NewQuota
+	}
+	return 0
+}
+
+func (x *TopUpQuotaResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+type RedeemCode struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Amount        int64                  `protobuf:"varint,3,opt,name=amount,proto3" json:"amount,omitempty"`
+	Count         int32                  `protobuf:"varint,4,opt,name=count,proto3" json:"count,omitempty"`
+	Status        int32                  `protobuf:"varint,5,opt,name=status,proto3" json:"status,omitempty"`
+	CreatedBy     string                 `protobuf:"bytes,6,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RedeemCode) Reset() {
+	*x = RedeemCode{}
+	mi := &file_billing_v1_billing_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RedeemCode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RedeemCode) ProtoMessage() {}
+
+func (x *RedeemCode) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RedeemCode.ProtoReflect.Descriptor instead.
+func (*RedeemCode) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *RedeemCode) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *RedeemCode) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RedeemCode) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *RedeemCode) GetCount() int32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *RedeemCode) GetStatus() int32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+func (x *RedeemCode) GetCreatedBy() string {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return ""
+}
+
+func (x *RedeemCode) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *RedeemCode) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
+type CreateRedeemCodeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Amount        int64                  `protobuf:"varint,3,opt,name=amount,proto3" json:"amount,omitempty"`
+	Count         int32                  `protobuf:"varint,4,opt,name=count,proto3" json:"count,omitempty"`
+	OperatorId    string                 `protobuf:"bytes,5,opt,name=operator_id,json=operatorId,proto3" json:"operator_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateRedeemCodeRequest) Reset() {
+	*x = CreateRedeemCodeRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateRedeemCodeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateRedeemCodeRequest) ProtoMessage() {}
+
+func (x *CreateRedeemCodeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateRedeemCodeRequest.ProtoReflect.Descriptor instead.
+func (*CreateRedeemCodeRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *CreateRedeemCodeRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *CreateRedeemCodeRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateRedeemCodeRequest) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *CreateRedeemCodeRequest) GetCount() int32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *CreateRedeemCodeRequest) GetOperatorId() string {
+	if x != nil {
+		return x.OperatorId
+	}
+	return ""
+}
+
+type CreateRedeemCodeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateRedeemCodeResponse) Reset() {
+	*x = CreateRedeemCodeResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateRedeemCodeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateRedeemCodeResponse) ProtoMessage() {}
+
+func (x *CreateRedeemCodeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateRedeemCodeResponse.ProtoReflect.Descriptor instead.
+func (*CreateRedeemCodeResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *CreateRedeemCodeResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *CreateRedeemCodeResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+type CreateRedeemCodesBatchRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Amount        int64                  `protobuf:"varint,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	Count         int32                  `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	BatchSize     int32                  `protobuf:"varint,4,opt,name=batch_size,json=batchSize,proto3" json:"batch_size,omitempty"`
+	OperatorId    string                 `protobuf:"bytes,5,opt,name=operator_id,json=operatorId,proto3" json:"operator_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateRedeemCodesBatchRequest) Reset() {
+	*x = CreateRedeemCodesBatchRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateRedeemCodesBatchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateRedeemCodesBatchRequest) ProtoMessage() {}
+
+func (x *CreateRedeemCodesBatchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateRedeemCodesBatchRequest.ProtoReflect.Descriptor instead.
+func (*CreateRedeemCodesBatchRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *CreateRedeemCodesBatchRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateRedeemCodesBatchRequest) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *CreateRedeemCodesBatchRequest) GetCount() int32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *CreateRedeemCodesBatchRequest) GetBatchSize() int32 {
+	if x != nil {
+		return x.BatchSize
+	}
+	return 0
+}
+
+func (x *CreateRedeemCodesBatchRequest) GetOperatorId() string {
+	if x != nil {
+		return x.OperatorId
+	}
+	return ""
+}
+
+type CreateRedeemCodesBatchResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Codes         []string               `protobuf:"bytes,2,rep,name=codes,proto3" json:"codes,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateRedeemCodesBatchResponse) Reset() {
+	*x = CreateRedeemCodesBatchResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateRedeemCodesBatchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateRedeemCodesBatchResponse) ProtoMessage() {}
+
+func (x *CreateRedeemCodesBatchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateRedeemCodesBatchResponse.ProtoReflect.Descriptor instead.
+func (*CreateRedeemCodesBatchResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *CreateRedeemCodesBatchResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *CreateRedeemCodesBatchResponse) GetCodes() []string {
+	if x != nil {
+		return x.Codes
+	}
+	return nil
+}
+
+func (x *CreateRedeemCodesBatchResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+type GetRedeemCodeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRedeemCodeRequest) Reset() {
+	*x = GetRedeemCodeRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRedeemCodeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRedeemCodeRequest) ProtoMessage() {}
+
+func (x *GetRedeemCodeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRedeemCodeRequest.ProtoReflect.Descriptor instead.
+func (*GetRedeemCodeRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetRedeemCodeRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+type GetRedeemCodeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RedeemCode    *RedeemCode            `protobuf:"bytes,1,opt,name=redeem_code,json=redeemCode,proto3" json:"redeem_code,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRedeemCodeResponse) Reset() {
+	*x = GetRedeemCodeResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRedeemCodeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRedeemCodeResponse) ProtoMessage() {}
+
+func (x *GetRedeemCodeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRedeemCodeResponse.ProtoReflect.Descriptor instead.
+func (*GetRedeemCodeResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *GetRedeemCodeResponse) GetRedeemCode() *RedeemCode {
+	if x != nil {
+		return x.RedeemCode
+	}
+	return nil
+}
+
+func (x *GetRedeemCodeResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+type ListRedeemCodesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Page          int32                  `protobuf:"varint,1,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize      int32                  `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRedeemCodesRequest) Reset() {
+	*x = ListRedeemCodesRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRedeemCodesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRedeemCodesRequest) ProtoMessage() {}
+
+func (x *ListRedeemCodesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRedeemCodesRequest.ProtoReflect.Descriptor instead.
+func (*ListRedeemCodesRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ListRedeemCodesRequest) GetPage() int32 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *ListRedeemCodesRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+type ListRedeemCodesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Codes         []*RedeemCode          `protobuf:"bytes,1,rep,name=codes,proto3" json:"codes,omitempty"`
+	Total         int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRedeemCodesResponse) Reset() {
+	*x = ListRedeemCodesResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRedeemCodesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRedeemCodesResponse) ProtoMessage() {}
+
+func (x *ListRedeemCodesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRedeemCodesResponse.ProtoReflect.Descriptor instead.
+func (*ListRedeemCodesResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ListRedeemCodesResponse) GetCodes() []*RedeemCode {
+	if x != nil {
+		return x.Codes
+	}
+	return nil
+}
+
+func (x *ListRedeemCodesResponse) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+type SearchRedeemCodesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Keyword       string                 `protobuf:"bytes,1,opt,name=keyword,proto3" json:"keyword,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchRedeemCodesRequest) Reset() {
+	*x = SearchRedeemCodesRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchRedeemCodesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchRedeemCodesRequest) ProtoMessage() {}
+
+func (x *SearchRedeemCodesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchRedeemCodesRequest.ProtoReflect.Descriptor instead.
+func (*SearchRedeemCodesRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *SearchRedeemCodesRequest) GetKeyword() string {
+	if x != nil {
+		return x.Keyword
+	}
+	return ""
+}
+
+type SearchRedeemCodesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Codes         []*RedeemCode          `protobuf:"bytes,1,rep,name=codes,proto3" json:"codes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchRedeemCodesResponse) Reset() {
+	*x = SearchRedeemCodesResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchRedeemCodesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchRedeemCodesResponse) ProtoMessage() {}
+
+func (x *SearchRedeemCodesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchRedeemCodesResponse.ProtoReflect.Descriptor instead.
+func (*SearchRedeemCodesResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *SearchRedeemCodesResponse) GetCodes() []*RedeemCode {
+	if x != nil {
+		return x.Codes
+	}
+	return nil
+}
+
+type UpdateRedeemCodeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Amount        int64                  `protobuf:"varint,3,opt,name=amount,proto3" json:"amount,omitempty"`
+	Status        int32                  `protobuf:"varint,4,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateRedeemCodeRequest) Reset() {
+	*x = UpdateRedeemCodeRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateRedeemCodeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateRedeemCodeRequest) ProtoMessage() {}
+
+func (x *UpdateRedeemCodeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateRedeemCodeRequest.ProtoReflect.Descriptor instead.
+func (*UpdateRedeemCodeRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *UpdateRedeemCodeRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *UpdateRedeemCodeRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *UpdateRedeemCodeRequest) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *UpdateRedeemCodeRequest) GetStatus() int32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+type UpdateRedeemCodeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateRedeemCodeResponse) Reset() {
+	*x = UpdateRedeemCodeResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateRedeemCodeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateRedeemCodeResponse) ProtoMessage() {}
+
+func (x *UpdateRedeemCodeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateRedeemCodeResponse.ProtoReflect.Descriptor instead.
+func (*UpdateRedeemCodeResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *UpdateRedeemCodeResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *UpdateRedeemCodeResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+type DeleteRedeemCodeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteRedeemCodeRequest) Reset() {
+	*x = DeleteRedeemCodeRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteRedeemCodeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteRedeemCodeRequest) ProtoMessage() {}
+
+func (x *DeleteRedeemCodeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteRedeemCodeRequest.ProtoReflect.Descriptor instead.
+func (*DeleteRedeemCodeRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *DeleteRedeemCodeRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+type DeleteRedeemCodeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteRedeemCodeResponse) Reset() {
+	*x = DeleteRedeemCodeResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteRedeemCodeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteRedeemCodeResponse) ProtoMessage() {}
+
+func (x *DeleteRedeemCodeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteRedeemCodeResponse.ProtoReflect.Descriptor instead.
+func (*DeleteRedeemCodeResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *DeleteRedeemCodeResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *DeleteRedeemCodeResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+type RedeemCodeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Code          string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RedeemCodeRequest) Reset() {
+	*x = RedeemCodeRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RedeemCodeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RedeemCodeRequest) ProtoMessage() {}
+
+func (x *RedeemCodeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RedeemCodeRequest.ProtoReflect.Descriptor instead.
+func (*RedeemCodeRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *RedeemCodeRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *RedeemCodeRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+type RedeemCodeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Amount        int64                  `protobuf:"varint,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	NewQuota      int64                  `protobuf:"varint,3,opt,name=new_quota,json=newQuota,proto3" json:"new_quota,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RedeemCodeResponse) Reset() {
+	*x = RedeemCodeResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RedeemCodeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RedeemCodeResponse) ProtoMessage() {}
+
+func (x *RedeemCodeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RedeemCodeResponse.ProtoReflect.Descriptor instead.
+func (*RedeemCodeResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *RedeemCodeResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *RedeemCodeResponse) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *RedeemCodeResponse) GetNewQuota() int64 {
+	if x != nil {
+		return x.NewQuota
+	}
+	return 0
+}
+
+func (x *RedeemCodeResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+type LedgerEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Amount        int64                  `protobuf:"varint,3,opt,name=amount,proto3" json:"amount,omitempty"`
+	BalanceAfter  int64                  `protobuf:"varint,4,opt,name=balance_after,json=balanceAfter,proto3" json:"balance_after,omitempty"`
+	Type          string                 `protobuf:"bytes,5,opt,name=type,proto3" json:"type,omitempty"`
+	ReferenceId   string                 `protobuf:"bytes,6,opt,name=reference_id,json=referenceId,proto3" json:"reference_id,omitempty"`
+	Remark        string                 `protobuf:"bytes,7,opt,name=remark,proto3" json:"remark,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LedgerEntry) Reset() {
+	*x = LedgerEntry{}
+	mi := &file_billing_v1_billing_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LedgerEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LedgerEntry) ProtoMessage() {}
+
+func (x *LedgerEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LedgerEntry.ProtoReflect.Descriptor instead.
+func (*LedgerEntry) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *LedgerEntry) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *LedgerEntry) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *LedgerEntry) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *LedgerEntry) GetBalanceAfter() int64 {
+	if x != nil {
+		return x.BalanceAfter
+	}
+	return 0
+}
+
+func (x *LedgerEntry) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *LedgerEntry) GetReferenceId() string {
+	if x != nil {
+		return x.ReferenceId
+	}
+	return ""
+}
+
+func (x *LedgerEntry) GetRemark() string {
+	if x != nil {
+		return x.Remark
+	}
+	return ""
+}
+
+func (x *LedgerEntry) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+type ListLedgerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Page          int32                  `protobuf:"varint,2,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize      int32                  `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	StartTime     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	EndTime       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListLedgerRequest) Reset() {
+	*x = ListLedgerRequest{}
+	mi := &file_billing_v1_billing_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListLedgerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListLedgerRequest) ProtoMessage() {}
+
+func (x *ListLedgerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListLedgerRequest.ProtoReflect.Descriptor instead.
+func (*ListLedgerRequest) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *ListLedgerRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ListLedgerRequest) GetPage() int32 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *ListLedgerRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListLedgerRequest) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *ListLedgerRequest) GetEndTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndTime
+	}
+	return nil
+}
+
+type ListLedgerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Entries       []*LedgerEntry         `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	Total         int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListLedgerResponse) Reset() {
+	*x = ListLedgerResponse{}
+	mi := &file_billing_v1_billing_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListLedgerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListLedgerResponse) ProtoMessage() {}
+
+func (x *ListLedgerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_billing_v1_billing_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListLedgerResponse.ProtoReflect.Descriptor instead.
+func (*ListLedgerResponse) Descriptor() ([]byte, []int) {
+	return file_billing_v1_billing_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ListLedgerResponse) GetEntries() []*LedgerEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+func (x *ListLedgerResponse) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
 }
 
 var File_billing_v1_billing_proto protoreflect.FileDescriptor
 
 const file_billing_v1_billing_proto_rawDesc = "" +
 	"\n" +
-	"\x18billing/v1/billing.proto\x12\x0eapi.billing.v1\"\x94\x01\n" +
-	"\x13ReserveQuotaRequest\x12\x1d\n" +
+	"\x18billing/v1/billing.proto\x12\x0eapi.billing.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xad\x01\n" +
+	"\x13ReserveQuotaRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\x03R\x06userId\x12\x19\n" +
-	"\btoken_id\x18\x03 \x01(\x03R\atokenId\x12\x14\n" +
-	"\x05quota\x18\x04 \x01(\x03R\x05quota\x12\x14\n" +
-	"\x05model\x18\x05 \x01(\tR\x05model\"p\n" +
-	"\x11ReserveQuotaReply\x12%\n" +
-	"\x0ereservation_id\x18\x01 \x01(\tR\rreservationId\x12\x1a\n" +
-	"\breserved\x18\x02 \x01(\bR\breserved\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"}\n" +
-	"\x12CommitQuotaRequest\x12\x1d\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x12)\n" +
+	"\x10estimated_tokens\x18\x03 \x01(\x03R\x0festimatedTokens\x12\x14\n" +
+	"\x05model\x18\x04 \x01(\tR\x05model\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12%\n" +
-	"\x0ereservation_id\x18\x02 \x01(\tR\rreservationId\x12!\n" +
-	"\factual_quota\x18\x03 \x01(\x03R\vactualQuota\"J\n" +
-	"\x10CommitQuotaReply\x12\x1c\n" +
-	"\tcommitted\x18\x01 \x01(\bR\tcommitted\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"[\n" +
-	"\x13ReleaseQuotaRequest\x12\x1d\n" +
+	"channel_id\x18\x05 \x01(\tR\tchannelId\"\xa5\x01\n" +
+	"\x14ReserveQuotaResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12%\n" +
+	"\x0ereservation_id\x18\x02 \x01(\tR\rreservationId\x12'\n" +
+	"\x0freserved_amount\x18\x03 \x01(\x03R\x0ereservedAmount\x12#\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\x9b\x01\n" +
+	"\x12CommitQuotaRequest\x12%\n" +
+	"\x0ereservation_id\x18\x01 \x01(\tR\rreservationId\x12#\n" +
+	"\ractual_tokens\x18\x02 \x01(\x03R\factualTokens\x12\x1f\n" +
+	"\vactual_cost\x18\x03 \x01(\x03R\n" +
+	"actualCost\x12\x18\n" +
+	"\asuccess\x18\x04 \x01(\bR\asuccess\"\xa4\x01\n" +
+	"\x13CommitQuotaResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12)\n" +
+	"\x10committed_amount\x18\x02 \x01(\x03R\x0fcommittedAmount\x12#\n" +
+	"\rrefund_amount\x18\x03 \x01(\x03R\frefundAmount\x12#\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"T\n" +
+	"\x13ReleaseQuotaRequest\x12%\n" +
+	"\x0ereservation_id\x18\x01 \x01(\tR\rreservationId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"~\n" +
+	"\x14ReleaseQuotaResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12'\n" +
+	"\x0freleased_amount\x18\x02 \x01(\x03R\x0ereleasedAmount\x12#\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\"\xde\x01\n" +
+	"\x0fAccountSnapshot\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05quota\x18\x02 \x01(\x03R\x05quota\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12%\n" +
-	"\x0ereservation_id\x18\x02 \x01(\tR\rreservationId\"I\n" +
-	"\x11ReleaseQuotaReply\x12\x1a\n" +
-	"\breleased\x18\x01 \x01(\bR\breleased\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"O\n" +
+	"used_quota\x18\x03 \x01(\x03R\tusedQuota\x12#\n" +
+	"\rrequest_count\x18\x04 \x01(\x03R\frequestCount\x12\x14\n" +
+	"\x05group\x18\x05 \x01(\tR\x05group\x12\x1f\n" +
+	"\vgroup_ratio\x18\x06 \x01(\x01R\n" +
+	"groupRatio\x12!\n" +
+	"\ffrozen_quota\x18\a \x01(\x03R\vfrozenQuota\"4\n" +
 	"\x19GetAccountSnapshotRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x19\n" +
-	"\btoken_id\x18\x02 \x01(\x03R\atokenId\"w\n" +
-	"\x17GetAccountSnapshotReply\x12\x1d\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\"Y\n" +
+	"\x1aGetAccountSnapshotResponse\x12;\n" +
+	"\bsnapshot\x18\x01 \x01(\v2\x1f.api.billing.v1.AccountSnapshotR\bsnapshot\"}\n" +
+	"\x11TopUpQuotaRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06amount\x18\x02 \x01(\x03R\x06amount\x12\x1f\n" +
+	"\voperator_id\x18\x03 \x01(\tR\n" +
+	"operatorId\x12\x16\n" +
+	"\x06remark\x18\x04 \x01(\tR\x06remark\"p\n" +
+	"\x12TopUpQuotaResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1b\n" +
+	"\tnew_quota\x18\x02 \x01(\x03R\bnewQuota\x12#\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\"\x8f\x02\n" +
 	"\n" +
-	"user_quota\x18\x01 \x01(\x03R\tuserQuota\x12\x1f\n" +
-	"\vtoken_quota\x18\x02 \x01(\x03R\n" +
-	"tokenQuota\x12\x1c\n" +
-	"\tunlimited\x18\x03 \x01(\bR\tunlimited2\xff\x02\n" +
-	"\x0eBillingService\x12V\n" +
-	"\fReserveQuota\x12#.api.billing.v1.ReserveQuotaRequest\x1a!.api.billing.v1.ReserveQuotaReply\x12S\n" +
-	"\vCommitQuota\x12\".api.billing.v1.CommitQuotaRequest\x1a .api.billing.v1.CommitQuotaReply\x12V\n" +
-	"\fReleaseQuota\x12#.api.billing.v1.ReleaseQuotaRequest\x1a!.api.billing.v1.ReleaseQuotaReply\x12h\n" +
-	"\x12GetAccountSnapshot\x12).api.billing.v1.GetAccountSnapshotRequest\x1a'.api.billing.v1.GetAccountSnapshotReplyB(Z&micro-one-api/api/billing/v1;billingv1b\x06proto3"
+	"RedeemCode\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
+	"\x06amount\x18\x03 \x01(\x03R\x06amount\x12\x14\n" +
+	"\x05count\x18\x04 \x01(\x05R\x05count\x12\x16\n" +
+	"\x06status\x18\x05 \x01(\x05R\x06status\x12\x1d\n" +
+	"\n" +
+	"created_by\x18\x06 \x01(\tR\tcreatedBy\x129\n" +
+	"\n" +
+	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x90\x01\n" +
+	"\x17CreateRedeemCodeRequest\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
+	"\x06amount\x18\x03 \x01(\x03R\x06amount\x12\x14\n" +
+	"\x05count\x18\x04 \x01(\x05R\x05count\x12\x1f\n" +
+	"\voperator_id\x18\x05 \x01(\tR\n" +
+	"operatorId\"Y\n" +
+	"\x18CreateRedeemCodeResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\"\xa1\x01\n" +
+	"\x1dCreateRedeemCodesBatchRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06amount\x18\x02 \x01(\x03R\x06amount\x12\x14\n" +
+	"\x05count\x18\x03 \x01(\x05R\x05count\x12\x1d\n" +
+	"\n" +
+	"batch_size\x18\x04 \x01(\x05R\tbatchSize\x12\x1f\n" +
+	"\voperator_id\x18\x05 \x01(\tR\n" +
+	"operatorId\"u\n" +
+	"\x1eCreateRedeemCodesBatchResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05codes\x18\x02 \x03(\tR\x05codes\x12#\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\"*\n" +
+	"\x14GetRedeemCodeRequest\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\"y\n" +
+	"\x15GetRedeemCodeResponse\x12;\n" +
+	"\vredeem_code\x18\x01 \x01(\v2\x1a.api.billing.v1.RedeemCodeR\n" +
+	"redeemCode\x12#\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\"I\n" +
+	"\x16ListRedeemCodesRequest\x12\x12\n" +
+	"\x04page\x18\x01 \x01(\x05R\x04page\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\"a\n" +
+	"\x17ListRedeemCodesResponse\x120\n" +
+	"\x05codes\x18\x01 \x03(\v2\x1a.api.billing.v1.RedeemCodeR\x05codes\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total\"4\n" +
+	"\x18SearchRedeemCodesRequest\x12\x18\n" +
+	"\akeyword\x18\x01 \x01(\tR\akeyword\"M\n" +
+	"\x19SearchRedeemCodesResponse\x120\n" +
+	"\x05codes\x18\x01 \x03(\v2\x1a.api.billing.v1.RedeemCodeR\x05codes\"q\n" +
+	"\x17UpdateRedeemCodeRequest\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
+	"\x06amount\x18\x03 \x01(\x03R\x06amount\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\x05R\x06status\"Y\n" +
+	"\x18UpdateRedeemCodeResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\"-\n" +
+	"\x17DeleteRedeemCodeRequest\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\"Y\n" +
+	"\x18DeleteRedeemCodeResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\"@\n" +
+	"\x11RedeemCodeRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04code\x18\x02 \x01(\tR\x04code\"\x88\x01\n" +
+	"\x12RedeemCodeResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
+	"\x06amount\x18\x02 \x01(\x03R\x06amount\x12\x1b\n" +
+	"\tnew_quota\x18\x03 \x01(\x03R\bnewQuota\x12#\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\xfd\x01\n" +
+	"\vLedgerEntry\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06amount\x18\x03 \x01(\x03R\x06amount\x12#\n" +
+	"\rbalance_after\x18\x04 \x01(\x03R\fbalanceAfter\x12\x12\n" +
+	"\x04type\x18\x05 \x01(\tR\x04type\x12!\n" +
+	"\freference_id\x18\x06 \x01(\tR\vreferenceId\x12\x16\n" +
+	"\x06remark\x18\a \x01(\tR\x06remark\x129\n" +
+	"\n" +
+	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xcf\x01\n" +
+	"\x11ListLedgerRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04page\x18\x02 \x01(\x05R\x04page\x12\x1b\n" +
+	"\tpage_size\x18\x03 \x01(\x05R\bpageSize\x129\n" +
+	"\n" +
+	"start_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x125\n" +
+	"\bend_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\aendTime\"a\n" +
+	"\x12ListLedgerResponse\x125\n" +
+	"\aentries\x18\x01 \x03(\v2\x1b.api.billing.v1.LedgerEntryR\aentries\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total2\xe4\n" +
+	"\n" +
+	"\x0eBillingService\x12Y\n" +
+	"\fReserveQuota\x12#.api.billing.v1.ReserveQuotaRequest\x1a$.api.billing.v1.ReserveQuotaResponse\x12V\n" +
+	"\vCommitQuota\x12\".api.billing.v1.CommitQuotaRequest\x1a#.api.billing.v1.CommitQuotaResponse\x12Y\n" +
+	"\fReleaseQuota\x12#.api.billing.v1.ReleaseQuotaRequest\x1a$.api.billing.v1.ReleaseQuotaResponse\x12k\n" +
+	"\x12GetAccountSnapshot\x12).api.billing.v1.GetAccountSnapshotRequest\x1a*.api.billing.v1.GetAccountSnapshotResponse\x12S\n" +
+	"\n" +
+	"TopUpQuota\x12!.api.billing.v1.TopUpQuotaRequest\x1a\".api.billing.v1.TopUpQuotaResponse\x12e\n" +
+	"\x10CreateRedeemCode\x12'.api.billing.v1.CreateRedeemCodeRequest\x1a(.api.billing.v1.CreateRedeemCodeResponse\x12w\n" +
+	"\x16CreateRedeemCodesBatch\x12-.api.billing.v1.CreateRedeemCodesBatchRequest\x1a..api.billing.v1.CreateRedeemCodesBatchResponse\x12S\n" +
+	"\n" +
+	"RedeemCode\x12!.api.billing.v1.RedeemCodeRequest\x1a\".api.billing.v1.RedeemCodeResponse\x12\\\n" +
+	"\rGetRedeemCode\x12$.api.billing.v1.GetRedeemCodeRequest\x1a%.api.billing.v1.GetRedeemCodeResponse\x12b\n" +
+	"\x0fListRedeemCodes\x12&.api.billing.v1.ListRedeemCodesRequest\x1a'.api.billing.v1.ListRedeemCodesResponse\x12h\n" +
+	"\x11SearchRedeemCodes\x12(.api.billing.v1.SearchRedeemCodesRequest\x1a).api.billing.v1.SearchRedeemCodesResponse\x12e\n" +
+	"\x10UpdateRedeemCode\x12'.api.billing.v1.UpdateRedeemCodeRequest\x1a(.api.billing.v1.UpdateRedeemCodeResponse\x12e\n" +
+	"\x10DeleteRedeemCode\x12'.api.billing.v1.DeleteRedeemCodeRequest\x1a(.api.billing.v1.DeleteRedeemCodeResponse\x12S\n" +
+	"\n" +
+	"ListLedger\x12!.api.billing.v1.ListLedgerRequest\x1a\".api.billing.v1.ListLedgerResponseB(Z&micro-one-api/api/billing/v1;billingv1b\x06proto3"
 
 var (
 	file_billing_v1_billing_proto_rawDescOnce sync.Once
@@ -543,31 +2122,85 @@ func file_billing_v1_billing_proto_rawDescGZIP() []byte {
 	return file_billing_v1_billing_proto_rawDescData
 }
 
-var file_billing_v1_billing_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_billing_v1_billing_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_billing_v1_billing_proto_goTypes = []any{
-	(*ReserveQuotaRequest)(nil),       // 0: api.billing.v1.ReserveQuotaRequest
-	(*ReserveQuotaReply)(nil),         // 1: api.billing.v1.ReserveQuotaReply
-	(*CommitQuotaRequest)(nil),        // 2: api.billing.v1.CommitQuotaRequest
-	(*CommitQuotaReply)(nil),          // 3: api.billing.v1.CommitQuotaReply
-	(*ReleaseQuotaRequest)(nil),       // 4: api.billing.v1.ReleaseQuotaRequest
-	(*ReleaseQuotaReply)(nil),         // 5: api.billing.v1.ReleaseQuotaReply
-	(*GetAccountSnapshotRequest)(nil), // 6: api.billing.v1.GetAccountSnapshotRequest
-	(*GetAccountSnapshotReply)(nil),   // 7: api.billing.v1.GetAccountSnapshotReply
+	(*ReserveQuotaRequest)(nil),            // 0: api.billing.v1.ReserveQuotaRequest
+	(*ReserveQuotaResponse)(nil),           // 1: api.billing.v1.ReserveQuotaResponse
+	(*CommitQuotaRequest)(nil),             // 2: api.billing.v1.CommitQuotaRequest
+	(*CommitQuotaResponse)(nil),            // 3: api.billing.v1.CommitQuotaResponse
+	(*ReleaseQuotaRequest)(nil),            // 4: api.billing.v1.ReleaseQuotaRequest
+	(*ReleaseQuotaResponse)(nil),           // 5: api.billing.v1.ReleaseQuotaResponse
+	(*AccountSnapshot)(nil),                // 6: api.billing.v1.AccountSnapshot
+	(*GetAccountSnapshotRequest)(nil),      // 7: api.billing.v1.GetAccountSnapshotRequest
+	(*GetAccountSnapshotResponse)(nil),     // 8: api.billing.v1.GetAccountSnapshotResponse
+	(*TopUpQuotaRequest)(nil),              // 9: api.billing.v1.TopUpQuotaRequest
+	(*TopUpQuotaResponse)(nil),             // 10: api.billing.v1.TopUpQuotaResponse
+	(*RedeemCode)(nil),                     // 11: api.billing.v1.RedeemCode
+	(*CreateRedeemCodeRequest)(nil),        // 12: api.billing.v1.CreateRedeemCodeRequest
+	(*CreateRedeemCodeResponse)(nil),       // 13: api.billing.v1.CreateRedeemCodeResponse
+	(*CreateRedeemCodesBatchRequest)(nil),  // 14: api.billing.v1.CreateRedeemCodesBatchRequest
+	(*CreateRedeemCodesBatchResponse)(nil), // 15: api.billing.v1.CreateRedeemCodesBatchResponse
+	(*GetRedeemCodeRequest)(nil),           // 16: api.billing.v1.GetRedeemCodeRequest
+	(*GetRedeemCodeResponse)(nil),          // 17: api.billing.v1.GetRedeemCodeResponse
+	(*ListRedeemCodesRequest)(nil),         // 18: api.billing.v1.ListRedeemCodesRequest
+	(*ListRedeemCodesResponse)(nil),        // 19: api.billing.v1.ListRedeemCodesResponse
+	(*SearchRedeemCodesRequest)(nil),       // 20: api.billing.v1.SearchRedeemCodesRequest
+	(*SearchRedeemCodesResponse)(nil),      // 21: api.billing.v1.SearchRedeemCodesResponse
+	(*UpdateRedeemCodeRequest)(nil),        // 22: api.billing.v1.UpdateRedeemCodeRequest
+	(*UpdateRedeemCodeResponse)(nil),       // 23: api.billing.v1.UpdateRedeemCodeResponse
+	(*DeleteRedeemCodeRequest)(nil),        // 24: api.billing.v1.DeleteRedeemCodeRequest
+	(*DeleteRedeemCodeResponse)(nil),       // 25: api.billing.v1.DeleteRedeemCodeResponse
+	(*RedeemCodeRequest)(nil),              // 26: api.billing.v1.RedeemCodeRequest
+	(*RedeemCodeResponse)(nil),             // 27: api.billing.v1.RedeemCodeResponse
+	(*LedgerEntry)(nil),                    // 28: api.billing.v1.LedgerEntry
+	(*ListLedgerRequest)(nil),              // 29: api.billing.v1.ListLedgerRequest
+	(*ListLedgerResponse)(nil),             // 30: api.billing.v1.ListLedgerResponse
+	(*timestamppb.Timestamp)(nil),          // 31: google.protobuf.Timestamp
 }
 var file_billing_v1_billing_proto_depIdxs = []int32{
-	0, // 0: api.billing.v1.BillingService.ReserveQuota:input_type -> api.billing.v1.ReserveQuotaRequest
-	2, // 1: api.billing.v1.BillingService.CommitQuota:input_type -> api.billing.v1.CommitQuotaRequest
-	4, // 2: api.billing.v1.BillingService.ReleaseQuota:input_type -> api.billing.v1.ReleaseQuotaRequest
-	6, // 3: api.billing.v1.BillingService.GetAccountSnapshot:input_type -> api.billing.v1.GetAccountSnapshotRequest
-	1, // 4: api.billing.v1.BillingService.ReserveQuota:output_type -> api.billing.v1.ReserveQuotaReply
-	3, // 5: api.billing.v1.BillingService.CommitQuota:output_type -> api.billing.v1.CommitQuotaReply
-	5, // 6: api.billing.v1.BillingService.ReleaseQuota:output_type -> api.billing.v1.ReleaseQuotaReply
-	7, // 7: api.billing.v1.BillingService.GetAccountSnapshot:output_type -> api.billing.v1.GetAccountSnapshotReply
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	6,  // 0: api.billing.v1.GetAccountSnapshotResponse.snapshot:type_name -> api.billing.v1.AccountSnapshot
+	31, // 1: api.billing.v1.RedeemCode.created_at:type_name -> google.protobuf.Timestamp
+	31, // 2: api.billing.v1.RedeemCode.updated_at:type_name -> google.protobuf.Timestamp
+	11, // 3: api.billing.v1.GetRedeemCodeResponse.redeem_code:type_name -> api.billing.v1.RedeemCode
+	11, // 4: api.billing.v1.ListRedeemCodesResponse.codes:type_name -> api.billing.v1.RedeemCode
+	11, // 5: api.billing.v1.SearchRedeemCodesResponse.codes:type_name -> api.billing.v1.RedeemCode
+	31, // 6: api.billing.v1.LedgerEntry.created_at:type_name -> google.protobuf.Timestamp
+	31, // 7: api.billing.v1.ListLedgerRequest.start_time:type_name -> google.protobuf.Timestamp
+	31, // 8: api.billing.v1.ListLedgerRequest.end_time:type_name -> google.protobuf.Timestamp
+	28, // 9: api.billing.v1.ListLedgerResponse.entries:type_name -> api.billing.v1.LedgerEntry
+	0,  // 10: api.billing.v1.BillingService.ReserveQuota:input_type -> api.billing.v1.ReserveQuotaRequest
+	2,  // 11: api.billing.v1.BillingService.CommitQuota:input_type -> api.billing.v1.CommitQuotaRequest
+	4,  // 12: api.billing.v1.BillingService.ReleaseQuota:input_type -> api.billing.v1.ReleaseQuotaRequest
+	7,  // 13: api.billing.v1.BillingService.GetAccountSnapshot:input_type -> api.billing.v1.GetAccountSnapshotRequest
+	9,  // 14: api.billing.v1.BillingService.TopUpQuota:input_type -> api.billing.v1.TopUpQuotaRequest
+	12, // 15: api.billing.v1.BillingService.CreateRedeemCode:input_type -> api.billing.v1.CreateRedeemCodeRequest
+	14, // 16: api.billing.v1.BillingService.CreateRedeemCodesBatch:input_type -> api.billing.v1.CreateRedeemCodesBatchRequest
+	26, // 17: api.billing.v1.BillingService.RedeemCode:input_type -> api.billing.v1.RedeemCodeRequest
+	16, // 18: api.billing.v1.BillingService.GetRedeemCode:input_type -> api.billing.v1.GetRedeemCodeRequest
+	18, // 19: api.billing.v1.BillingService.ListRedeemCodes:input_type -> api.billing.v1.ListRedeemCodesRequest
+	20, // 20: api.billing.v1.BillingService.SearchRedeemCodes:input_type -> api.billing.v1.SearchRedeemCodesRequest
+	22, // 21: api.billing.v1.BillingService.UpdateRedeemCode:input_type -> api.billing.v1.UpdateRedeemCodeRequest
+	24, // 22: api.billing.v1.BillingService.DeleteRedeemCode:input_type -> api.billing.v1.DeleteRedeemCodeRequest
+	29, // 23: api.billing.v1.BillingService.ListLedger:input_type -> api.billing.v1.ListLedgerRequest
+	1,  // 24: api.billing.v1.BillingService.ReserveQuota:output_type -> api.billing.v1.ReserveQuotaResponse
+	3,  // 25: api.billing.v1.BillingService.CommitQuota:output_type -> api.billing.v1.CommitQuotaResponse
+	5,  // 26: api.billing.v1.BillingService.ReleaseQuota:output_type -> api.billing.v1.ReleaseQuotaResponse
+	8,  // 27: api.billing.v1.BillingService.GetAccountSnapshot:output_type -> api.billing.v1.GetAccountSnapshotResponse
+	10, // 28: api.billing.v1.BillingService.TopUpQuota:output_type -> api.billing.v1.TopUpQuotaResponse
+	13, // 29: api.billing.v1.BillingService.CreateRedeemCode:output_type -> api.billing.v1.CreateRedeemCodeResponse
+	15, // 30: api.billing.v1.BillingService.CreateRedeemCodesBatch:output_type -> api.billing.v1.CreateRedeemCodesBatchResponse
+	27, // 31: api.billing.v1.BillingService.RedeemCode:output_type -> api.billing.v1.RedeemCodeResponse
+	17, // 32: api.billing.v1.BillingService.GetRedeemCode:output_type -> api.billing.v1.GetRedeemCodeResponse
+	19, // 33: api.billing.v1.BillingService.ListRedeemCodes:output_type -> api.billing.v1.ListRedeemCodesResponse
+	21, // 34: api.billing.v1.BillingService.SearchRedeemCodes:output_type -> api.billing.v1.SearchRedeemCodesResponse
+	23, // 35: api.billing.v1.BillingService.UpdateRedeemCode:output_type -> api.billing.v1.UpdateRedeemCodeResponse
+	25, // 36: api.billing.v1.BillingService.DeleteRedeemCode:output_type -> api.billing.v1.DeleteRedeemCodeResponse
+	30, // 37: api.billing.v1.BillingService.ListLedger:output_type -> api.billing.v1.ListLedgerResponse
+	24, // [24:38] is the sub-list for method output_type
+	10, // [10:24] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_billing_v1_billing_proto_init() }
@@ -581,7 +2214,7 @@ func file_billing_v1_billing_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_billing_v1_billing_proto_rawDesc), len(file_billing_v1_billing_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

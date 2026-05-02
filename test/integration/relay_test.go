@@ -8,11 +8,71 @@ import (
 	"testing"
 	"time"
 
+	billingv1 "micro-one-api/api/billing/v1"
 	relayprovider "micro-one-api/internal/relay/provider"
 	relayserver "micro-one-api/internal/relay/server"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
+
+// Mock billing service for testing
+type mockBillingService struct {
+	billingv1.UnimplementedBillingServiceServer
+}
+
+func (m *mockBillingService) ReserveQuota(ctx context.Context, req *billingv1.ReserveQuotaRequest) (*billingv1.ReserveQuotaResponse, error) {
+	return &billingv1.ReserveQuotaResponse{
+		Success:        true,
+		ReservationId:   "test-reservation-123",
+		ReservedAmount: 100,
+	}, nil
+}
+
+func (m *mockBillingService) CommitQuota(ctx context.Context, req *billingv1.CommitQuotaRequest) (*billingv1.CommitQuotaResponse, error) {
+	return &billingv1.CommitQuotaResponse{
+		Success:        true,
+		CommittedAmount: req.ActualTokens,
+		RefundAmount:   0,
+	}, nil
+}
+
+func (m *mockBillingService) ReleaseQuota(ctx context.Context, req *billingv1.ReleaseQuotaRequest) (*billingv1.ReleaseQuotaResponse, error) {
+	return &billingv1.ReleaseQuotaResponse{
+		Success: true,
+	}, nil
+}
+
+func setupInMemoryBillingService(t *testing.T, addr string) (func(), billingv1.BillingServiceClient) {
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+
+	grpcSrv := grpc.NewServer()
+	billingv1.RegisterBillingServiceServer(grpcSrv, &mockBillingService{})
+
+	go func() {
+		if err := grpcSrv.Serve(lis); err != nil {
+			t.Logf("gRPC server error: %v", err)
+		}
+	}()
+
+	// Connect to the billing service
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	if err != nil {
+		t.Fatalf("failed to connect to billing service: %v", err)
+	}
+
+	cleanup := func() {
+		conn.Close()
+		grpcSrv.Stop()
+		lis.Close()
+	}
+
+	return cleanup, billingv1.NewBillingServiceClient(conn)
+}
 
 func TestRelayIntegration(t *testing.T) {
 	identityCleanup, identityClient := setupInMemoryIdentityService(t, "127.0.0.1:19001")
@@ -21,9 +81,12 @@ func TestRelayIntegration(t *testing.T) {
 	channelCleanup, channelClient := setupInMemoryChannelService(t, "127.0.0.1:19002")
 	defer channelCleanup()
 
+	billingCleanup, billingClient := setupInMemoryBillingService(t, "127.0.0.1:19003")
+	defer billingCleanup()
+
 	providerFactory := relayprovider.NewProviderFactory(30 * time.Second)
 
-	httpServer := relayserver.NewHTTPServer(identityClient, channelClient, providerFactory)
+	httpServer := relayserver.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory)
 
 	lis, err := net.Listen("tcp", ":19000")
 	if err != nil {
