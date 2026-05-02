@@ -2,12 +2,12 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -77,7 +77,7 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req relayprovider.ChatCompletionsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r.Body, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 		return
 	}
@@ -173,7 +173,7 @@ func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Requ
 			totalTokens += int64(len(choice.Delta.Content) / 4)
 		}
 
-		jsonData, err := json.Marshal(chunk)
+		jsonData, err := sonic.Marshal(chunk)
 		if err != nil {
 			applogger.Log.Warn("failed to marshal chunk", zap.Error(err))
 			continue
@@ -383,7 +383,7 @@ func (s *HTTPServer) handleBillingError(w http.ResponseWriter, err error) {
 func (s *HTTPServer) writeError(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	encodeJSON(w, map[string]interface{}{
 		"error": map[string]interface{}{
 			"message": message,
 		},
@@ -393,7 +393,7 @@ func (s *HTTPServer) writeError(w http.ResponseWriter, statusCode int, message s
 func (s *HTTPServer) writeJSON(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(data)
+	encodeJSON(w, data)
 }
 
 // 配额管理方法
@@ -456,3 +456,4 @@ func (s *HTTPServer) calculateActualTokens(resp *relayprovider.ChatCompletionsRe
 func generateRequestID() string {
 	return fmt.Sprintf("req_%d", time.Now().UnixNano())
 }
+

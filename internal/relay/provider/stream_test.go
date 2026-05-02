@@ -35,7 +35,6 @@ func TestOpenAIProvider_ChatCompletionsStream(t *testing.T) {
 			t.Fatalf("expected stream=true, got %v", req.Stream)
 		}
 
-		// Send SSE response
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 
@@ -103,5 +102,118 @@ func TestOpenAIProvider_ChatCompletionsStream_Error(t *testing.T) {
 	_, err := provider.ChatCompletionsStream(context.Background(), req)
 	if err == nil {
 		t.Fatal("expected error for unauthorized request")
+	}
+}
+
+func TestOpenAIProvider_ChatCompletions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST request, got %s", r.Method)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-api-key" {
+			t.Fatalf("unexpected auth header: %s", r.Header.Get("Authorization"))
+		}
+
+		var req ChatCompletionsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		if req.Stream {
+			t.Fatalf("expected stream=false, got true")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ChatCompletionsResponse{
+			ID:      "chatcmpl-test",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "gpt-4o-mini",
+			Choices: []Choice{{
+				Index: 0,
+				Message: Message{
+					Role:    "assistant",
+					Content: "Hello, world!",
+				},
+				FinishReason: "stop",
+			}},
+			Usage: Usage{
+				PromptTokens:     10,
+				CompletionTokens: 3,
+				TotalTokens:      13,
+			},
+		})
+	}))
+	defer server.Close()
+
+	provider := NewOpenAIProvider(server.URL, "test-api-key", 30*time.Second)
+	resp, err := provider.ChatCompletions(context.Background(), &ChatCompletionsRequest{
+		Model: "gpt-4o-mini",
+		Messages: []Message{
+			{Role: "user", Content: "Hello"},
+		},
+		Stream: false,
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	if resp.ID != "chatcmpl-test" {
+		t.Fatalf("unexpected ID: %s", resp.ID)
+	}
+	if resp.Choices[0].Message.Content != "Hello, world!" {
+		t.Fatalf("unexpected content: %s", resp.Choices[0].Message.Content)
+	}
+	if resp.Usage.TotalTokens != 13 {
+		t.Fatalf("unexpected total tokens: %d", resp.Usage.TotalTokens)
+	}
+}
+
+func TestOpenAIProvider_ChatCompletions_Error(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error": {"message": "invalid request"}}`))
+	}))
+	defer server.Close()
+
+	provider := NewOpenAIProvider(server.URL, "test-api-key", 30*time.Second)
+	_, err := provider.ChatCompletions(context.Background(), &ChatCompletionsRequest{
+		Model:    "gpt-4o-mini",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestProviderFactory_CreateProvider(t *testing.T) {
+	factory := NewProviderFactory(30 * time.Second)
+
+	p, err := factory.CreateProvider(ChannelTypeOpenAI, "https://api.openai.com/v1", "sk-test")
+	if err != nil {
+		t.Fatalf("CreateProvider() error = %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected non-nil provider")
+	}
+
+	p2, err := factory.CreateProvider(999, "https://custom.api/v1", "sk-test")
+	if err != nil {
+		t.Fatalf("CreateProvider(unknown) error = %v", err)
+	}
+	if p2 == nil {
+		t.Fatal("expected non-nil provider for unknown type")
+	}
+}
+
+func TestProviderFactory_DefaultTimeout(t *testing.T) {
+	factory := NewProviderFactory(0)
+	if factory.defaultTimeout != 30*time.Second {
+		t.Fatalf("expected 30s default timeout, got %v", factory.defaultTimeout)
+	}
+}
+
+func TestNewOpenAIProvider_DefaultTimeout(t *testing.T) {
+	provider := NewOpenAIProvider("https://api.openai.com", "sk-test", 0)
+	if provider.timeout != 30*time.Second {
+		t.Fatalf("expected 30s default timeout, got %v", provider.timeout)
 	}
 }

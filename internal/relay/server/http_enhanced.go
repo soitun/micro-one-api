@@ -2,12 +2,12 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -102,7 +102,7 @@ func (s *EnhancedHTTPServer) handleChatCompletions(w http.ResponseWriter, r *htt
 
 	// Parse and validate request
 	var req relayprovider.ChatCompletionsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r.Body, &req); err != nil {
 		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 		return
 	}
@@ -195,7 +195,7 @@ func (s *EnhancedHTTPServer) handleStreamingResponse(w http.ResponseWriter, r *h
 	w.Header().Set("Transfer-Encoding", "chunked")
 
 	for chunk := range chunkChan {
-		jsonData, err := json.Marshal(chunk)
+		jsonData, err := sonic.Marshal(chunk)
 		if err != nil {
 			applogger.Log.Warn("failed to marshal chunk", zap.Error(err))
 			continue
@@ -306,7 +306,7 @@ func (s *EnhancedHTTPServer) validateAuthorization(r *http.Request) (string, err
 func (s *EnhancedHTTPServer) writeValidationError(w http.ResponseWriter, err error) {
 	if appvalidation.IsValidationError(err) {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		encodeJSON(w, map[string]interface{}{
 			"error": map[string]interface{}{
 				"message": err.Error(),
 				"code":    400,
@@ -431,7 +431,7 @@ func (s *EnhancedHTTPServer) handleAuthError(w http.ResponseWriter, err error) {
 func (s *EnhancedHTTPServer) writeError(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	encodeJSON(w, map[string]interface{}{
 		"error": map[string]interface{}{
 			"message": applogger.Sanitize(message),
 			"code":    statusCode,
@@ -442,5 +442,6 @@ func (s *EnhancedHTTPServer) writeError(w http.ResponseWriter, statusCode int, m
 func (s *EnhancedHTTPServer) writeJSON(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(data)
+	encodeJSON(w, data)
 }
+

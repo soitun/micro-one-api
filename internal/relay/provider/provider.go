@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"go.uber.org/zap"
 	applogger "micro-one-api/internal/pkg/logger"
 )
@@ -103,7 +103,7 @@ func NewOpenAIProvider(baseURL, apiKey string, timeout time.Duration) *OpenAIPro
 func (p *OpenAIProvider) ChatCompletions(ctx context.Context, req *ChatCompletionsRequest) (*ChatCompletionsResponse, error) {
 	url := fmt.Sprintf("%s/chat/completions", p.baseURL)
 
-	body, err := json.Marshal(req)
+	body, err := sonic.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -132,7 +132,7 @@ func (p *OpenAIProvider) ChatCompletions(ctx context.Context, req *ChatCompletio
 	}
 
 	var response ChatCompletionsResponse
-	if err := json.Unmarshal(respBody, &response); err != nil {
+	if err := sonic.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
@@ -143,7 +143,7 @@ func (p *OpenAIProvider) ChatCompletions(ctx context.Context, req *ChatCompletio
 func (p *OpenAIProvider) ChatCompletionsStream(ctx context.Context, req *ChatCompletionsRequest) (<-chan StreamChunk, error) {
 	url := fmt.Sprintf("%s/chat/completions", p.baseURL)
 
-	body, err := json.Marshal(req)
+	body, err := sonic.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -180,14 +180,13 @@ func (p *OpenAIProvider) ChatCompletionsStream(ctx context.Context, req *ChatCom
 				continue
 			}
 
-			if strings.HasPrefix(line, "data: ") {
-				data := strings.TrimPrefix(line, "data: ")
+			if data, ok := strings.CutPrefix(line, "data: "); ok {
 				if data == "[DONE]" {
 					break
 				}
 
 				var chunk StreamChunk
-				if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				if err := sonic.Unmarshal([]byte(data), &chunk); err != nil {
 					applogger.Log.Warn("failed to parse SSE chunk",
 						zap.Error(err),
 						zap.Int("data_length", len(data)),

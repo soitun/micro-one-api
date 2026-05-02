@@ -3,11 +3,12 @@ package biz
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"math/big"
 	"sort"
 	"strings"
+
+	"github.com/bytedance/sonic"
 )
 
 const (
@@ -154,7 +155,7 @@ func DecodeChannelConfig(input string) ChannelConfig {
 		return ChannelConfig{}
 	}
 	var cfg ChannelConfig
-	_ = json.Unmarshal([]byte(input), &cfg)
+	_ = sonic.Unmarshal([]byte(input), &cfg)
 	return cfg
 }
 

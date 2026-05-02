@@ -1,5 +1,9 @@
 package middleware
 
+// Keep encoding/json for ValidateJSONBody: it needs Decoder.DisallowUnknownFields()
+// and custom error type checking (json.SyntaxError, json.UnmarshalTypeError) that sonic
+// doesn't expose the same way. Body parsing is not the hot path for serialization.
+
 import (
 	"encoding/json"
 	"errors"

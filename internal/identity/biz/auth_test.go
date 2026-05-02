@@ -498,3 +498,359 @@ func equalStringSlices(a, b []string) bool {
 	}
 	return true
 }
+
+// ========== Login Tests ==========
+
+func TestIdentityUsecase_Login_Success(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled, Group: "default"},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	user, token, err := uc.Login(context.Background(), "alice", "secret123")
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if user.Username != "alice" {
+		t.Fatalf("unexpected username: %s", user.Username)
+	}
+	if token == "" {
+		t.Fatal("expected non-empty token")
+	}
+}
+
+func TestIdentityUsecase_Login_EmptyCredentials(t *testing.T) {
+	repo := &mockIdentityRepo{users: make(map[int64]*User), tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+
+	_, _, err := uc.Login(context.Background(), "", "secret")
+	if !errors.Is(err, ErrInvalidPassword) {
+		t.Fatalf("expected ErrInvalidPassword, got: %v", err)
+	}
+
+	_, _, err = uc.Login(context.Background(), "alice", "")
+	if !errors.Is(err, ErrInvalidPassword) {
+		t.Fatalf("expected ErrInvalidPassword, got: %v", err)
+	}
+}
+
+func TestIdentityUsecase_Login_UserNotFound(t *testing.T) {
+	repo := &mockIdentityRepo{users: make(map[int64]*User), tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+	_, _, err := uc.Login(context.Background(), "nobody", "secret")
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("expected ErrUserNotFound, got: %v", err)
+	}
+}
+
+func TestIdentityUsecase_Login_UserDisabled(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusDisabled},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	_, _, err := uc.Login(context.Background(), "alice", "secret")
+	if !errors.Is(err, ErrUserDisabled) {
+		t.Fatalf("expected ErrUserDisabled, got: %v", err)
+	}
+}
+
+func TestIdentityUsecase_Login_CreatesToken(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	_, token, err := uc.Login(context.Background(), "alice", "secret")
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if len(repo.tokens) != 1 {
+		t.Fatalf("expected 1 token created, got: %d", len(repo.tokens))
+	}
+	if repo.tokens[token] == nil {
+		t.Fatal("token not found in repo")
+	}
+}
+
+// ========== Register Tests ==========
+
+func TestIdentityUsecase_Register_Success(t *testing.T) {
+	repo := &mockIdentityRepo{users: make(map[int64]*User), tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+	user, err := uc.Register(context.Background(), "bob", "pass", "bob@example.com", "vip")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if user.Username != "bob" {
+		t.Fatalf("unexpected username: %s", user.Username)
+	}
+	if user.Email != "bob@example.com" {
+		t.Fatalf("unexpected email: %s", user.Email)
+	}
+	if user.Group != "vip" {
+		t.Fatalf("unexpected group: %s", user.Group)
+	}
+	if user.Status != UserStatusEnabled {
+		t.Fatalf("expected enabled status, got: %d", user.Status)
+	}
+}
+
+func TestIdentityUsecase_Register_UserExists(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	_, err := uc.Register(context.Background(), "alice", "pass", "alice@example.com", "default")
+	if !errors.Is(err, ErrUserExists) {
+		t.Fatalf("expected ErrUserExists, got: %v", err)
+	}
+}
+
+// ========== CreateAccessToken Tests ==========
+
+func TestIdentityUsecase_CreateAccessToken_Success(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	expireAt := time.Now().Add(time.Hour).Unix()
+	token, err := uc.CreateAccessToken(context.Background(), 1, "work-token", []string{"gpt-4o"}, expireAt)
+	if err != nil {
+		t.Fatalf("CreateAccessToken() error = %v", err)
+	}
+	if token.UserID != 1 {
+		t.Fatalf("unexpected user ID: %d", token.UserID)
+	}
+	if token.ExpiredAt != expireAt {
+		t.Fatalf("unexpected expireAt: %d", token.ExpiredAt)
+	}
+	if len(token.Models) != 1 || token.Models[0] != "gpt-4o" {
+		t.Fatalf("unexpected models: %v", token.Models)
+	}
+}
+
+func TestIdentityUsecase_CreateAccessToken_UserNotFound(t *testing.T) {
+	repo := &mockIdentityRepo{users: make(map[int64]*User), tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+	_, err := uc.CreateAccessToken(context.Background(), 999, "token", nil, 0)
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("expected ErrUserNotFound, got: %v", err)
+	}
+}
+
+func TestIdentityUsecase_CreateAccessToken_UserDisabled(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusDisabled},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	_, err := uc.CreateAccessToken(context.Background(), 1, "token", nil, 0)
+	if !errors.Is(err, ErrUserDisabled) {
+		t.Fatalf("expected ErrUserDisabled, got: %v", err)
+	}
+}
+
+// ========== ListUsers Tests ==========
+
+func TestIdentityUsecase_ListUsers_Success(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled, Group: "default"},
+			2: {ID: 2, Username: "bob", Status: UserStatusEnabled, Group: "vip"},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	users, total, err := uc.ListUsers(context.Background(), 1, 10, "", "", 0)
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected total 2, got: %d", total)
+	}
+	if len(users) != 2 {
+		t.Fatalf("expected 2 users, got: %d", len(users))
+	}
+}
+
+func TestIdentityUsecase_ListUsers_Empty(t *testing.T) {
+	repo := &mockIdentityRepo{users: make(map[int64]*User), tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+	users, total, err := uc.ListUsers(context.Background(), 1, 10, "", "", 0)
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("expected total 0, got: %d", total)
+	}
+	if len(users) != 0 {
+		t.Fatalf("expected 0 users, got: %d", len(users))
+	}
+}
+
+// ========== CreateUser Tests ==========
+
+func TestIdentityUsecase_CreateUser_Success(t *testing.T) {
+	repo := &mockIdentityRepo{users: make(map[int64]*User), tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+	user, err := uc.CreateUser(context.Background(), "alice", "Alice User", "alice@example.com", "secret", "vip", 1000)
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if user.Username != "alice" {
+		t.Fatalf("unexpected username: %s", user.Username)
+	}
+	if user.DisplayName != "Alice User" {
+		t.Fatalf("unexpected display name: %s", user.DisplayName)
+	}
+	if user.Email != "alice@example.com" {
+		t.Fatalf("unexpected email: %s", user.Email)
+	}
+	if user.Group != "vip" {
+		t.Fatalf("unexpected group: %s", user.Group)
+	}
+}
+
+func TestIdentityUsecase_CreateUser_AlreadyExists(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	_, err := uc.CreateUser(context.Background(), "alice", "", "", "", "", 0)
+	if !errors.Is(err, ErrUserExists) {
+		t.Fatalf("expected ErrUserExists, got: %v", err)
+	}
+}
+
+// ========== UpdateUser Tests ==========
+
+func TestIdentityUsecase_UpdateUser_Success(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", DisplayName: "Old Name", Group: "default", Status: UserStatusEnabled},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	err := uc.UpdateUser(context.Background(), 1, "New Name", "alice@example.com", "vip", UserStatusDisabled)
+	if err != nil {
+		t.Fatalf("UpdateUser() error = %v", err)
+	}
+	if repo.users[1].DisplayName != "New Name" {
+		t.Fatalf("unexpected display name: %s", repo.users[1].DisplayName)
+	}
+	if repo.users[1].Email != "alice@example.com" {
+		t.Fatalf("unexpected email: %s", repo.users[1].Email)
+	}
+	if repo.users[1].Group != "vip" {
+		t.Fatalf("unexpected group: %s", repo.users[1].Group)
+	}
+	if repo.users[1].Status != UserStatusDisabled {
+		t.Fatalf("unexpected status: %d", repo.users[1].Status)
+	}
+}
+
+func TestIdentityUsecase_UpdateUser_NotFound(t *testing.T) {
+	repo := &mockIdentityRepo{users: make(map[int64]*User), tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+	err := uc.UpdateUser(context.Background(), 999, "name", "", "", 0)
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("expected ErrUserNotFound, got: %v", err)
+	}
+}
+
+func TestIdentityUsecase_UpdateUser_PartialUpdate(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", DisplayName: "Old Name", Email: "old@example.com", Group: "default", Status: UserStatusEnabled},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	// Only update display name, leave others unchanged
+	err := uc.UpdateUser(context.Background(), 1, "New Name", "", "", UserStatusEnabled)
+	if err != nil {
+		t.Fatalf("UpdateUser() error = %v", err)
+	}
+	if repo.users[1].DisplayName != "New Name" {
+		t.Fatalf("display name not updated: %s", repo.users[1].DisplayName)
+	}
+	if repo.users[1].Email != "old@example.com" {
+		t.Fatalf("email changed unexpectedly: %s", repo.users[1].Email)
+	}
+}
+
+// ========== DeleteUser Tests ==========
+
+func TestIdentityUsecase_DeleteUser_Success(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	err := uc.DeleteUser(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("DeleteUser() error = %v", err)
+	}
+	if len(repo.users) != 0 {
+		t.Fatalf("expected 0 users, got: %d", len(repo.users))
+	}
+}
+
+func TestIdentityUsecase_DeleteUser_NotFound(t *testing.T) {
+	repo := &mockIdentityRepo{users: make(map[int64]*User), tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+	// DeleteUser mock doesn't return error for not found
+	err := uc.DeleteUser(context.Background(), 999)
+	if err != nil {
+		t.Fatalf("DeleteUser() unexpected error: %v", err)
+	}
+}
+
+// ========== GetUser Tests ==========
+
+func TestIdentityUsecase_GetUser_Success(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled},
+		},
+		tokens: make(map[string]*Token),
+	}
+	uc := NewIdentityUsecase(repo)
+	user, err := uc.GetUser(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetUser() error = %v", err)
+	}
+	if user.Username != "alice" {
+		t.Fatalf("unexpected username: %s", user.Username)
+	}
+}
+
+func TestIdentityUsecase_GetUser_NotFound(t *testing.T) {
+	repo := &mockIdentityRepo{users: make(map[int64]*User), tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+	_, err := uc.GetUser(context.Background(), 999)
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("expected ErrUserNotFound, got: %v", err)
+	}
+}
