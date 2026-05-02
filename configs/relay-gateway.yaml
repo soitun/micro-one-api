@@ -8,4 +8,15 @@ clients:
     endpoint: 127.0.0.1:9002
   billing:
     endpoint: 127.0.0.1:9004
-
+retry:
+  max_attempts: 3
+  initial_interval: 500ms
+  max_interval: 5s
+  multiplier: 2.0
+  retryable_status:
+    - 429
+    - 500
+    - 502
+    - 503
+models:
+  path: configs/models.yaml

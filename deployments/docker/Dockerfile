@@ -1,43 +1,32 @@
 # Multi-stage build for security
+# Usage: docker build --build-arg SERVICE_NAME=relay-gateway -f Dockerfile ../..
+ARG SERVICE_NAME=relay-gateway
+
 FROM golang:1.26-alpine AS builder
 
-# Install security tools
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /app
 
-# Copy dependency files
 COPY go.mod go.sum ./
-RUN go mod download
-RUN go mod verify
+RUN go mod download && go mod verify
 
-# Copy source code
 COPY . .
 
-# Build with security flags
+ARG SERVICE_NAME
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags='-s -w -extldflags "-static"' \
     -installsuffix cgo \
-    -o relay-gateway ./cmd/relay-gateway
+    -o /app/bin/service ./cmd/${SERVICE_NAME}
 
 # Final minimal image
 FROM scratch
 
-# Copy CA certificates from builder
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /app/bin/service /service
 
-# Copy binary
-COPY --from=builder /app/relay-gateway /relay-gateway
-
-# Use non-root user
 USER 65534:65534
 
-# Expose port
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["/relay-gateway", "--health-check"]
-
-# Run binary
-ENTRYPOINT ["/relay-gateway"]
+ENTRYPOINT ["/service"]

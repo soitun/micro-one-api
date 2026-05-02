@@ -4,6 +4,17 @@ package config
 type Config struct {
 	Server  ServerConfig  `json:"server"`
 	Clients ClientsConfig `json:"clients"`
+	Data    DataConfig    `json:"data"`
+}
+
+// DataConfig holds database configuration for system options storage.
+type DataConfig struct {
+	Database DatabaseConfig `json:"database"`
+}
+
+type DatabaseConfig struct {
+	Driver string `json:"driver"`
+	Source string `json:"source"`
 }
 
 type ServerConfig struct {

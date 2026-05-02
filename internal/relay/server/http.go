@@ -18,6 +18,7 @@ import (
 	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/internal/pkg/errors"
 	applogger "micro-one-api/internal/pkg/logger"
+	relaybiz "micro-one-api/internal/relay/biz"
 	relayprovider "micro-one-api/internal/relay/provider"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
@@ -29,6 +30,8 @@ type HTTPServer struct {
 	channelClient  channelv1.ChannelServiceClient
 	billingClient  billingv1.BillingServiceClient
 	providerFactory *relayprovider.ProviderFactory
+	retry           *retryConfig
+	modelMapper     *relaybiz.ModelMapper
 }
 
 // NewHTTPServer creates a new HTTP server for Kratos.
@@ -44,6 +47,16 @@ func NewHTTPServer(
 		billingClient:   billingClient,
 		providerFactory: providerFactory,
 	}
+}
+
+// SetRetryConfig sets the retry configuration for upstream provider calls.
+func (s *HTTPServer) SetRetryConfig(maxAttempts int, initialInterval, maxInterval string, multiplier float64, retryableStatus []int) {
+	s.retry = parseRetryConfig(maxAttempts, initialInterval, maxInterval, multiplier, retryableStatus)
+}
+
+// SetModelMapper sets the model name mapper for resolving client model names to upstream names.
+func (s *HTTPServer) SetModelMapper(mapper *relaybiz.ModelMapper) {
+	s.modelMapper = mapper
 }
 
 // RegisterRoutes registers HTTP routes to a Kratos *khttp.Server.
@@ -98,47 +111,88 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Resolve model name mapping (e.g. gpt-4o -> gpt-4o-2024-08-06)
+	if s.modelMapper != nil {
+		req.Model = s.modelMapper.Resolve(req.Model)
+	}
+
+	// First channel selection
 	channel, err := s.selectChannel(r.Context(), authSnapshot.Group, req.Model)
 	if err != nil {
 		s.handleChannelError(w, err)
 		return
 	}
 
-	// 预扣配额
-	requestID := generateRequestID()
-	estimatedTokens := s.estimateTokens(&req)
-	reservation, err := s.reserveQuota(r.Context(), fmt.Sprintf("%d", authSnapshot.UserId), requestID, estimatedTokens, req.Model, fmt.Sprintf("%d", channel.Id))
-	if err != nil {
-		s.handleBillingError(w, err)
+	// Retry loop for upstream provider calls
+	maxAttempts := 1
+	if s.retry != nil {
+		maxAttempts = s.retry.maxAttempts
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Wait before retry (skip on first attempt)
+		if attempt > 0 && s.retry != nil {
+			wait := backoffDuration(attempt-1, s.retry.initialInterval, s.retry.maxInterval, s.retry.multiplier)
+			logRetry(attempt-1, maxAttempts, wait, lastErr)
+			time.Sleep(wait)
+
+			// Re-select channel with excludeFirstPriority for fallback
+			newChannel, selErr := s.selectChannelExcludePriority(r.Context(), authSnapshot.Group, req.Model, true)
+			if selErr != nil {
+				// No more channels available, return the last upstream error
+				break
+			}
+			channel = newChannel
+		}
+
+		// Reserve quota
+		requestID := generateRequestID()
+		estimatedTokens := s.estimateTokens(&req)
+		reservation, reserveErr := s.reserveQuota(r.Context(), fmt.Sprintf("%d", authSnapshot.UserId), requestID, estimatedTokens, req.Model, fmt.Sprintf("%d", channel.Id))
+		if reserveErr != nil {
+			s.handleBillingError(w, reserveErr)
+			return
+		}
+
+		provider, provErr := s.providerFactory.CreateProvider(channel.Type, channel.BaseUrl, channel.Key)
+		if provErr != nil {
+			_ = s.releaseQuota(r.Context(), reservation.ReservationId, "failed to create provider")
+			s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create provider: %v", provErr))
+			return
+		}
+
+		if req.Stream {
+			s.handleStreamingResponse(w, r, provider, &req, reservation)
+			return
+		}
+
+		// Non-streaming call
+		resp, callErr := provider.ChatCompletions(r.Context(), &req)
+		if callErr != nil {
+			_ = s.releaseQuota(r.Context(), reservation.ReservationId, "upstream error")
+			lastErr = callErr
+			// Check if retryable
+			if s.retry == nil || !isRetryableError(callErr, s.retry.retryableStatus) {
+				s.writeError(w, mapUpstreamError(upstreamStatus(callErr)), fmt.Sprintf("upstream error: %v", callErr))
+				return
+			}
+			continue
+		}
+
+		// Success — commit quota and return
+		actualTokens := s.calculateActualTokens(resp)
+		_ = s.commitQuota(r.Context(), reservation.ReservationId, actualTokens, true)
+		s.writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
-	provider, err := s.providerFactory.CreateProvider(channel.Type, channel.BaseUrl, channel.Key)
-	if err != nil {
-		// 创建 provider 失败，释放预扣配额
-		_ = s.releaseQuota(r.Context(), reservation.ReservationId, "failed to create provider")
-		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create provider: %v", err))
-		return
+	// All retries exhausted
+	if lastErr != nil {
+		s.writeError(w, mapUpstreamError(upstreamStatus(lastErr)), fmt.Sprintf("upstream error after %d attempts: %v", maxAttempts, lastErr))
+	} else {
+		s.writeError(w, http.StatusServiceUnavailable, "no available channels")
 	}
-
-	if req.Stream {
-		s.handleStreamingResponse(w, r, provider, &req, reservation)
-		return
-	}
-
-	resp, err := provider.ChatCompletions(r.Context(), &req)
-	if err != nil {
-		// 请求失败，释放预扣配额
-		_ = s.releaseQuota(r.Context(), reservation.ReservationId, "upstream error")
-		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("upstream error: %v", err))
-		return
-	}
-
-	// 请求成功，提交配额
-	actualTokens := s.calculateActualTokens(resp)
-	_ = s.commitQuota(r.Context(), reservation.ReservationId, actualTokens, true)
-
-	s.writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Request, provider relayprovider.Provider, req *relayprovider.ChatCompletionsRequest, reservation *billingv1.ReserveQuotaResponse) {
@@ -276,6 +330,19 @@ func (s *HTTPServer) selectChannel(ctx context.Context, group, model string) (*c
 		Group:              group,
 		Model:              model,
 		ExcludeFirstPriority: false,
+	}
+	resp, err := s.channelClient.SelectChannel(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Channel, nil
+}
+
+func (s *HTTPServer) selectChannelExcludePriority(ctx context.Context, group, model string, excludeFirst bool) (*commonv1.ChannelInfo, error) {
+	req := &channelv1.SelectChannelRequest{
+		Group:              group,
+		Model:              model,
+		ExcludeFirstPriority: excludeFirst,
 	}
 	resp, err := s.channelClient.SelectChannel(ctx, req)
 	if err != nil {

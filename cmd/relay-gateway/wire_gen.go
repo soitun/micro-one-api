@@ -18,6 +18,7 @@ import (
 	identityv1 "micro-one-api/api/identity/v1"
 	appauth "micro-one-api/internal/pkg/auth"
 	apptls "micro-one-api/internal/pkg/tls"
+	relaybiz "micro-one-api/internal/relay/biz"
 	relaycfg "micro-one-api/internal/relay/config"
 	relayprovider "micro-one-api/internal/relay/provider"
 	"micro-one-api/internal/relay/server"
@@ -110,6 +111,20 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 
 	providerFactory := relayprovider.NewProviderFactory(providerTimeout)
 	httpServer := server.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory)
+	httpServer.SetRetryConfig(
+		cfg.Retry.MaxAttempts,
+		cfg.Retry.InitialInterval,
+		cfg.Retry.MaxInterval,
+		cfg.Retry.Multiplier,
+		cfg.Retry.RetryableStatus,
+	)
+
+	modelMapper, err := relaybiz.NewModelMapper(cfg.Models.Path)
+	if err != nil {
+		fmt.Printf("Warning: Failed to load models config: %v\n", err)
+	} else {
+		httpServer.SetModelMapper(modelMapper)
+	}
 
 	srv := khttp.NewServer(khttp.Address(cfg.Server.HTTP.Addr), khttp.Timeout(providerTimeout))
 	httpServer.RegisterRoutes(srv)

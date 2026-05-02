@@ -2702,6 +2702,242 @@ func (x *UpdateSystemOptionsResponse) GetMessage() string {
 	return ""
 }
 
+type ListLogsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Page          int32                  `protobuf:"varint,1,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize      int32                  `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	UserId        string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Type          string                 `protobuf:"bytes,4,opt,name=type,proto3" json:"type,omitempty"`
+	StartTime     int64                  `protobuf:"varint,5,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	EndTime       int64                  `protobuf:"varint,6,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListLogsRequest) Reset() {
+	*x = ListLogsRequest{}
+	mi := &file_api_admin_v1_admin_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListLogsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListLogsRequest) ProtoMessage() {}
+
+func (x *ListLogsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_admin_v1_admin_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListLogsRequest.ProtoReflect.Descriptor instead.
+func (*ListLogsRequest) Descriptor() ([]byte, []int) {
+	return file_api_admin_v1_admin_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *ListLogsRequest) GetPage() int32 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *ListLogsRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListLogsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ListLogsRequest) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *ListLogsRequest) GetStartTime() int64 {
+	if x != nil {
+		return x.StartTime
+	}
+	return 0
+}
+
+func (x *ListLogsRequest) GetEndTime() int64 {
+	if x != nil {
+		return x.EndTime
+	}
+	return 0
+}
+
+type ListLogsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Logs          []*LogEntry            `protobuf:"bytes,1,rep,name=logs,proto3" json:"logs,omitempty"`
+	Total         int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListLogsResponse) Reset() {
+	*x = ListLogsResponse{}
+	mi := &file_api_admin_v1_admin_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListLogsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListLogsResponse) ProtoMessage() {}
+
+func (x *ListLogsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_admin_v1_admin_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListLogsResponse.ProtoReflect.Descriptor instead.
+func (*ListLogsResponse) Descriptor() ([]byte, []int) {
+	return file_api_admin_v1_admin_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *ListLogsResponse) GetLogs() []*LogEntry {
+	if x != nil {
+		return x.Logs
+	}
+	return nil
+}
+
+func (x *ListLogsResponse) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+type LogEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Type          string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
+	Amount        int64                  `protobuf:"varint,4,opt,name=amount,proto3" json:"amount,omitempty"`
+	BalanceAfter  int64                  `protobuf:"varint,5,opt,name=balance_after,json=balanceAfter,proto3" json:"balance_after,omitempty"`
+	ReferenceId   string                 `protobuf:"bytes,6,opt,name=reference_id,json=referenceId,proto3" json:"reference_id,omitempty"`
+	Remark        string                 `protobuf:"bytes,7,opt,name=remark,proto3" json:"remark,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogEntry) Reset() {
+	*x = LogEntry{}
+	mi := &file_api_admin_v1_admin_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogEntry) ProtoMessage() {}
+
+func (x *LogEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_api_admin_v1_admin_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
+func (*LogEntry) Descriptor() ([]byte, []int) {
+	return file_api_admin_v1_admin_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *LogEntry) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *LogEntry) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *LogEntry) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *LogEntry) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *LogEntry) GetBalanceAfter() int64 {
+	if x != nil {
+		return x.BalanceAfter
+	}
+	return 0
+}
+
+func (x *LogEntry) GetReferenceId() string {
+	if x != nil {
+		return x.ReferenceId
+	}
+	return ""
+}
+
+func (x *LogEntry) GetRemark() string {
+	if x != nil {
+		return x.Remark
+	}
+	return ""
+}
+
+func (x *LogEntry) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
 var File_api_admin_v1_admin_proto protoreflect.FileDescriptor
 
 const file_api_admin_v1_admin_proto_rawDesc = "" +
@@ -2892,7 +3128,28 @@ const file_api_admin_v1_admin_proto_rawDesc = "" +
 	"\aoptions\x18\x01 \x01(\v2\x1c.api.common.v1.SystemOptionsR\aoptions\"Q\n" +
 	"\x1bUpdateSystemOptionsResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage2\xf6\x10\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xa9\x01\n" +
+	"\x0fListLogsRequest\x12\x12\n" +
+	"\x04page\x18\x01 \x01(\x05R\x04page\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04type\x18\x04 \x01(\tR\x04type\x12\x1d\n" +
+	"\n" +
+	"start_time\x18\x05 \x01(\x03R\tstartTime\x12\x19\n" +
+	"\bend_time\x18\x06 \x01(\x03R\aendTime\"T\n" +
+	"\x10ListLogsResponse\x12*\n" +
+	"\x04logs\x18\x01 \x03(\v2\x16.api.admin.v1.LogEntryR\x04logs\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total\"\xde\x01\n" +
+	"\bLogEntry\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04type\x18\x03 \x01(\tR\x04type\x12\x16\n" +
+	"\x06amount\x18\x04 \x01(\x03R\x06amount\x12#\n" +
+	"\rbalance_after\x18\x05 \x01(\x03R\fbalanceAfter\x12!\n" +
+	"\freference_id\x18\x06 \x01(\tR\vreferenceId\x12\x16\n" +
+	"\x06remark\x18\a \x01(\tR\x06remark\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\b \x01(\x03R\tcreatedAt2\xc1\x11\n" +
 	"\fAdminService\x12O\n" +
 	"\n" +
 	"TopUpQuota\x12\x1f.api.admin.v1.TopUpQuotaRequest\x1a .api.admin.v1.TopUpQuotaResponse\x12a\n" +
@@ -2919,7 +3176,8 @@ const file_api_admin_v1_admin_proto_rawDesc = "" +
 	"\rDeleteChannel\x12'.api.admin.v1.AdminDeleteChannelRequest\x1a(.api.admin.v1.AdminDeleteChannelResponse\x12t\n" +
 	"\x13ChangeChannelStatus\x12-.api.admin.v1.AdminChangeChannelStatusRequest\x1a..api.admin.v1.AdminChangeChannelStatusResponse\x12a\n" +
 	"\x10GetSystemOptions\x12%.api.admin.v1.GetSystemOptionsRequest\x1a&.api.admin.v1.GetSystemOptionsResponse\x12j\n" +
-	"\x13UpdateSystemOptions\x12(.api.admin.v1.UpdateSystemOptionsRequest\x1a).api.admin.v1.UpdateSystemOptionsResponseB$Z\"micro-one-api/api/admin/v1;adminv1b\x06proto3"
+	"\x13UpdateSystemOptions\x12(.api.admin.v1.UpdateSystemOptionsRequest\x1a).api.admin.v1.UpdateSystemOptionsResponse\x12I\n" +
+	"\bListLogs\x12\x1d.api.admin.v1.ListLogsRequest\x1a\x1e.api.admin.v1.ListLogsResponseB$Z\"micro-one-api/api/admin/v1;adminv1b\x06proto3"
 
 var (
 	file_api_admin_v1_admin_proto_rawDescOnce sync.Once
@@ -2933,7 +3191,7 @@ func file_api_admin_v1_admin_proto_rawDescGZIP() []byte {
 	return file_api_admin_v1_admin_proto_rawDescData
 }
 
-var file_api_admin_v1_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
+var file_api_admin_v1_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_api_admin_v1_admin_proto_goTypes = []any{
 	(*TopUpQuotaRequest)(nil),                // 0: api.admin.v1.TopUpQuotaRequest
 	(*TopUpQuotaResponse)(nil),               // 1: api.admin.v1.TopUpQuotaResponse
@@ -2981,74 +3239,80 @@ var file_api_admin_v1_admin_proto_goTypes = []any{
 	(*GetSystemOptionsResponse)(nil),         // 43: api.admin.v1.GetSystemOptionsResponse
 	(*UpdateSystemOptionsRequest)(nil),       // 44: api.admin.v1.UpdateSystemOptionsRequest
 	(*UpdateSystemOptionsResponse)(nil),      // 45: api.admin.v1.UpdateSystemOptionsResponse
-	(*v1.LedgerInfo)(nil),                    // 46: api.common.v1.LedgerInfo
-	(*v1.AccountInfo)(nil),                   // 47: api.common.v1.AccountInfo
-	(*v1.UserInfo)(nil),                      // 48: api.common.v1.UserInfo
-	(*v1.ChannelSummary)(nil),                // 49: api.common.v1.ChannelSummary
-	(*v1.ChannelConfig)(nil),                 // 50: api.common.v1.ChannelConfig
-	(*v1.SystemOptions)(nil),                 // 51: api.common.v1.SystemOptions
+	(*ListLogsRequest)(nil),                  // 46: api.admin.v1.ListLogsRequest
+	(*ListLogsResponse)(nil),                 // 47: api.admin.v1.ListLogsResponse
+	(*LogEntry)(nil),                         // 48: api.admin.v1.LogEntry
+	(*v1.LedgerInfo)(nil),                    // 49: api.common.v1.LedgerInfo
+	(*v1.AccountInfo)(nil),                   // 50: api.common.v1.AccountInfo
+	(*v1.UserInfo)(nil),                      // 51: api.common.v1.UserInfo
+	(*v1.ChannelSummary)(nil),                // 52: api.common.v1.ChannelSummary
+	(*v1.ChannelConfig)(nil),                 // 53: api.common.v1.ChannelConfig
+	(*v1.SystemOptions)(nil),                 // 54: api.common.v1.SystemOptions
 }
 var file_api_admin_v1_admin_proto_depIdxs = []int32{
 	8,  // 0: api.admin.v1.RedeemCodeResponse.redeem_code:type_name -> api.admin.v1.RedeemCodeInfo
 	8,  // 1: api.admin.v1.ListRedeemCodesResponse.codes:type_name -> api.admin.v1.RedeemCodeInfo
 	8,  // 2: api.admin.v1.RedeemCodesSearchResponse.codes:type_name -> api.admin.v1.RedeemCodeInfo
-	46, // 3: api.admin.v1.UserLedgerResponse.ledgers:type_name -> api.common.v1.LedgerInfo
-	47, // 4: api.admin.v1.AdminAccountSnapshotResponse.account:type_name -> api.common.v1.AccountInfo
-	48, // 5: api.admin.v1.AdminListUsersResponse.users:type_name -> api.common.v1.UserInfo
-	49, // 6: api.admin.v1.AdminListChannelsResponse.channels:type_name -> api.common.v1.ChannelSummary
-	50, // 7: api.admin.v1.AdminCreateChannelRequest.config:type_name -> api.common.v1.ChannelConfig
-	50, // 8: api.admin.v1.AdminUpdateChannelRequest.config:type_name -> api.common.v1.ChannelConfig
-	51, // 9: api.admin.v1.GetSystemOptionsResponse.options:type_name -> api.common.v1.SystemOptions
-	51, // 10: api.admin.v1.UpdateSystemOptionsRequest.options:type_name -> api.common.v1.SystemOptions
-	0,  // 11: api.admin.v1.AdminService.TopUpQuota:input_type -> api.admin.v1.TopUpQuotaRequest
-	2,  // 12: api.admin.v1.AdminService.CreateRedeemCode:input_type -> api.admin.v1.CreateRedeemCodeRequest
-	4,  // 13: api.admin.v1.AdminService.CreateRedeemCodesBatch:input_type -> api.admin.v1.CreateRedeemCodesBatchRequest
-	6,  // 14: api.admin.v1.AdminService.GetRedeemCode:input_type -> api.admin.v1.GetRedeemCodeRequest
-	9,  // 15: api.admin.v1.AdminService.ListRedeemCodes:input_type -> api.admin.v1.ListRedeemCodesRequest
-	11, // 16: api.admin.v1.AdminService.SearchRedeemCodes:input_type -> api.admin.v1.SearchRedeemCodesRequest
-	13, // 17: api.admin.v1.AdminService.UpdateRedeemCode:input_type -> api.admin.v1.UpdateRedeemCodeRequest
-	15, // 18: api.admin.v1.AdminService.DeleteRedeemCode:input_type -> api.admin.v1.DeleteRedeemCodeRequest
-	17, // 19: api.admin.v1.AdminService.ListUserLedger:input_type -> api.admin.v1.ListUserLedgerRequest
-	20, // 20: api.admin.v1.AdminService.GetAccountSnapshot:input_type -> api.admin.v1.GetAccountSnapshotRequest
-	22, // 21: api.admin.v1.AdminService.ListUsers:input_type -> api.admin.v1.AdminListUsersRequest
-	24, // 22: api.admin.v1.AdminService.CreateUser:input_type -> api.admin.v1.AdminCreateUserRequest
-	26, // 23: api.admin.v1.AdminService.UpdateUser:input_type -> api.admin.v1.AdminUpdateUserRequest
-	28, // 24: api.admin.v1.AdminService.DeleteUser:input_type -> api.admin.v1.AdminDeleteUserRequest
-	30, // 25: api.admin.v1.AdminService.ResetUserQuota:input_type -> api.admin.v1.ResetUserQuotaRequest
-	32, // 26: api.admin.v1.AdminService.ListChannels:input_type -> api.admin.v1.AdminListChannelsRequest
-	34, // 27: api.admin.v1.AdminService.CreateChannel:input_type -> api.admin.v1.AdminCreateChannelRequest
-	36, // 28: api.admin.v1.AdminService.UpdateChannel:input_type -> api.admin.v1.AdminUpdateChannelRequest
-	38, // 29: api.admin.v1.AdminService.DeleteChannel:input_type -> api.admin.v1.AdminDeleteChannelRequest
-	40, // 30: api.admin.v1.AdminService.ChangeChannelStatus:input_type -> api.admin.v1.AdminChangeChannelStatusRequest
-	42, // 31: api.admin.v1.AdminService.GetSystemOptions:input_type -> api.admin.v1.GetSystemOptionsRequest
-	44, // 32: api.admin.v1.AdminService.UpdateSystemOptions:input_type -> api.admin.v1.UpdateSystemOptionsRequest
-	1,  // 33: api.admin.v1.AdminService.TopUpQuota:output_type -> api.admin.v1.TopUpQuotaResponse
-	3,  // 34: api.admin.v1.AdminService.CreateRedeemCode:output_type -> api.admin.v1.CreateRedeemCodeResponse
-	5,  // 35: api.admin.v1.AdminService.CreateRedeemCodesBatch:output_type -> api.admin.v1.CreateRedeemCodesBatchResponse
-	7,  // 36: api.admin.v1.AdminService.GetRedeemCode:output_type -> api.admin.v1.RedeemCodeResponse
-	10, // 37: api.admin.v1.AdminService.ListRedeemCodes:output_type -> api.admin.v1.ListRedeemCodesResponse
-	12, // 38: api.admin.v1.AdminService.SearchRedeemCodes:output_type -> api.admin.v1.RedeemCodesSearchResponse
-	14, // 39: api.admin.v1.AdminService.UpdateRedeemCode:output_type -> api.admin.v1.UpdateRedeemCodeResponse
-	16, // 40: api.admin.v1.AdminService.DeleteRedeemCode:output_type -> api.admin.v1.DeleteRedeemCodeResponse
-	18, // 41: api.admin.v1.AdminService.ListUserLedger:output_type -> api.admin.v1.UserLedgerResponse
-	21, // 42: api.admin.v1.AdminService.GetAccountSnapshot:output_type -> api.admin.v1.AdminAccountSnapshotResponse
-	23, // 43: api.admin.v1.AdminService.ListUsers:output_type -> api.admin.v1.AdminListUsersResponse
-	25, // 44: api.admin.v1.AdminService.CreateUser:output_type -> api.admin.v1.AdminCreateUserResponse
-	27, // 45: api.admin.v1.AdminService.UpdateUser:output_type -> api.admin.v1.AdminUpdateUserResponse
-	29, // 46: api.admin.v1.AdminService.DeleteUser:output_type -> api.admin.v1.AdminDeleteUserResponse
-	31, // 47: api.admin.v1.AdminService.ResetUserQuota:output_type -> api.admin.v1.ResetUserQuotaResponse
-	33, // 48: api.admin.v1.AdminService.ListChannels:output_type -> api.admin.v1.AdminListChannelsResponse
-	35, // 49: api.admin.v1.AdminService.CreateChannel:output_type -> api.admin.v1.AdminCreateChannelResponse
-	37, // 50: api.admin.v1.AdminService.UpdateChannel:output_type -> api.admin.v1.AdminUpdateChannelResponse
-	39, // 51: api.admin.v1.AdminService.DeleteChannel:output_type -> api.admin.v1.AdminDeleteChannelResponse
-	41, // 52: api.admin.v1.AdminService.ChangeChannelStatus:output_type -> api.admin.v1.AdminChangeChannelStatusResponse
-	43, // 53: api.admin.v1.AdminService.GetSystemOptions:output_type -> api.admin.v1.GetSystemOptionsResponse
-	45, // 54: api.admin.v1.AdminService.UpdateSystemOptions:output_type -> api.admin.v1.UpdateSystemOptionsResponse
-	33, // [33:55] is the sub-list for method output_type
-	11, // [11:33] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	49, // 3: api.admin.v1.UserLedgerResponse.ledgers:type_name -> api.common.v1.LedgerInfo
+	50, // 4: api.admin.v1.AdminAccountSnapshotResponse.account:type_name -> api.common.v1.AccountInfo
+	51, // 5: api.admin.v1.AdminListUsersResponse.users:type_name -> api.common.v1.UserInfo
+	52, // 6: api.admin.v1.AdminListChannelsResponse.channels:type_name -> api.common.v1.ChannelSummary
+	53, // 7: api.admin.v1.AdminCreateChannelRequest.config:type_name -> api.common.v1.ChannelConfig
+	53, // 8: api.admin.v1.AdminUpdateChannelRequest.config:type_name -> api.common.v1.ChannelConfig
+	54, // 9: api.admin.v1.GetSystemOptionsResponse.options:type_name -> api.common.v1.SystemOptions
+	54, // 10: api.admin.v1.UpdateSystemOptionsRequest.options:type_name -> api.common.v1.SystemOptions
+	48, // 11: api.admin.v1.ListLogsResponse.logs:type_name -> api.admin.v1.LogEntry
+	0,  // 12: api.admin.v1.AdminService.TopUpQuota:input_type -> api.admin.v1.TopUpQuotaRequest
+	2,  // 13: api.admin.v1.AdminService.CreateRedeemCode:input_type -> api.admin.v1.CreateRedeemCodeRequest
+	4,  // 14: api.admin.v1.AdminService.CreateRedeemCodesBatch:input_type -> api.admin.v1.CreateRedeemCodesBatchRequest
+	6,  // 15: api.admin.v1.AdminService.GetRedeemCode:input_type -> api.admin.v1.GetRedeemCodeRequest
+	9,  // 16: api.admin.v1.AdminService.ListRedeemCodes:input_type -> api.admin.v1.ListRedeemCodesRequest
+	11, // 17: api.admin.v1.AdminService.SearchRedeemCodes:input_type -> api.admin.v1.SearchRedeemCodesRequest
+	13, // 18: api.admin.v1.AdminService.UpdateRedeemCode:input_type -> api.admin.v1.UpdateRedeemCodeRequest
+	15, // 19: api.admin.v1.AdminService.DeleteRedeemCode:input_type -> api.admin.v1.DeleteRedeemCodeRequest
+	17, // 20: api.admin.v1.AdminService.ListUserLedger:input_type -> api.admin.v1.ListUserLedgerRequest
+	20, // 21: api.admin.v1.AdminService.GetAccountSnapshot:input_type -> api.admin.v1.GetAccountSnapshotRequest
+	22, // 22: api.admin.v1.AdminService.ListUsers:input_type -> api.admin.v1.AdminListUsersRequest
+	24, // 23: api.admin.v1.AdminService.CreateUser:input_type -> api.admin.v1.AdminCreateUserRequest
+	26, // 24: api.admin.v1.AdminService.UpdateUser:input_type -> api.admin.v1.AdminUpdateUserRequest
+	28, // 25: api.admin.v1.AdminService.DeleteUser:input_type -> api.admin.v1.AdminDeleteUserRequest
+	30, // 26: api.admin.v1.AdminService.ResetUserQuota:input_type -> api.admin.v1.ResetUserQuotaRequest
+	32, // 27: api.admin.v1.AdminService.ListChannels:input_type -> api.admin.v1.AdminListChannelsRequest
+	34, // 28: api.admin.v1.AdminService.CreateChannel:input_type -> api.admin.v1.AdminCreateChannelRequest
+	36, // 29: api.admin.v1.AdminService.UpdateChannel:input_type -> api.admin.v1.AdminUpdateChannelRequest
+	38, // 30: api.admin.v1.AdminService.DeleteChannel:input_type -> api.admin.v1.AdminDeleteChannelRequest
+	40, // 31: api.admin.v1.AdminService.ChangeChannelStatus:input_type -> api.admin.v1.AdminChangeChannelStatusRequest
+	42, // 32: api.admin.v1.AdminService.GetSystemOptions:input_type -> api.admin.v1.GetSystemOptionsRequest
+	44, // 33: api.admin.v1.AdminService.UpdateSystemOptions:input_type -> api.admin.v1.UpdateSystemOptionsRequest
+	46, // 34: api.admin.v1.AdminService.ListLogs:input_type -> api.admin.v1.ListLogsRequest
+	1,  // 35: api.admin.v1.AdminService.TopUpQuota:output_type -> api.admin.v1.TopUpQuotaResponse
+	3,  // 36: api.admin.v1.AdminService.CreateRedeemCode:output_type -> api.admin.v1.CreateRedeemCodeResponse
+	5,  // 37: api.admin.v1.AdminService.CreateRedeemCodesBatch:output_type -> api.admin.v1.CreateRedeemCodesBatchResponse
+	7,  // 38: api.admin.v1.AdminService.GetRedeemCode:output_type -> api.admin.v1.RedeemCodeResponse
+	10, // 39: api.admin.v1.AdminService.ListRedeemCodes:output_type -> api.admin.v1.ListRedeemCodesResponse
+	12, // 40: api.admin.v1.AdminService.SearchRedeemCodes:output_type -> api.admin.v1.RedeemCodesSearchResponse
+	14, // 41: api.admin.v1.AdminService.UpdateRedeemCode:output_type -> api.admin.v1.UpdateRedeemCodeResponse
+	16, // 42: api.admin.v1.AdminService.DeleteRedeemCode:output_type -> api.admin.v1.DeleteRedeemCodeResponse
+	18, // 43: api.admin.v1.AdminService.ListUserLedger:output_type -> api.admin.v1.UserLedgerResponse
+	21, // 44: api.admin.v1.AdminService.GetAccountSnapshot:output_type -> api.admin.v1.AdminAccountSnapshotResponse
+	23, // 45: api.admin.v1.AdminService.ListUsers:output_type -> api.admin.v1.AdminListUsersResponse
+	25, // 46: api.admin.v1.AdminService.CreateUser:output_type -> api.admin.v1.AdminCreateUserResponse
+	27, // 47: api.admin.v1.AdminService.UpdateUser:output_type -> api.admin.v1.AdminUpdateUserResponse
+	29, // 48: api.admin.v1.AdminService.DeleteUser:output_type -> api.admin.v1.AdminDeleteUserResponse
+	31, // 49: api.admin.v1.AdminService.ResetUserQuota:output_type -> api.admin.v1.ResetUserQuotaResponse
+	33, // 50: api.admin.v1.AdminService.ListChannels:output_type -> api.admin.v1.AdminListChannelsResponse
+	35, // 51: api.admin.v1.AdminService.CreateChannel:output_type -> api.admin.v1.AdminCreateChannelResponse
+	37, // 52: api.admin.v1.AdminService.UpdateChannel:output_type -> api.admin.v1.AdminUpdateChannelResponse
+	39, // 53: api.admin.v1.AdminService.DeleteChannel:output_type -> api.admin.v1.AdminDeleteChannelResponse
+	41, // 54: api.admin.v1.AdminService.ChangeChannelStatus:output_type -> api.admin.v1.AdminChangeChannelStatusResponse
+	43, // 55: api.admin.v1.AdminService.GetSystemOptions:output_type -> api.admin.v1.GetSystemOptionsResponse
+	45, // 56: api.admin.v1.AdminService.UpdateSystemOptions:output_type -> api.admin.v1.UpdateSystemOptionsResponse
+	47, // 57: api.admin.v1.AdminService.ListLogs:output_type -> api.admin.v1.ListLogsResponse
+	35, // [35:58] is the sub-list for method output_type
+	12, // [12:35] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_api_admin_v1_admin_proto_init() }
@@ -3062,7 +3326,7 @@ func file_api_admin_v1_admin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_admin_v1_admin_proto_rawDesc), len(file_api_admin_v1_admin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   46,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

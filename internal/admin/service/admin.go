@@ -21,6 +21,13 @@ type AdminService struct {
 	billingClient  billingv1.BillingServiceClient
 	identityClient identityv1.IdentityServiceClient
 	channelClient  channelv1.ChannelServiceClient
+	systemOptsRepo SystemOptionsStore
+}
+
+// SystemOptionsStore is the interface for system options persistence.
+type SystemOptionsStore interface {
+	Get(key string) (string, error)
+	Set(key, value string) error
 }
 
 // NewAdminService creates a new admin service
@@ -28,11 +35,13 @@ func NewAdminService(
 	billingClient billingv1.BillingServiceClient,
 	identityClient identityv1.IdentityServiceClient,
 	channelClient channelv1.ChannelServiceClient,
+	systemOptsRepo SystemOptionsStore,
 ) *AdminService {
 	return &AdminService{
 		billingClient:  billingClient,
 		identityClient: identityClient,
 		channelClient:  channelClient,
+		systemOptsRepo: systemOptsRepo,
 	}
 }
 
@@ -523,18 +532,127 @@ func (s *AdminService) ChangeChannelStatus(ctx context.Context, req *adminv1.Adm
 // ========== 系统配置 ==========
 
 func (s *AdminService) GetSystemOptions(ctx context.Context, req *adminv1.GetSystemOptionsRequest) (*adminv1.GetSystemOptionsResponse, error) {
+	siteTitle := "One-API"
+	registrationEnabled := true
+
+	if s.systemOptsRepo != nil {
+		if v, err := s.systemOptsRepo.Get("site_title"); err == nil && v != "" {
+			siteTitle = v
+		}
+		if v, err := s.systemOptsRepo.Get("registration_enabled"); err == nil && v != "" {
+			registrationEnabled = v == "true"
+		}
+	}
+
 	return &adminv1.GetSystemOptionsResponse{
 		Options: &commonv1.SystemOptions{
-			SiteTitle:             "One-API",
-			RegistrationEnabled:   true,
+			SiteTitle:           siteTitle,
+			RegistrationEnabled: registrationEnabled,
 		},
 	}, nil
 }
 
 func (s *AdminService) UpdateSystemOptions(ctx context.Context, req *adminv1.UpdateSystemOptionsRequest) (*adminv1.UpdateSystemOptionsResponse, error) {
+	if s.systemOptsRepo == nil {
+		return &adminv1.UpdateSystemOptionsResponse{
+			Success: false,
+			Message: "system options storage not configured",
+		}, nil
+	}
+
+	if req.Options == nil {
+		return &adminv1.UpdateSystemOptionsResponse{
+			Success: false,
+			Message: "options is required",
+		}, nil
+	}
+
+	if err := s.systemOptsRepo.Set("site_title", req.Options.SiteTitle); err != nil {
+		return &adminv1.UpdateSystemOptionsResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to save site_title: %v", err),
+		}, nil
+	}
+
+	registrationValue := "false"
+	if req.Options.RegistrationEnabled {
+		registrationValue = "true"
+	}
+	if err := s.systemOptsRepo.Set("registration_enabled", registrationValue); err != nil {
+		return &adminv1.UpdateSystemOptionsResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to save registration_enabled: %v", err),
+		}, nil
+	}
+
 	return &adminv1.UpdateSystemOptionsResponse{
-		Success: false,
-		Message: "not implemented",
+		Success: true,
+		Message: "system options updated",
+	}, nil
+}
+
+// ========== 日志查询 ==========
+
+// ListLogs returns ledger logs by proxying to billing-service.
+func (s *AdminService) ListLogs(ctx context.Context, req *adminv1.ListLogsRequest) (*adminv1.ListLogsResponse, error) {
+	if req.UserId == "" {
+		return &adminv1.ListLogsResponse{
+			Logs:  []*adminv1.LogEntry{},
+			Total: 0,
+		}, nil
+	}
+
+	page := req.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := req.PageSize
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
+	billingReq := &billingv1.ListLedgerRequest{
+		UserId:   req.UserId,
+		Page:     page,
+		PageSize: pageSize,
+	}
+
+	billingResp, err := s.billingClient.ListLedger(ctx, billingReq)
+	if err != nil {
+		st, ok := status.FromError(err)
+		if ok {
+			return &adminv1.ListLogsResponse{
+				Logs:  []*adminv1.LogEntry{},
+				Total: 0,
+			}, fmt.Errorf("failed to list ledger: %s", st.Message())
+		}
+		return &adminv1.ListLogsResponse{
+			Logs:  []*adminv1.LogEntry{},
+			Total: 0,
+		}, fmt.Errorf("failed to list ledger: %w", err)
+	}
+
+	logs := make([]*adminv1.LogEntry, 0, len(billingResp.Entries))
+	for _, entry := range billingResp.Entries {
+		var createdAt int64
+		if entry.CreatedAt != nil {
+			createdAt = entry.CreatedAt.AsTime().Unix()
+		}
+		logs = append(logs, &adminv1.LogEntry{
+			Id:           0, // LedgerEntry.Id is string, LogEntry.Id is int64
+			UserId:       entry.UserId,
+			Type:         entry.Type,
+			Amount:       entry.Amount,
+			BalanceAfter: entry.BalanceAfter,
+			ReferenceId:  entry.ReferenceId,
+			Remark:       entry.Remark,
+			CreatedAt:    createdAt,
+		})
+	}
+
+	return &adminv1.ListLogsResponse{
+		Logs:  logs,
+		Total: billingResp.Total,
 	}, nil
 }
 

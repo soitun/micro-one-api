@@ -41,6 +41,7 @@ const (
 	AdminService_ChangeChannelStatus_FullMethodName    = "/api.admin.v1.AdminService/ChangeChannelStatus"
 	AdminService_GetSystemOptions_FullMethodName       = "/api.admin.v1.AdminService/GetSystemOptions"
 	AdminService_UpdateSystemOptions_FullMethodName    = "/api.admin.v1.AdminService/UpdateSystemOptions"
+	AdminService_ListLogs_FullMethodName               = "/api.admin.v1.AdminService/ListLogs"
 )
 
 // AdminServiceClient is the client API for AdminService service.
@@ -73,6 +74,8 @@ type AdminServiceClient interface {
 	// ========== 系统配置管理 ==========
 	GetSystemOptions(ctx context.Context, in *GetSystemOptionsRequest, opts ...grpc.CallOption) (*GetSystemOptionsResponse, error)
 	UpdateSystemOptions(ctx context.Context, in *UpdateSystemOptionsRequest, opts ...grpc.CallOption) (*UpdateSystemOptionsResponse, error)
+	// ========== 日志查询 ==========
+	ListLogs(ctx context.Context, in *ListLogsRequest, opts ...grpc.CallOption) (*ListLogsResponse, error)
 }
 
 type adminServiceClient struct {
@@ -303,6 +306,16 @@ func (c *adminServiceClient) UpdateSystemOptions(ctx context.Context, in *Update
 	return out, nil
 }
 
+func (c *adminServiceClient) ListLogs(ctx context.Context, in *ListLogsRequest, opts ...grpc.CallOption) (*ListLogsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListLogsResponse)
+	err := c.cc.Invoke(ctx, AdminService_ListLogs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminServiceServer is the server API for AdminService service.
 // All implementations should embed UnimplementedAdminServiceServer
 // for forward compatibility.
@@ -333,6 +346,8 @@ type AdminServiceServer interface {
 	// ========== 系统配置管理 ==========
 	GetSystemOptions(context.Context, *GetSystemOptionsRequest) (*GetSystemOptionsResponse, error)
 	UpdateSystemOptions(context.Context, *UpdateSystemOptionsRequest) (*UpdateSystemOptionsResponse, error)
+	// ========== 日志查询 ==========
+	ListLogs(context.Context, *ListLogsRequest) (*ListLogsResponse, error)
 }
 
 // UnimplementedAdminServiceServer should be embedded to have
@@ -407,6 +422,9 @@ func (UnimplementedAdminServiceServer) GetSystemOptions(context.Context, *GetSys
 }
 func (UnimplementedAdminServiceServer) UpdateSystemOptions(context.Context, *UpdateSystemOptionsRequest) (*UpdateSystemOptionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateSystemOptions not implemented")
+}
+func (UnimplementedAdminServiceServer) ListLogs(context.Context, *ListLogsRequest) (*ListLogsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListLogs not implemented")
 }
 func (UnimplementedAdminServiceServer) testEmbeddedByValue() {}
 
@@ -824,6 +842,24 @@ func _AdminService_UpdateSystemOptions_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AdminService_ListLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).ListLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_ListLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).ListLogs(ctx, req.(*ListLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AdminService_ServiceDesc is the grpc.ServiceDesc for AdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -918,6 +954,10 @@ var AdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateSystemOptions",
 			Handler:    _AdminService_UpdateSystemOptions_Handler,
+		},
+		{
+			MethodName: "ListLogs",
+			Handler:    _AdminService_ListLogs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

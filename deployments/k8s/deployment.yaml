@@ -58,6 +58,11 @@ spec:
             configMapKeyRef:
               name: app-config
               key: channel-grpc-endpoint
+        - name: BILLING_GRPC_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: billing-grpc-endpoint
         - name: RATE_LIMIT_REQUESTS_PER_SECOND
           valueFrom:
             configMapKeyRef:
@@ -146,6 +151,8 @@ metadata:
 data:
   identity-grpc-endpoint: "identity-service:9001"
   channel-grpc-endpoint: "channel-service:9002"
+  billing-grpc-endpoint: "billing-service:9004"
+  redis-addr: "redis:6379"
   rate-limit-rps: "100"
   rate-limit-burst: "200"
   cors-origins: "https://yourdomain.com,https://app.yourdomain.com"
@@ -197,6 +204,14 @@ spec:
     ports:
     - protocol: TCP
       port: 9002
+  # Allow communication with billing service
+  - to:
+    - podSelector:
+        matchLabels:
+          app: billing-service
+    ports:
+    - protocol: TCP
+      port: 9004
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

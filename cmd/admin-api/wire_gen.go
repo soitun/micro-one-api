@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"os/signal"
@@ -18,7 +19,10 @@ import (
 	channelv1 "micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
 	admincfg "micro-one-api/internal/admin/config"
+	"micro-one-api/internal/admin/data"
 	"micro-one-api/internal/admin/service"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 func loadConfig(confPath string) (*admincfg.Config, error) {
@@ -67,7 +71,18 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	channelClient := channelv1.NewChannelServiceClient(channelConn)
 	billingClient := billingv1.NewBillingServiceClient(billingConn)
 
-	adminSvc := service.NewAdminService(billingClient, identityClient, channelClient)
+	// System options repo (optional — skip if DB not configured)
+	var systemOptsRepo service.SystemOptionsStore
+	if cfg.Data.Database.Source != "" {
+		db, dbErr := sql.Open(cfg.Data.Database.Driver, cfg.Data.Database.Source)
+		if dbErr == nil {
+			systemOptsRepo = data.NewSystemOptionsRepo(db)
+		} else {
+			fmt.Printf("Warning: Failed to connect to system options DB: %v\n", dbErr)
+		}
+	}
+
+	adminSvc := service.NewAdminService(billingClient, identityClient, channelClient, systemOptsRepo)
 
 	grpcSrv := grpcx.NewServer(grpcx.Address(cfg.Server.GRPC.Addr))
 	adminv1.RegisterAdminServiceServer(grpcSrv, adminSvc)
