@@ -57,7 +57,12 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 		d.RedeemRepo(),
 		groupRatios,
 	)
-	svc := service.NewBillingService(uc)
+	reconUc := biz.NewReconciliationUsecase(
+		d.AccountRepo(),
+		d.ReservationRepo(),
+		d.ReconciliationRepo(),
+	)
+	svc := service.NewBillingService(uc, reconUc)
 
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
 	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc)

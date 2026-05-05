@@ -16,6 +16,7 @@ import (
 	channelv1 "micro-one-api/api/channel/v1"
 	billingv1 "micro-one-api/api/billing/v1"
 	"micro-one-api/internal/pkg/errors"
+	"micro-one-api/internal/pkg/metrics"
 	applogger "micro-one-api/internal/pkg/logger"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relayprovider "micro-one-api/internal/relay/provider"
@@ -54,6 +55,9 @@ func (s *HTTPServer) RegisterRoutes(srv *khttp.Server) {
 	srv.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
 	srv.HandleFunc("/v1/models", s.handleModels)
 	srv.HandleFunc("/healthz", s.handleHealth)
+	srv.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		metrics.Handler().ServeHTTP(w, r)
+	})
 }
 
 func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Request) {

@@ -238,7 +238,6 @@ func simpleHash(s string) string {
 	hash := 0
 	for i, c := range s {
 		hash = ((hash << 5) - hash) + int(c) + i
-		hash = hash & hash // Keep it within integer range
 	}
 	return fmt.Sprintf("%x", hash)
 }

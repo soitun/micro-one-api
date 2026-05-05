@@ -2,11 +2,14 @@ package xgrpc
 
 import (
 	"context"
+	"time"
 
+	"micro-one-api/internal/pkg/metrics"
 	"micro-one-api/internal/pkg/xtrace"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 const traceIDKey = "x-trace-id"
@@ -52,5 +55,20 @@ func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		ctx = TraceIDFromIncoming(ctx)
 		return handler(ctx, req)
+	}
+}
+
+// MetricsUnaryServerInterceptor returns a gRPC unary server interceptor that records Prometheus metrics.
+func MetricsUnaryServerInterceptor(service string) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		start := time.Now()
+		resp, err := handler(ctx, req)
+		duration := time.Since(start).Seconds()
+
+		code := status.Code(err).String()
+		metrics.GRPCRequestTotal.WithLabelValues(service, info.FullMethod, code).Inc()
+		metrics.GRPCRequestDuration.WithLabelValues(service, info.FullMethod).Observe(duration)
+
+		return resp, err
 	}
 }

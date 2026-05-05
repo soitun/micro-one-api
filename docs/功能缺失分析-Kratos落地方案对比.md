@@ -1,6 +1,6 @@
 # 功能缺失分析 — Kratos 落地方案 vs 当前实现
 
-> 基于 `docs/One-API基于Kratos的微服务落地方案.md` 与当前代码库的全面对比，分析日期：2026-05-02，更新日期：2026-05-03
+> 基于 `docs/One-API基于Kratos的微服务落地方案.md` 与当前代码库的全面对比，分析日期：2026-05-02，更新日期：2026-05-05
 
 ## 一、文档标记"✅ 已完成"但实际未达标的项（已修复）
 
@@ -78,13 +78,13 @@
 
 ## 五、仍待实现的功能
 
-| 缺失项 | 来源 | 说明 | 优先级 |
-|--------|------|------|--------|
-| **OAuth/SSO** | Kratos 方案§3.2 | 无 OAuth2/OIDC 实现 | P3 |
-| **账务对账任务** | Kratos 方案§6 | 无 reconciliation、无审计报告 | P2 |
-| **分布式限流** | Kratos 方案§9 | 进程内限流器，多实例无法协同 | P2 |
-| **监控告警** | §17 第 10 条 | 无 Prometheus metrics 端点 | P2 |
-| **服务治理 / 注册中心** | §17 第 3 条 | 静态端点配置，无 consul/nacos 服务发现 | P3 |
+| 缺失项 | 来源 | 说明 | 优先级 | 状态 |
+|--------|------|------|--------|------|
+| **OAuth/SSO** | Kratos 方案§3.2 | 无 OAuth2/OIDC 实现 | P3 | 待实现 |
+| **账务对账任务** | Kratos 方案§6 | reconciliation + 审计报告 | P2 | ✅ 已实现 |
+| **分布式限流** | Kratos 方案§9 | Redis sorted set 滑动窗口限流 | P2 | ✅ 已实现 |
+| **监控告警** | §17 第 10 条 | Prometheus metrics 端点 | P2 | ✅ 已实现 |
+| **服务治理 / 注册中心** | §17 第 3 条 | 静态端点配置，无 consul/nacos 服务发现 | P3 | 待实现 |
 
 ---
 
@@ -115,5 +115,10 @@
 | 幂等计费 | 无 | requestID 去重 ✅ |
 | 事件驱动 | 仅常量 | EventBus + 发布 ✅ |
 | 错误处理 | relay/identity/channel | + config/log/monitor/notify ✅ |
+| 分布式限流 | 进程内 | Redis sorted set 滑动窗口 ✅ |
+| Prometheus metrics | 无 | 9/9 服务 `/metrics` 端点 + HTTP/gRPC 指标 ✅ |
+| 账务对账 | 无 | `ReconciliationUsecase` + `/v1/reconciliation` 端点 ✅ |
+| 部署文档 | 无 | `docs/deployment.md` 完整运维文档 ✅ |
+| 二期服务测试 | 仅 biz 层 | biz + data 层单元测试 ✅ |
 
-**剩余待做**：OAuth/SSO、分布式限流、Prometheus metrics、服务注册发现、账务对账（均为 P2-P3）。
+**剩余待做**：OAuth/SSO、服务注册发现（均为 P3）。

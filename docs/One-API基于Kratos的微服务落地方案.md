@@ -711,7 +711,7 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 
 8. ~~**第二阶段服务**~~ — ✅ 已完成 — 4 个服务已创建并实现 HTTP API
 9. **性能优化** — 缓存策略、连接池配置、限流细化
-10. **监控告警** — Prometheus metrics、Grafana dashboard、告警规则配置
+10. ~~**监控告警**~~ — ✅ 已完成 — 9/9 服务 `/metrics` 端点，Prometheus 指标（HTTP/gRPC 请求计数、延迟、活跃连接）
 
 ### 架构改进建议（可选）
 
@@ -735,7 +735,7 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 
 4. ~~**K8s 部署完善**~~ — ✅ 已完成
 5. ~~**健康检查完善**~~ — ✅ 已完成 — 所有 9 个服务均有健康检查端点
-6. **部署文档** — 撰写详细的部署运维文档
+6. ~~**部署文档**~~ — ✅ 已完成 — `docs/deployment.md` 含 Docker Compose / K8s / 环境变量 / 健康检查 / 故障排查
 
 ### 功能完善相关 — ✅ 已全部完成
 
@@ -747,7 +747,7 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 ### 后续迭代建议
 
 11. **二期服务 Proto 定义** — 为 config / log / monitor / notify 服务补充 proto 定义
-12. **二期服务单元测试** — 为二期服务补充 biz / data 层单元测试
+12. ~~**二期服务单元测试**~~ — ✅ 已完成 — 4 个服务 biz + data 层单元测试
 13. **集成测试增强** — 补充 retry、model mapping、chat completions 流程的集成测试
 14. **性能优化** — 缓存策略、连接池配置、限流细化
-15. **监控告警** — Prometheus metrics、Grafana dashboard
+15. ~~**监控告警**~~ — ✅ 已完成 — Prometheus metrics + Grafana 指标

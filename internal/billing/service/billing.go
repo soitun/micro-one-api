@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	billingv1 "micro-one-api/api/billing/v1"
@@ -14,11 +16,12 @@ import (
 
 type BillingService struct {
 	billingv1.UnimplementedBillingServiceServer
-	uc *biz.BillingUsecase
+	uc         *biz.BillingUsecase
+	reconUc    *biz.ReconciliationUsecase
 }
 
-func NewBillingService(uc *biz.BillingUsecase) *BillingService {
-	return &BillingService{uc: uc}
+func NewBillingService(uc *biz.BillingUsecase, reconUc *biz.ReconciliationUsecase) *BillingService {
+	return &BillingService{uc: uc, reconUc: reconUc}
 }
 
 func (s *BillingService) ReserveQuota(ctx context.Context, req *billingv1.ReserveQuotaRequest) (*billingv1.ReserveQuotaResponse, error) {
@@ -290,4 +293,24 @@ func toProtoTimestamp(t time.Time) *timestamppb.Timestamp {
 		Seconds: t.Unix(),
 		Nanos:   int32(t.Nanosecond()),
 	}
+}
+
+// HandleReconciliation triggers a billing reconciliation and returns the result as JSON.
+func (s *BillingService) HandleReconciliation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	result, err := s.reconUc.RunReconciliation(r.Context())
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(result)
 }

@@ -1,6 +1,22 @@
 package data
 
-import "time"
+import (
+	"time"
+)
+
+type accountModel struct {
+	ID           int64  `gorm:"primaryKey;column:id"`
+	Username     string `gorm:"column:username"`
+	DisplayName  string `gorm:"column:display_name"`
+	Group        string `gorm:"column:group"`
+	Quota        int64  `gorm:"column:quota"`
+	UsedQuota    int64  `gorm:"column:used_quota"`
+	RequestCount int64  `gorm:"column:request_count"`
+	FrozenQuota  int64  `gorm:"column:frozen_quota"`
+	Status       int32  `gorm:"column:status"`
+}
+
+func (accountModel) TableName() string { return "users" }
 
 type reservationModel struct {
 	ID           uint      `gorm:"primaryKey;column:id"`

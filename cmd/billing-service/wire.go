@@ -17,6 +17,7 @@ import (
 var ProviderSet = wire.NewSet(
 	data.NewData,
 	biz.NewBillingUsecase,
+	biz.NewReconciliationUsecase,
 	service.NewBillingService,
 	server.NewGRPCServer,
 	server.NewHTTPServer,

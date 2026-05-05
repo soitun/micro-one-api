@@ -19,6 +19,7 @@ type Data struct {
 	reservationRepo biz.ReservationRepo
 	ledgerRepo      biz.LedgerRepo
 	redeemRepo      biz.RedeemRepo
+	reconRepo       biz.ReconciliationRepo
 }
 
 func NewData(dsn ...string) (*Data, error) {
@@ -56,6 +57,7 @@ func NewData(dsn ...string) (*Data, error) {
 	d.reservationRepo = NewReservationRepo(d)
 	d.ledgerRepo = NewLedgerRepo(d)
 	d.redeemRepo = NewRedeemRepo(d)
+	d.reconRepo = NewReconciliationRepo(d)
 
 	return d, nil
 }
@@ -74,6 +76,10 @@ func (d *Data) LedgerRepo() biz.LedgerRepo {
 
 func (d *Data) RedeemRepo() biz.RedeemRepo {
 	return d.redeemRepo
+}
+
+func (d *Data) ReconciliationRepo() biz.ReconciliationRepo {
+	return d.reconRepo
 }
 
 func (d *Data) Close() error {

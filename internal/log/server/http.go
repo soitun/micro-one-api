@@ -6,6 +6,7 @@ import (
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 
 	"micro-one-api/internal/log/service"
+	"micro-one-api/internal/pkg/metrics"
 )
 
 // NewHTTPServer wires HTTP transport for log-service.
@@ -25,6 +26,9 @@ func NewHTTPServer(addr string, svc *service.LogService) *khttp.Server {
 	})
 	srv.HandleFunc("/v1/logs/", func(w http.ResponseWriter, r *http.Request) {
 		svc.HandleGetLog(w, r)
+	})
+	srv.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		metrics.Handler().ServeHTTP(w, r)
 	})
 	srv.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
