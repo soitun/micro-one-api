@@ -9,4 +9,19 @@ data:
     source: ${DATABASE_DSN:-root:password@tcp(127.0.0.1:3306)/oneapi}
   redis:
     addr: ${REDIS_ADDR:-127.0.0.1:6379}
+registry:
+  type: ${REGISTRY_TYPE:-}
+  consul:
+    address: ${CONSUL_ADDR:-127.0.0.1:8500}
+    health_check_interval: 10
+oauth:
+  base_url: ${OAUTH_BASE_URL:-http://localhost:8001}
+  github:
+    enabled: ${OAUTH_GITHUB_ENABLED:-false}
+    client_id: ${OAUTH_GITHUB_CLIENT_ID:-}
+    client_secret: ${OAUTH_GITHUB_CLIENT_SECRET:-}
+  google:
+    enabled: ${OAUTH_GOOGLE_ENABLED:-false}
+    client_id: ${OAUTH_GOOGLE_CLIENT_ID:-}
+    client_secret: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
 

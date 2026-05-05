@@ -1,9 +1,13 @@
 package config
 
+import appregistry "micro-one-api/internal/pkg/registry"
+
 // Config holds the identity-service configuration.
 type Config struct {
-	Server ServerConfig `json:"server"`
-	Data   DataConfig   `json:"data"`
+	Server   ServerConfig       `json:"server"`
+	Data     DataConfig         `json:"data"`
+	OAuth    OAuthConfig        `json:"oauth"`
+	Registry appregistry.Config `json:"registry"`
 }
 
 type ServerConfig struct {
@@ -31,4 +35,16 @@ type DatabaseConfig struct {
 
 type RedisConfig struct {
 	Addr string `json:"addr"`
+}
+
+type OAuthConfig struct {
+	GitHub OAuthProviderConfig `json:"github"`
+	Google OAuthProviderConfig `json:"google"`
+	BaseURL string             `json:"base_url"`
+}
+
+type OAuthProviderConfig struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	Enabled      bool   `json:"enabled"`
 }

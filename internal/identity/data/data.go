@@ -23,13 +23,15 @@ type Repository struct {
 }
 
 type userModel struct {
-	ID           int64  `gorm:"column:id"`
-	Username     string `gorm:"column:username;uniqueIndex"`
-	DisplayName  string `gorm:"column:display_name"`
-	Email        string `gorm:"column:email"`
-	Group        string `gorm:"column:group"`
-	Status       int32  `gorm:"column:status"`
-	PasswordHash string `gorm:"column:password_hash"`
+	ID            int64  `gorm:"column:id"`
+	Username      string `gorm:"column:username;uniqueIndex"`
+	DisplayName   string `gorm:"column:display_name"`
+	Email         string `gorm:"column:email"`
+	Group         string `gorm:"column:group"`
+	Status        int32  `gorm:"column:status"`
+	PasswordHash  string `gorm:"column:password_hash"`
+	OAuthProvider string `gorm:"column:oauth_provider;index"`
+	OAuthID       string `gorm:"column:oauth_id;index"`
 }
 
 func (userModel) TableName() string { return "users" }
@@ -127,6 +129,21 @@ func (r *Repository) FindUserByUsername(ctx context.Context, username string) (*
 		}
 	}
 	return nil, biz.ErrUserNotFound
+}
+
+func (r *Repository) FindUserByOAuth(ctx context.Context, provider, oauthID string) (*biz.User, error) {
+	if r.db != nil {
+		return r.findUserByOAuthDB(ctx, provider, oauthID)
+	}
+	r.identityLock.RLock()
+	defer r.identityLock.RUnlock()
+	for _, u := range r.usersByID {
+		if u.OAuthProvider == provider && u.OAuthID == oauthID {
+			cloned := *u
+			return &cloned, nil
+		}
+	}
+	return nil, biz.ErrOAuthUserNotFound
 }
 
 func (r *Repository) CreateUser(ctx context.Context, user *biz.User) error {
@@ -229,13 +246,15 @@ func (r *Repository) findUserByIDDB(ctx context.Context, userID int64) (*biz.Use
 		return nil, err
 	}
 	return &biz.User{
-		ID:           model.ID,
-		Username:     model.Username,
-		DisplayName:  model.DisplayName,
-		Email:        model.Email,
-		Group:        model.Group,
-		Status:       model.Status,
-		PasswordHash: model.PasswordHash,
+		ID:            model.ID,
+		Username:      model.Username,
+		DisplayName:   model.DisplayName,
+		Email:         model.Email,
+		Group:         model.Group,
+		Status:        model.Status,
+		PasswordHash:  model.PasswordHash,
+		OAuthProvider: model.OAuthProvider,
+		OAuthID:       model.OAuthID,
 	}, nil
 }
 
@@ -248,24 +267,49 @@ func (r *Repository) findUserByUsernameDB(ctx context.Context, username string) 
 		return nil, err
 	}
 	return &biz.User{
-		ID:           model.ID,
-		Username:     model.Username,
-		DisplayName:  model.DisplayName,
-		Email:        model.Email,
-		Group:        model.Group,
-		Status:       model.Status,
-		PasswordHash: model.PasswordHash,
+		ID:            model.ID,
+		Username:      model.Username,
+		DisplayName:   model.DisplayName,
+		Email:         model.Email,
+		Group:         model.Group,
+		Status:        model.Status,
+		PasswordHash:  model.PasswordHash,
+		OAuthProvider: model.OAuthProvider,
+		OAuthID:       model.OAuthID,
+	}, nil
+}
+
+func (r *Repository) findUserByOAuthDB(ctx context.Context, provider, oauthID string) (*biz.User, error) {
+	var model userModel
+	if err := r.db.WithContext(ctx).Where("oauth_provider = ? AND oauth_id = ?", provider, oauthID).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, biz.ErrOAuthUserNotFound
+		}
+		return nil, err
+	}
+	return &biz.User{
+		ID:            model.ID,
+		Username:      model.Username,
+		DisplayName:   model.DisplayName,
+		Email:         model.Email,
+		Group:         model.Group,
+		Status:        model.Status,
+		PasswordHash:  model.PasswordHash,
+		OAuthProvider: model.OAuthProvider,
+		OAuthID:       model.OAuthID,
 	}, nil
 }
 
 func (r *Repository) createUserDB(ctx context.Context, user *biz.User) error {
 	model := userModel{
-		Username:     user.Username,
-		DisplayName:  user.DisplayName,
-		Email:        user.Email,
-		Group:        user.Group,
-		Status:       user.Status,
-		PasswordHash: user.PasswordHash,
+		Username:      user.Username,
+		DisplayName:   user.DisplayName,
+		Email:         user.Email,
+		Group:         user.Group,
+		Status:        user.Status,
+		PasswordHash:  user.PasswordHash,
+		OAuthProvider: user.OAuthProvider,
+		OAuthID:       user.OAuthID,
 	}
 	if err := r.db.WithContext(ctx).Create(&model).Error; err != nil {
 		return err

@@ -19,6 +19,7 @@ import (
 	billingv1 "micro-one-api/api/billing/v1"
 	identityv1 "micro-one-api/api/identity/v1"
 	appauth "micro-one-api/internal/pkg/auth"
+	appregistry "micro-one-api/internal/pkg/registry"
 	apptls "micro-one-api/internal/pkg/tls"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaycfg "micro-one-api/internal/relay/config"
@@ -100,40 +101,59 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 		}
 	}
 
+	// Setup service discovery
+	discovery, err := appregistry.NewDiscovery(cfg.Registry)
+	if err != nil {
+		fmt.Printf("Warning: Failed to create service discovery: %v\n", err)
+	}
+	registrar, err := appregistry.NewRegistrar(cfg.Registry)
+	if err != nil {
+		fmt.Printf("Warning: Failed to create registrar: %v\n", err)
+	}
+
+	resolver := appregistry.NewResolver(discovery)
+	resolver.SetStatic("identity-service", cfg.Clients.Identity.Endpoint)
+	resolver.SetStatic("channel-service", cfg.Clients.Channel.Endpoint)
+	resolver.SetStatic("billing-service", cfg.Clients.Billing.Endpoint)
+
 	var identityConn, channelConn, billingConn *grpc.ClientConn
 	var identityClient identityv1.IdentityServiceClient
 	var channelClient channelv1.ChannelServiceClient
 	var billingClient billingv1.BillingServiceClient
 
+	identityEndpoint, _ := resolver.ResolveGRPC(context.Background(), "identity-service")
+	channelEndpoint, _ := resolver.ResolveGRPC(context.Background(), "channel-service")
+	billingEndpoint, _ := resolver.ResolveGRPC(context.Background(), "billing-service")
+
 	if enableAuth && tlsConfig.Enabled {
-		identityConn, err = createAuthenticatedClient(cfg.Clients.Identity.Endpoint, tlsConfig, serviceAuth)
+		identityConn, err = createAuthenticatedClient(identityEndpoint, tlsConfig, serviceAuth)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create identity client: %w", err)
 		}
-		channelConn, err = createAuthenticatedClient(cfg.Clients.Channel.Endpoint, tlsConfig, serviceAuth)
+		channelConn, err = createAuthenticatedClient(channelEndpoint, tlsConfig, serviceAuth)
 		if err != nil {
 			identityConn.Close()
 			return nil, nil, fmt.Errorf("failed to create channel client: %w", err)
 		}
-		billingConn, err = createAuthenticatedClient(cfg.Clients.Billing.Endpoint, tlsConfig, serviceAuth)
+		billingConn, err = createAuthenticatedClient(billingEndpoint, tlsConfig, serviceAuth)
 		if err != nil {
 			identityConn.Close()
 			channelConn.Close()
 			return nil, nil, fmt.Errorf("failed to create billing client: %w", err)
 		}
 	} else {
-		identityConn, err = grpc.NewClient(cfg.Clients.Identity.Endpoint,
+		identityConn, err = grpc.NewClient(identityEndpoint,
 			grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to connect to identity: %w", err)
 		}
-		channelConn, err = grpc.NewClient(cfg.Clients.Channel.Endpoint,
+		channelConn, err = grpc.NewClient(channelEndpoint,
 			grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			identityConn.Close()
 			return nil, nil, fmt.Errorf("failed to connect to channel: %w", err)
 		}
-		billingConn, err = grpc.NewClient(cfg.Clients.Billing.Endpoint,
+		billingConn, err = grpc.NewClient(billingEndpoint,
 			grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			identityConn.Close()
@@ -160,7 +180,14 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	srv := khttp.NewServer(khttp.Address(cfg.Server.HTTP.Addr), khttp.Timeout(providerTimeout))
 	httpServer.RegisterRoutes(srv)
 
-	app := kratos.New(kratos.Name("relay-gateway"), kratos.Server(srv))
+	kratosOpts := []kratos.Option{
+		kratos.Name("relay-gateway"),
+		kratos.Server(srv),
+	}
+	if registrar != nil {
+		kratosOpts = append(kratosOpts, kratos.Registrar(registrar))
+	}
+	app := kratos.New(kratosOpts...)
 
 	fmt.Printf("Starting relay-gateway on %s\n", cfg.Server.HTTP.Addr)
 

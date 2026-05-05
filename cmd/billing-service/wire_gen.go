@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,6 +19,7 @@ import (
 	"micro-one-api/internal/billing/data"
 	"micro-one-api/internal/billing/server"
 	"micro-one-api/internal/billing/service"
+	appregistry "micro-one-api/internal/pkg/registry"
 )
 
 func loadConfig(confPath string) (*bcfg.Config, error) {
@@ -67,10 +69,19 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
 	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc)
 
-	app := kratos.New(
+	registrar, rErr := appregistry.NewRegistrar(cfg.Registry)
+	if rErr != nil {
+		fmt.Printf("Warning: Failed to create registrar: %v\n", rErr)
+	}
+
+	kratosOpts := []kratos.Option{
 		kratos.Name("billing-service"),
 		kratos.Server(grpcSrv, httpSrv),
-	)
+	}
+	if registrar != nil {
+		kratosOpts = append(kratosOpts, kratos.Registrar(registrar))
+	}
+	app := kratos.New(kratosOpts...)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cleanupJob := biz.NewCleanupJob(uc, 1*time.Minute)

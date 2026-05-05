@@ -37,6 +37,15 @@ func (m *mockIdentityRepo) FindUserByUsername(ctx context.Context, username stri
 	return nil, ErrUserNotFound
 }
 
+func (m *mockIdentityRepo) FindUserByOAuth(ctx context.Context, provider, oauthID string) (*User, error) {
+	for _, u := range m.users {
+		if u.OAuthProvider == provider && u.OAuthID == oauthID {
+			return u, nil
+		}
+	}
+	return nil, ErrOAuthUserNotFound
+}
+
 func (m *mockIdentityRepo) CreateUser(ctx context.Context, user *User) error {
 	user.ID = int64(len(m.users) + 1)
 	m.users[user.ID] = user

@@ -29,16 +29,19 @@ var (
 	ErrTokenNotFound  = errors.New("token not found")
 	ErrUserExists     = errors.New("user already exists")
 	ErrInvalidPassword = errors.New("invalid password")
+	ErrOAuthUserNotFound = errors.New("oauth user not found")
 )
 
 type User struct {
-	ID           int64
-	Username     string
-	DisplayName  string
-	Email        string
-	Group        string
-	Status       int32
-	PasswordHash string
+	ID            int64
+	Username      string
+	DisplayName   string
+	Email         string
+	Group         string
+	Status        int32
+	PasswordHash  string
+	OAuthProvider string
+	OAuthID       string
 }
 
 type Token struct {
@@ -66,6 +69,7 @@ type IdentityRepo interface {
 	FindTokenByKey(ctx context.Context, key string) (*Token, error)
 	FindUserByID(ctx context.Context, userID int64) (*User, error)
 	FindUserByUsername(ctx context.Context, username string) (*User, error)
+	FindUserByOAuth(ctx context.Context, provider, oauthID string) (*User, error)
 	CreateUser(ctx context.Context, user *User) error
 	UpdateUser(ctx context.Context, user *User) error
 	DeleteUser(ctx context.Context, userID int64) error
@@ -263,6 +267,53 @@ func (uc *IdentityUsecase) generateToken() string {
 		b[i] = letters[time.Now().UnixNano()%int64(len(letters))]
 	}
 	return string(b)
+}
+
+// OAuthLogin finds or creates a user by OAuth provider identity, then returns a token.
+func (uc *IdentityUsecase) OAuthLogin(ctx context.Context, provider, oauthID, username, email, displayName string) (*User, string, error) {
+	// Try to find existing OAuth user
+	user, err := uc.repo.FindUserByOAuth(ctx, provider, oauthID)
+	if err != nil && !errors.Is(err, ErrOAuthUserNotFound) {
+		return nil, "", err
+	}
+
+	if user == nil {
+		// Create new OAuth user
+		if displayName == "" {
+			displayName = username
+		}
+		user = &User{
+			Username:      username,
+			DisplayName:   displayName,
+			Email:         email,
+			Group:         "default",
+			Status:        UserStatusEnabled,
+			OAuthProvider: provider,
+			OAuthID:       oauthID,
+		}
+		if err := uc.repo.CreateUser(ctx, user); err != nil {
+			return nil, "", err
+		}
+	}
+
+	if user.Status != UserStatusEnabled {
+		return nil, "", ErrUserDisabled
+	}
+
+	// Generate token
+	token := uc.generateToken()
+	tokenRecord := &Token{
+		UserID:         user.ID,
+		Key:            token,
+		Status:         TokenStatusEnabled,
+		UnlimitedQuota: true,
+		Models:         []string{},
+	}
+	if err := uc.repo.CreateToken(ctx, tokenRecord); err != nil {
+		return nil, "", err
+	}
+
+	return user, token, nil
 }
 
 func SplitCSVPtr(input *string) []string {

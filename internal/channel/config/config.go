@@ -1,9 +1,12 @@
 package config
 
+import appregistry "micro-one-api/internal/pkg/registry"
+
 // Config holds the channel-service configuration.
 type Config struct {
-	Server ServerConfig `json:"server"`
-	Data   DataConfig   `json:"data"`
+	Server   ServerConfig       `json:"server"`
+	Data     DataConfig         `json:"data"`
+	Registry appregistry.Config `json:"registry"`
 }
 
 type ServerConfig struct {

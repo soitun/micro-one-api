@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"micro-one-api/internal/admin/data"
 	adminserver "micro-one-api/internal/admin/server"
 	"micro-one-api/internal/admin/service"
+	appregistry "micro-one-api/internal/pkg/registry"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -49,20 +51,39 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 		return nil, nil, err
 	}
 
-	identityConn, err := grpc.NewClient(cfg.Clients.Identity.Endpoint,
+	// Setup service discovery
+	discovery, dErr := appregistry.NewDiscovery(cfg.Registry)
+	if dErr != nil {
+		fmt.Printf("Warning: Failed to create service discovery: %v\n", dErr)
+	}
+	registrar, rErr := appregistry.NewRegistrar(cfg.Registry)
+	if rErr != nil {
+		fmt.Printf("Warning: Failed to create registrar: %v\n", rErr)
+	}
+
+	resolver := appregistry.NewResolver(discovery)
+	resolver.SetStatic("identity-service", cfg.Clients.Identity.Endpoint)
+	resolver.SetStatic("channel-service", cfg.Clients.Channel.Endpoint)
+	resolver.SetStatic("billing-service", cfg.Clients.Billing.Endpoint)
+
+	identityEndpoint, _ := resolver.ResolveGRPC(context.Background(), "identity-service")
+	channelEndpoint, _ := resolver.ResolveGRPC(context.Background(), "channel-service")
+	billingEndpoint, _ := resolver.ResolveGRPC(context.Background(), "billing-service")
+
+	identityConn, err := grpc.NewClient(identityEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to connect to identity service: %w", err)
 	}
 
-	channelConn, err := grpc.NewClient(cfg.Clients.Channel.Endpoint,
+	channelConn, err := grpc.NewClient(channelEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		identityConn.Close()
 		return nil, nil, fmt.Errorf("failed to connect to channel service: %w", err)
 	}
 
-	billingConn, err := grpc.NewClient(cfg.Clients.Billing.Endpoint,
+	billingConn, err := grpc.NewClient(billingEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		identityConn.Close()
@@ -92,10 +113,14 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 
 	httpSrv := adminserver.NewHTTPServer(cfg.Server.HTTP.Addr)
 
-	app := kratos.New(
+	kratosOpts := []kratos.Option{
 		kratos.Name("admin-api"),
 		kratos.Server(grpcSrv, httpSrv),
-	)
+	}
+	if registrar != nil {
+		kratosOpts = append(kratosOpts, kratos.Registrar(registrar))
+	}
+	app := kratos.New(kratosOpts...)
 
 	cleanup := func() {
 		identityConn.Close()

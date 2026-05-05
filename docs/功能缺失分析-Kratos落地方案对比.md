@@ -80,11 +80,11 @@
 
 | 缺失项 | 来源 | 说明 | 优先级 | 状态 |
 |--------|------|------|--------|------|
-| **OAuth/SSO** | Kratos 方案§3.2 | 无 OAuth2/OIDC 实现 | P3 | 待实现 |
+| **OAuth/SSO** | Kratos 方案§3.2 | GitHub/Google OAuth2 授权码登录 | P3 | ✅ 已实现 |
 | **账务对账任务** | Kratos 方案§6 | reconciliation + 审计报告 | P2 | ✅ 已实现 |
 | **分布式限流** | Kratos 方案§9 | Redis sorted set 滑动窗口限流 | P2 | ✅ 已实现 |
 | **监控告警** | §17 第 10 条 | Prometheus metrics 端点 | P2 | ✅ 已实现 |
-| **服务治理 / 注册中心** | §17 第 3 条 | 静态端点配置，无 consul/nacos 服务发现 | P3 | 待实现 |
+| **服务治理 / 注册中心** | §17 第 3 条 | Consul 注册发现 + 静态端点回退 | P3 | ✅ 已实现 |
 
 ---
 
@@ -120,5 +120,7 @@
 | 账务对账 | 无 | `ReconciliationUsecase` + `/v1/reconciliation` 端点 ✅ |
 | 部署文档 | 无 | `docs/deployment.md` 完整运维文档 ✅ |
 | 二期服务测试 | 仅 biz 层 | biz + data 层单元测试 ✅ |
+| OAuth/SSO | 无 | GitHub/Google OAuth2 授权码登录 + 用户自动创建 ✅ |
+| 服务注册发现 | 静态端点 | Consul 注册发现 + 静态端点回退 ✅ |
 
-**剩余待做**：OAuth/SSO、服务注册发现（均为 P3）。
+**所有缺失项已全部实现。**

@@ -1,6 +1,11 @@
 server:
   http:
     addr: 0.0.0.0:3000
+registry:
+  type: ${REGISTRY_TYPE:-}
+  consul:
+    address: ${CONSUL_ADDR:-127.0.0.1:8500}
+    health_check_interval: 10
 clients:
   identity:
     endpoint: 127.0.0.1:9001

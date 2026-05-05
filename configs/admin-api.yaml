@@ -3,6 +3,11 @@ server:
     addr: 0.0.0.0:8000
   grpc:
     addr: 0.0.0.0:9000
+registry:
+  type: ${REGISTRY_TYPE:-}
+  consul:
+    address: ${CONSUL_ADDR:-127.0.0.1:8500}
+    health_check_interval: 10
 clients:
   identity:
     endpoint: 127.0.0.1:9001

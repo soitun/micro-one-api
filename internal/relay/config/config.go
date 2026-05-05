@@ -1,11 +1,14 @@
 package config
 
+import appregistry "micro-one-api/internal/pkg/registry"
+
 // Config holds the relay-gateway configuration.
 type Config struct {
-	Server  ServerConfig  `json:"server"`
-	Clients ClientsConfig `json:"clients"`
-	Retry   RetryConfig   `json:"retry"`
-	Models  ModelsConfig  `json:"models"`
+	Server   ServerConfig         `json:"server"`
+	Clients  ClientsConfig        `json:"clients"`
+	Retry    RetryConfig          `json:"retry"`
+	Models   ModelsConfig         `json:"models"`
+	Registry appregistry.Config   `json:"registry"`
 }
 
 // ModelsConfig holds model mapping configuration.

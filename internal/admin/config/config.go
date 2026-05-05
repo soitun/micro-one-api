@@ -1,10 +1,13 @@
 package config
 
+import appregistry "micro-one-api/internal/pkg/registry"
+
 // Config holds the admin-api configuration.
 type Config struct {
-	Server  ServerConfig  `json:"server"`
-	Clients ClientsConfig `json:"clients"`
-	Data    DataConfig    `json:"data"`
+	Server   ServerConfig       `json:"server"`
+	Clients  ClientsConfig      `json:"clients"`
+	Data     DataConfig         `json:"data"`
+	Registry appregistry.Config `json:"registry"`
 }
 
 // DataConfig holds database configuration for system options storage.

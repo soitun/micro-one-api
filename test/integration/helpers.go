@@ -216,6 +216,15 @@ func (m *testIdentityRepo) FindUserByUsername(ctx context.Context, username stri
 	return nil, identitybiz.ErrUserNotFound
 }
 
+func (m *testIdentityRepo) FindUserByOAuth(ctx context.Context, provider, oauthID string) (*identitybiz.User, error) {
+	for _, u := range m.users {
+		if u.OAuthProvider == provider && u.OAuthID == oauthID {
+			return u, nil
+		}
+	}
+	return nil, identitybiz.ErrOAuthUserNotFound
+}
+
 func (m *testIdentityRepo) CreateUser(ctx context.Context, user *identitybiz.User) error {
 	user.ID = int64(len(m.users) + 1)
 	m.users[user.ID] = user
