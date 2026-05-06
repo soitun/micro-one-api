@@ -564,7 +564,7 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 
 ---
 
-## 16. 迁移进度核查清单（截至 2026/05/02 更新）
+## 16. 迁移进度核查清单（截至 2026/05/06 更新）
 
 ### 16.1 骨架层 — ✅ 已完成
 
@@ -574,7 +574,7 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 | `internal/` DDD 目录 | ✅ | biz / data / service / server 四层均已创建 |
 | `api/` proto 定义 | ✅ | 6 个 .proto 文件均已生成（identity / channel / billing / admin / relay / common） |
 | `configs/` 配置文件 | ✅ | 9 个 .yaml 文件均已创建，支持环境变量覆盖 |
-| `internal/pkg/` 共享包 | ✅ | auth / errors / events / grpc / middleware / model / logger / timeout / tls / validation / xdb / xgrpc / xhttp / xtrace |
+| `internal/pkg/` 共享包 | ✅ | auth / errors / events / grpc / middleware / model / logger / timeout / tls / validation / xdb / xgrpc / xhttp / xtrace（已集成 OpenTelemetry + Jaeger） |
 | `third_party/` | ✅ | google / validate proto 依赖 |
 | `migrations/billing/` | ✅ | 6 个 SQL 迁移文件 |
 | `deployments/` | ✅ | Docker / K8s 部署文件（含二期服务） |
@@ -610,6 +610,8 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 
 - 14 个 RPC 均已实现（ReserveQuota / CommitQuota / ReleaseQuota / GetAccountSnapshot / TopUpQuota / CreateRedeemCode / CreateRedeemCodesBatch / RedeemCode / GetRedeemCode / ListRedeemCodes / SearchRedeemCodes / UpdateRedeemCode / DeleteRedeemCode / ListLedger）
 - ✅ **proto 文件无重复定义**，编译正常，196 行清晰结构
+- ✅ **对账定时调度** — `ReconciliationJob` 每小时自动执行（清理过期 reservation + 账户 quota 一致性检查）
+- ✅ **对账任务** — `ReconciliationUsecase.RunReconciliation()` 已实现，包含过期清理和账户不一致检测
 
 #### 16.2.4 `admin-api` — ✅ 已承担管理端 BFF 职责
 
@@ -634,7 +636,8 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 | 账务预扣/提交/释放调用 `billing-service` | ✅ 已集成（ReserveQuota / CommitQuota / ReleaseQuota） |
 | 鉴权调用 `identity-service` | ✅ 已集成（GetAuthSnapshot） |
 | `data/client/` 服务间调用封装 | ✅ 已存在（`internal/relay/data/` 包含 gRPC client + 适配器） |
-| `data/provider/` 上游模型适配 | ✅ 已存在（internal/relay/provider/ 包含 factory.go / provider.go / stream_test.go） |
+| `data/provider/` 上游模型适配 | ✅ 已存在（internal/relay/provider/ 包含 factory.go / provider.go / anthropic.go / stream_test.go） |
+| Anthropic Provider | ✅ 已实现 — 支持 Claude API 格式转换（请求/响应/流式），x-api-key 认证 |
 | 重试策略 `biz/retry.go` | ✅ 已实现 — `RetryPolicy` + `RetryExecutor`，指数退避 + channel fallback |
 | 流式处理 `biz/stream.go` | ✅ 已存在（在 provider 中实现） |
 | 模型映射 `biz/model_mapping.go` | ✅ 已实现 — 支持 YAML/JSON 格式，已接入 `RelayUsecase.Plan()` |
@@ -651,6 +654,8 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 | TLS 配置 | Kratos TLS | ✅ 已实现（internal/pkg/tls/） |
 | 服务认证 | JWT / mTLS | ✅ 已实现（internal/pkg/auth/） |
 | 第二阶段服务 | config-service / log-service / monitor-worker / notify-worker | ✅ 已创建并实现 HTTP API |
+| 链路追踪 | OpenTelemetry + Jaeger | ✅ 已集成 — xtrace 包支持 OTLP HTTP exporter，可配置采样率 |
+| 对账调度 | 定时任务 | ✅ 已实现 — billing-service 内置 ReconciliationJob（每小时） |
 
 ### 16.4 配置一致性 — ✅ 已修复
 
@@ -716,10 +721,23 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 ### 架构改进建议（可选）
 
 1. **统一错误处理** — 建议在 internal/pkg/errors/ 中进一步完善错误码体系
-2. **链路追踪** — 当前已有 xtrace 包，建议补充 Jaeger/Zipkin 集成
+2. ~~**链路追踪**~~ — ✅ 已完成 — OpenTelemetry + Jaeger OTLP HTTP 集成，支持采样率配置
 3. **服务治理** — 可考虑接入 consul/nacos 等注册中心，替代静态端点配置
 4. **API 文档** — 可考虑接入 swagger/OpenAPI 自动生成 API 文档
 5. **gRPC Proto 定义** — 二期服务目前仅有 HTTP API，建议补充 proto 定义以支持 gRPC 服务间调用
+
+### 安全修复（P0）— ✅ 已完成
+
+- ~~Token 生成使用 `time.Now().UnixNano()`~~ — ✅ 已修复为 `crypto/rand`，熵从 ~10bit 提升到 ~190bit
+- ~~Admin-api gRPC 服务器空壳~~ — ✅ 已实现 `NewGRPCServer()` 注册 AdminServiceServer
+- ~~Admin-api HTTP 路由缺失~~ — ✅ 已注册 /v1/users, /v1/channels, /v1/logs 等路由
+- ~~Event Bus 仅内存实现~~ — ✅ 已添加 Redis Pub/Sub 实现（`internal/pkg/events/redis.go`）
+
+### 多模型支持（P2）— ✅ 已完成
+
+- ~~Anthropic Provider~~ — ✅ 已实现（`internal/relay/provider/anthropic.go`），支持 Claude API 格式转换
+- ~~对账定时调度~~ — ✅ 已实现（`internal/billing/biz/reconciliation_job.go`），每小时自动执行
+- ~~二期服务集成测试~~ — ✅ 已实现（`test/integration/phase2_test.go`），覆盖 config/log/monitor/notify 四个服务
 
 ---
 
@@ -748,6 +766,9 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 
 11. **二期服务 Proto 定义** — 为 config / log / monitor / notify 服务补充 proto 定义
 12. ~~**二期服务单元测试**~~ — ✅ 已完成 — 4 个服务 biz + data 层单元测试
-13. **集成测试增强** — 补充 retry、model mapping、chat completions 流程的集成测试
+13. ~~**集成测试增强**~~ — ✅ 已完成 — `test/integration/phase2_test.go` 覆盖 config/log/monitor/notify 四个服务端到端测试
 14. **性能优化** — 缓存策略、连接池配置、限流细化
 15. ~~**监控告警**~~ — ✅ 已完成 — Prometheus metrics + Grafana 指标
+16. ~~**链路追踪集成**~~ — ✅ 已完成 — OpenTelemetry + Jaeger（`internal/pkg/xtrace/trace.go`）
+17. ~~**对账定时调度**~~ — ✅ 已完成 — ReconciliationJob 每小时自动执行（`internal/billing/biz/reconciliation_job.go`）
+18. ~~**Anthropic Provider**~~ — ✅ 已完成 — Claude API 格式转换（`internal/relay/provider/anthropic.go`）
