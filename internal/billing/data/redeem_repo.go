@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"micro-one-api/internal/billing/biz"
@@ -118,7 +119,7 @@ func (r *redeemRepo) SearchRedeemCodes(ctx context.Context, keyword string) ([]*
 	var models []redeemCodeModel
 
 	err := r.data.db.WithContext(ctx).
-		Where("code = ? OR name LIKE ?", keyword, keyword+"%").
+		Where("code = ? OR name LIKE ?", keyword, escapeLike(keyword)+"%").
 		Order("created_at DESC").
 		Find(&models).Error
 
@@ -199,4 +200,11 @@ func (r *redeemRepo) CreateRedeemRecord(ctx context.Context, record *biz.RedeemR
 	}
 
 	return r.data.db.WithContext(ctx).Create(model).Error
+}
+
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
 }

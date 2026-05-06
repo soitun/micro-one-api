@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -209,45 +211,22 @@ func extractToken(r *http.Request) string {
 	return ""
 }
 
-// getClientIP extracts the client IP address from the request
+// getClientIP extracts the client IP address from the request.
+// Only trusts RemoteAddr to prevent X-Forwarded-For spoofing.
+// Behind a trusted reverse proxy, the proxy should set X-Forwarded-For
+// and this function should be updated to trust the proxy's IP range.
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP
-		if idx := indexOf(xff, ","); idx != -1 {
-			return xff[:idx]
-		}
-		return xff
-	}
-
-	// Check X-Real-IP header
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
-	}
-
-	// Use RemoteAddr
-	if idx := indexOf(r.RemoteAddr, ":"); idx != -1 {
+	// Use RemoteAddr only - do not trust client-supplied headers
+	if idx := strings.LastIndex(r.RemoteAddr, ":"); idx != -1 {
 		return r.RemoteAddr[:idx]
 	}
 
 	return r.RemoteAddr
 }
 
-// simpleHash creates a simple hash of a string
+// simpleHash creates a SHA-256 hash of a string, truncated to hex
 func simpleHash(s string) string {
-	hash := 0
-	for i, c := range s {
-		hash = ((hash << 5) - hash) + int(c) + i
-	}
-	return fmt.Sprintf("%x", hash)
+	h := sha256.Sum256([]byte(s))
+	return fmt.Sprintf("%x", h[:8]) // first 8 bytes = 16 hex chars
 }
 
-// indexOf finds the index of a substring
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}

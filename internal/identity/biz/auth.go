@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -178,6 +180,9 @@ func (uc *IdentityUsecase) Register(ctx context.Context, username, password, ema
 	if existing != nil {
 		return nil, ErrUserExists
 	}
+	if len(password) < 8 {
+		return nil, fmt.Errorf("password must be at least 8 characters")
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
@@ -271,12 +276,12 @@ func (uc *IdentityUsecase) DeleteUser(ctx context.Context, userID int64) error {
 func (uc *IdentityUsecase) generateToken() string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback should never happen; crypto/rand uses OS CSPRNG
-		panic("crypto/rand failed: " + err.Error())
-	}
 	for i := range b {
-		b[i] = letters[int(b[i])%len(letters)]
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
+		if err != nil {
+			panic("crypto/rand failed: " + err.Error())
+		}
+		b[i] = letters[n.Int64()]
 	}
 	return string(b)
 }

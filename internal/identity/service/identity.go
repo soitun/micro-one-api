@@ -84,7 +84,7 @@ func (s *IdentityService) Login(ctx context.Context, req *identityv1.LoginReques
 	if err != nil {
 		return &identityv1.LoginResponse{
 			Success: false,
-			Message: err.Error(),
+			Message: "invalid credentials",
 		}, nil
 	}
 	return &identityv1.LoginResponse{
@@ -100,7 +100,7 @@ func (s *IdentityService) Register(ctx context.Context, req *identityv1.Register
 	if err != nil {
 		return &identityv1.RegisterResponse{
 			Success: false,
-			Message: err.Error(),
+			Message: "registration failed",
 		}, nil
 	}
 	return &identityv1.RegisterResponse{
@@ -115,7 +115,7 @@ func (s *IdentityService) CreateAccessToken(ctx context.Context, req *identityv1
 	if err != nil {
 		return &identityv1.CreateAccessTokenResponse{
 			Success: false,
-			Message: err.Error(),
+			Message: "failed to create access token",
 		}, nil
 	}
 	return &identityv1.CreateAccessTokenResponse{

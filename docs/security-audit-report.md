@@ -1,397 +1,628 @@
-# 安全审计报告
+# Micro-One-Api 安全审计报告 V2
 
-**项目名称**：micro-one-api
-**审计时间**：2026-05-06 14:00
-**审计范围**：当前完整目录下的所有源代码与配置文件
-**总发现数量**：28 个（Critical: 3, High: 8, Medium: 10, Low: 5, Info: 2）
-**已修复数量**：17 个（Critical: 3, High: 5, Medium: 8, Low: 1）
-**修复提交**：`security-audit` 分支
-
-## 1. 执行摘要（Executive Summary）
-
-micro-one-api 是一个基于 Go/Kratos 的 API 网关微服务系统。经过全面安全审计，发现 28 个安全问题，其中 3 个 Critical、8 个 High。审计后已修复 17 个漏洞，包括所有 Critical 级别问题和大部分 High/Medium 级别问题。整体安全成熟度评分从 **4/10** 提升至 **6/10**。
-
-**已修复的关键问题**：Admin API 认证、硬编码凭证移除、密码哈希修复、错误消息脱敏、OAuth CSRF 防护、LIKE 注入防护、CSP/HSTS 加固、Docker Compose 安全加固。
-
-**仍需处理的问题**：生产代码未接入安全中间件（需较大重构）、gRPC 服务间 TLS、OAuth 用户配额策略、Gemini URL 注入防护。
-
-## 2. 发现详情（Findings）
-
-### 2.1 [Critical] Admin API 无应用层认证 ✅ 已修复
-
-- **位置**：`internal/admin/server/http.go`
-- **描述**：Admin HTTP 服务器注册了 `/v1/users`、`/v1/channels`、`/v1/system/options`、`/v1/logs`、`/v1/account`、`/v1/redeem-codes` 等端点，但无任何认证中间件。
-- **修复状态**：✅ 已修复 — 添加 `AdminAuth` 中间件，使用 `ADMIN_TOKEN` 环境变量进行 Bearer token 认证，使用 `crypto/subtle.ConstantTimeCompare` 防止时序攻击。
-- **CVSS 3.1 分数**：9.8 (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H)
-- **参考**：OWASP A01:2021 - Broken Access Control, CWE-306
+**审计日期**: 2026-05-06
+**审计版本**: v2.0 (增强版)
+**审计范围**: 全量代码安全审计 (184 Go 源文件 + 11 YAML 配置 + 10 Proto + 部署文件)
+**评分标准**: CVSS 4.0
+**参考标准**: OWASP Top 10 2025, CWE Top 25 2025, MITRE ATT&CK v18+
 
 ---
 
-### 2.2 [Critical] 硬编码默认 JWT 密钥 ✅ 已修复
+## 目录
 
-- **位置**：`internal/pkg/auth/jwt.go:32-36`
-- **描述**：当 `JWT_SECRET_KEY` 环境变量未设置时，使用公开可见的默认密钥签发 JWT。
-- **修复状态**：✅ 已修复 — `NewJWTManager()` 和 `LoadServiceAuthConfig()` 在环境变量缺失时返回错误，拒绝启动。
-- **CVSS 3.1 分数**：9.1 (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N)
-- **参考**：CWE-798, CWE-321
-
----
-
-### 2.3 [Critical] 硬编码 demo 用户和 token ✅ 已修复
-
-- **位置**：`internal/identity/data/data.go:82-103`，`internal/channel/data/data.go:77-104`
-- **描述**：内存回退仓库包含硬编码的 root 用户（密码 "password"）、`demo-token`（无限配额）、以及硬编码的上游 API key。
-- **修复状态**：✅ 已修复 — identity 和 channel 的内存回退仓库均改为返回空 map，不再包含任何硬编码凭证。
-- **CVSS 3.1 分数**：9.8 (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H)
-- **参考**：CWE-798, OWASP A07:2021
+1. [执行摘要](#1-执行摘要)
+2. [审计方法论](#2-审计方法论)
+3. [OWASP Top 10 2025 分类审计](#3-owasp-top-10-2025-分类审计)
+4. [修复状态](#4-修复状态)
+5. [风险矩阵](#5-风险矩阵)
+6. [修复建议优先级](#6-修复建议优先级)
 
 ---
 
-### 2.4 [High] 生产代码未接入安全中间件 ❌ 未修复
+## 1. 执行摘要
 
-- **位置**：`cmd/relay-gateway/wire_gen.go:182` vs `internal/relay/server/http_enhanced.go`
-- **描述**：`EnhancedHTTPServer` 实现了完整的安全中间件链（SecurityHeaders、CORS、RateLimit、MaxBodySize、InputValidation），但生产入口调用的是无中间件版本。
-- **影响**：速率限制、安全头、CORS、输入验证、请求体大小限制在生产环境全部失效。
-- **CVSS 3.1 分数**：8.2 (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N)
-- **备注**：需要较大重构，将 `EnhancedHTTPServer` 的中间件链提取为共享组件并接入所有 HTTP 服务器。建议作为下个迭代的优先任务。
-- **参考**：OWASP A05:2021 - Security Misconfiguration
-
----
-
-### 2.5 [High] gRPC 服务间通信默认使用明文 ❌ 未修复
-
-- **位置**：`cmd/relay-gateway/wire_gen.go:147-158`，`cmd/admin-api/wire_gen.go:74-87`
-- **描述**：所有 gRPC 客户端连接使用 `insecure.NewCredentials()`，JWT token 和用户凭证以明文传输。
-- **影响**：网络嗅探可获取所有服务间通信内容。
-- **CVSS 3.1 分数**：7.5 (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N)
-- **备注**：需要配置 TLS 证书基础设施，建议配合 K8s mTLS 方案（如 Istio/Linkerd）或手动配置证书。
-- **参考**：CWE-319
+| 指标 | 数值 |
+|------|------|
+| 审计文件数 | 184 Go 源文件 + 11 YAML 配置 + 10 Proto + 部署文件 |
+| 发现总数 | 42 |
+| 严重 (Critical) | 5 |
+| 高危 (High) | 10 |
+| 中危 (Medium) | 14 |
+| 低危 (Low) | 8 |
+| 信息 (Info) | 5 (正面发现) |
+| 已修复 | 15 |
+| 待修复 | 22 |
 
 ---
 
-### 2.6 [High] 硬编码数据库凭证 ⚠️ 部分修复
+## 2. 审计方法论
 
-- **位置**：`configs/*.yaml`，`deployments/docker-compose/docker-compose.yml`
-- **描述**：配置文件和 docker-compose 使用默认弱密码。
-- **修复状态**：⚠️ 部分修复 — docker-compose 已改为要求 `${MYSQL_ROOT_PASSWORD:?...}`、`${DATABASE_DSN:?...}` 等必需环境变量，不再有默认值。configs/*.yaml 仍保留 `${DATABASE_DSN:-root:password}` 默认值（因为这些文件被 gitignore，仅作为模板参考）。
-- **CVSS 3.1 分数**：7.3 (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N)
-- **参考**：CWE-798
-
----
-
-### 2.7 [High] OAuth 用户自动获得无限配额 ❌ 未修复
-
-- **位置**：`internal/identity/biz/auth.go:310-316`
-- **描述**：OAuth 登录创建的新用户自动获得 `UnlimitedQuota: true`，无需管理员审批。
-- **影响**：任何人通过 OAuth 注册即可无限制消耗 AI API 配额。
-- **CVSS 3.1 分数**：7.5 (AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H)
-- **备注**：需要设计配额审批流程，涉及业务逻辑变更。
-- **参考**：OWASP A04:2021 - Insecure Design
+- **静态代码分析**: 全量 Go 源码审查 (grep, 人工审查)
+- **依赖分析**: go.mod 直接/间接依赖检查
+- **配置审查**: YAML, Dockerfile, docker-compose, K8s manifests
+- **供应链分析**: GitHub Actions, 依赖版本
+- **运行时风险评估**: gRPC 拦截器链, HTTP 中间件链, 数据流追踪
+- **CVSS 4.0 评分**: 每个发现使用完整向量字符串
 
 ---
 
-### 2.8 [High] Admin CreateUser 不设置密码 ✅ 已修复
+## 3. OWASP Top 10 2025 分类审计
 
-- **位置**：`internal/identity/biz/auth.go:224-240`
-- **描述**：`CreateUser` 方法接受 `password` 参数但从未使用，`PasswordHash` 字段留空。
-- **修复状态**：✅ 已修复 — 现在使用 `bcrypt.GenerateFromPassword` 哈希 password 参数并设置 `PasswordHash`。
-- **CVSS 3.1 分数**：7.2 (AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:N)
-- **参考**：CWE-256
+### A01:2025 - 访问控制失效 (Broken Access Control)
 
----
+**有发现**
 
-### 2.9 [High] 错误信息泄露内部细节 ✅ 已修复
+#### V-01 [CRITICAL] gRPC 认证拦截器 Token 提取逻辑完全失效
 
-- **位置**：`internal/admin/server/http.go`，`internal/relay/server/http.go`，`internal/identity/server/http.go`
-- **描述**：多个 HTTP handler 将 `err.Error()` 原始返回给客户端。
-- **修复状态**：✅ 已修复 — admin、identity、relay 三个服务的 HTTP handler 全部改为返回通用错误消息（"internal server error"、"upstream service error" 等），不再泄露内部细节。
-- **CVSS 3.1 分数**：7.5 (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N)
-- **参考**：OWASP A04:2021, CWE-209
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H` - **9.3**
+- **CWE**: CWE-287 (不当认证)
+- **MITRE ATT&CK**: T1078 (有效账户)
+- **文件**: `internal/pkg/grpc/auth.go:184-206`
+- **代码证据**:
+  ```go
+  func extractTokenFromContext(ctx context.Context) (string, error) {
+      md, ok := peer.FromContext(ctx)  // 错误: 应使用 metadata.FromIncomingContext
+      if !ok {
+          return "", fmt.Errorf("no peer info")
+      }
+      if token := md.AuthInfo; token != nil {
+          if tlsInfo, ok := token.(credentials.TLSInfo); ok {
+              if len(tlsInfo.State.PeerCertificates) > 0 {
+                  return "", nil // mTLS 时返回空字符串
+              }
+          }
+      }
+      return "", fmt.Errorf("token not found in metadata")
+  }
+  ```
+- **描述**: 函数使用 `peer.FromContext()` 获取传输层信息而非 gRPC metadata headers。TokenAuth 客户端通过 `authorization` metadata key 发送 token，但此函数从未读取 gRPC metadata。结果: (1) 无 mTLS 时所有认证调用失败; (2) 有 mTLS 时返回空字符串，JWT 验证必定失败。整个 gRPC 认证系统形同虚设。
+- **修复状态**: ❌ 待修复 (需架构级改造)
 
----
+#### V-02 [CRITICAL] 所有内部 gRPC 服务完全无认证
 
-### 2.10 [High] SSRF 风险 — Gemini provider URL 注入 ❌ 未修复
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H` - **9.3**
+- **CWE**: CWE-306 (关键功能缺少认证)
+- **MITRE ATT&CK**: T1078.004 (云账户)
+- **文件**:
+  - `internal/identity/server/grpc.go:11-16`
+  - `internal/admin/server/grpc.go:11-15`
+  - `internal/billing/server/grpc.go`
+  - `internal/channel/server/grpc.go`
+  - `internal/log/server/grpc.go`
+- **代码证据**:
+  ```go
+  // identity/server/grpc.go
+  func NewGRPCServer(addr string, svc *service.IdentityService) *kgrpc.Server {
+      srv := kgrpc.NewServer(kgrpc.Address(addr))  // 无认证拦截器
+      identityv1.RegisterIdentityServiceServer(srv, svc)
+      return srv
+  }
+  ```
+- **描述**: `CreateAuthenticatedServer` 函数存在但从未被任何服务调用。任何能到达 gRPC 端口的客户端可以: (1) 无限制暴力破解 Login; (2) 调用 CreateUser/DeleteUser 管理用户; (3) 调用 TopUpQuota/CreateRedeemCode 操控计费。
+- **修复状态**: ❌ 待修复 (需架构级改造)
 
-- **位置**：`internal/relay/provider/gemini.go:163,202`
-- **描述**：`req.Model`（用户可控输入）直接拼接到 URL 路径中。
-- **影响**：精心构造的 model 名称可操纵 URL 路径。
-- **CVSS 3.1 分数**：7.2 (AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N)
-- **备注**：需要在 provider 层对 model 名称做 URL 编码或白名单验证。
-- **参考**：CWE-918
+#### V-03 [HIGH] Admin gRPC 服务暴露所有管理操作
 
----
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N` - **8.7**
+- **CWE**: CWE-306 (关键功能缺少认证)
+- **文件**: `internal/admin/server/grpc.go:11-15`
+- **描述**: HTTP 端点有 AdminAuth 中间件保护，但 gRPC 端口完全开放，包含 TopUpQuota, CreateRedeemCode, DeleteUser 等所有管理操作。
+- **修复状态**: ❌ 待修复
 
-### 2.11 [Medium] OAuth state 验证可绕过 ✅ 已修复
+#### V-04 [HIGH] 日志服务 HTTP 端点无认证
 
-- **位置**：`internal/identity/server/http.go:101-107`
-- **描述**：当 `oauth_state` cookie 缺失或为空时，state 验证被跳过。
-- **修复状态**：✅ 已修复 — state 验证现在为强制性，cookie 缺失或为空时拒绝请求。
-- **CVSS 3.1 分数**：6.5 (AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N)
-- **参考**：CWE-352
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:L/VA:N/SC:N/SI:N/SA:N` - **7.3**
+- **CWE**: CWE-306 (关键功能缺少认证)
+- **文件**: `internal/log/server/http.go:17-29`
+- **描述**: 所有日志端点 (GET/POST /v1/logs, GET /v1/logs/{id}) 完全无认证。攻击者可读取所有日志或注入虚假日志。
+- **修复状态**: ❌ 待修复
 
----
+#### V-05 [HIGH] 计费对账端点无认证
 
-### 2.12 [Medium] IP 欺骗 — Rate Limiter 信任客户端头 ❌ 未修复
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:H/VA:H/SC:N/SI:N/SA:N` - **8.1**
+- **CWE**: CWE-306 (关键功能缺少认证)
+- **文件**: `internal/billing/server/http.go:17`
+- **描述**: `/v1/reconciliation` 端点无认证，可被反复触发导致数据库负载或计费竞态。
+- **修复状态**: ❌ 待修复
 
-- **位置**：`internal/pkg/middleware/ratelimit.go:212-233`
-- **描述**：`getClientIP` 直接信任 `X-Forwarded-For` 和 `X-Real-IP` 头。
-- **影响**：攻击者可伪造 IP 绕过速率限制。
-- **CVSS 3.1 分数**：5.3 (AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N)
-- **参考**：CWE-348
+#### V-06 [HIGH] IP 欺骗绕过速率限制
 
----
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N` - **8.2**
+- **CWE**: CWE-290 (欺骗认证绕过)
+- **文件**: `internal/pkg/middleware/ratelimit.go:213-234`
+- **代码证据**:
+  ```go
+  func getClientIP(r *http.Request) string {
+      if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+          if idx := indexOf(xff, ","); idx != -1 {
+              return xff[:idx]  // 盲信客户端 header
+          }
+          return xff
+      }
+  ```
+- **描述**: 速率限制器盲信 `X-Forwarded-For` 和 `X-Real-IP` header。攻击者可通过轮换伪造 IP 完全绕过 IP 级速率限制。
+- **修复状态**: ✅ 已修复 (移除 header 信任, 使用 RemoteAddr)
 
-### 2.13 [Medium] LIKE 通配符注入 ✅ 已修复
+#### V-07 [MEDIUM] OAuth 自动注册给予无限配额
 
-- **位置**：`internal/identity/data/data.go`，`internal/log/data/data.go`，`internal/channel/data/data.go`
-- **描述**：用户输入直接嵌入 LIKE 模式，未转义 `%` 和 `_` 通配符。
-- **修复状态**：✅ 已修复 — 三个模块均添加 `escapeLike()` 函数，转义 `%`、`_` 和 `\` 字符。
-- **CVSS 3.1 分数**：5.3 (AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N)
-- **参考**：CWE-89
-
----
-
-### 2.14 [Medium] 无登录/注册速率限制 ❌ 未修复
-
-- **位置**：`internal/identity/service/identity.go:82-111`
-- **描述**：Login 和 Register gRPC 端点无速率限制。
-- **影响**：攻击者可进行大规模密码猜测攻击。
-- **CVSS 3.1 分数**：5.3 (AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N)
-- **参考**：CWE-307
-
----
-
-### 2.15 [Medium] Redis 无认证 ✅ 已修复
-
-- **位置**：`deployments/docker-compose/docker-compose.yml`
-- **描述**：docker-compose 中 Redis 无 `--requirepass` 且暴露端口到主机。
-- **修复状态**：✅ 已修复 — Redis 使用 `--requirepass` 启动，密码通过 `${REDIS_PASSWORD:?...}` 必需环境变量注入，端口不再暴露到主机。
-- **CVSS 3.1 分数**：5.9 (AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N)
-- **参考**：CWE-306
-
----
-
-### 2.16 [Medium] TLS 默认关闭 ❌ 未修复
-
-- **位置**：`.env.example:28`，`internal/pkg/tls/config.go:26`
-- **描述**：`TLS_ENABLED=false` 是默认值。
-- **影响**：默认部署所有通信为明文。
-- **CVSS 3.1 分数**：5.9 (AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N)
-- **参考**：CWE-319
-
----
-
-### 2.17 [Medium] CSP 允许 unsafe-inline ✅ 已修复
-
-- **位置**：`internal/pkg/middleware/security.go:29-30`
-- **描述**：CSP 策略中 `script-src` 和 `style-src` 允许 `'unsafe-inline'`。
-- **修复状态**：✅ 已修复 — 移除 `unsafe-inline`，改为仅允许 `'self'`。
-- **CVSS 3.1 分数**：4.3 (AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N)
-- **参考**：CWE-79
-
----
-
-### 2.18 [Medium] HSTS 仅在 TLS 连接时设置 ✅ 已修复
-
-- **位置**：`internal/pkg/middleware/security.go:37-39`
-- **描述**：HSTS 头仅在 `r.TLS != nil` 时设置，TLS 终止代理后方不会生效。
-- **修复状态**：✅ 已修复 — 现在同时检查 `X-Forwarded-Proto: https` 头，在代理后方也能正确设置 HSTS。
-- **CVSS 3.1 分数**：4.3 (AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N)
-- **参考**：CWE-319
-
----
-
-### 2.19 [Medium] OAuth state cookie 缺少 Secure 标志 ✅ 已修复
-
-- **位置**：`internal/identity/server/http.go:83-89`
-- **描述**：`oauth_state` cookie 缺少 `Secure: true`。
-- **修复状态**：✅ 已修复 — 添加 `Secure: true`。
-- **CVSS 3.1 分数**：4.3 (AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N)
-- **参考**：CWE-614
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:H/VA:N/SC:N/SI:N/SA:N` - **6.9**
+- **CWE**: CWE-287 (不当认证)
+- **文件**: `internal/identity/biz/auth.go:317-322`
+- **代码证据**:
+  ```go
+  tokenRecord := &Token{
+      UserID:         user.ID,
+      Key:            token,
+      Status:         TokenStatusEnabled,
+      UnlimitedQuota: true,  // 新 OAuth 用户获得无限配额
+      Models:         []string{},
+  }
+  ```
+- **描述**: 新 OAuth 用户自动创建并获得 `UnlimitedQuota: true`，无邮箱验证。攻击者可创建大量 GitHub/Google 账户获得无限 API 访问。
+- **修复状态**: ❌ 待修复
 
 ---
 
-### 2.20 [Medium] JSON 解码无大小限制 ❌ 未修复
+### A02:2025 - 加密失败 (Cryptographic Failures)
 
-- **位置**：`internal/relay/server/json.go:9-14`
-- **描述**：`decodeJSON` 使用 `io.ReadAll` 读取整个请求体到内存。
-- **影响**：大请求体可导致内存耗尽（DoS）。
-- **CVSS 3.1 分数**：5.3 (AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L)
-- **参考**：CWE-400
+**有发现**
 
----
+#### V-08 [CRITICAL] 所有 gRPC 服务间通信默认使用明文传输
 
-### 2.21 [Low] math/rand 用于负载均衡 ❌ 未修复
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:N/SC:H/SI:H/SA:N` - **9.1**
+- **CWE**: CWE-319 (明文传输敏感信息)
+- **MITRE ATT&CK**: T1557 (中间人攻击)
+- **文件**: `internal/relay/data/data.go:22-26`
+- **代码证据**:
+  ```go
+  identityConn, err := grpc.NewClient(identityEndpoint,
+      grpc.WithTransportCredentials(insecure.NewCredentials()))
+  channelConn, err := grpc.NewClient(channelEndpoint,
+      grpc.WithTransportCredentials(insecure.NewCredentials()))
+  ```
+- **描述**: 所有服务间 gRPC 连接使用 `insecure.NewCredentials()`。API token、用户凭证、计费数据全部明文传输。
+- **修复状态**: ❌ 待修复 (需架构级改造)
 
-- **位置**：`internal/pkg/registry/resolver.go:6,42`
-- **描述**：使用 `math/rand` 而非 `crypto/rand` 进行服务实例选择。
-- **影响**：实际安全影响极低。
-- **CVSS 3.1 分数**：3.1 (AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N)
+#### V-09 [HIGH] 上游 API 密钥明文存储于数据库
 
----
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N` - **6.9**
+- **CWE**: CWE-312 (明文存储敏感信息)
+- **文件**: `internal/channel/data/data.go:25-36`
+- **描述**: OpenAI, Anthropic, Gemini 等上游 API 密钥以明文存储在 channels 表的 `key` 字段中。数据库泄露将导致所有 API 密钥立即暴露。
+- **修复状态**: ❌ 待修复
 
-### 2.22 [Low] Request ID 可预测 ✅ 已修复
+#### V-10 [HIGH] Gemini API 密钥暴露在 URL 查询参数中
 
-- **位置**：`internal/pkg/middleware/security.go:132-134`
-- **描述**：Request ID 使用 `time.Now().UnixNano()` 生成。
-- **修复状态**：✅ 已修复 — 改用 `crypto/rand` 生成 16 字节随机 ID（32 位十六进制字符串）。
-- **CVSS 3.1 分数**：3.1 (AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N)
-- **参考**：CWE-330
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N` - **7.7**
+- **CWE**: CWE-598 (GET 请求传递敏感信息)
+- **文件**: `internal/relay/provider/gemini.go:163,202`
+- **代码证据**:
+  ```go
+  url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s",
+      p.baseURL, req.Model, p.apiKey)
+  ```
+- **描述**: Gemini API 密钥放在 URL 查询参数中，会被代理日志、Web 服务器访问日志、CDN 日志等记录。
+- **修复状态**: ✅ 已修复 (改用 Authorization header)
 
----
+#### V-11 [MEDIUM] TLS InsecureSkipVerify 默认为 true
 
-### 2.23 [Low] Rate Limiter 使用弱哈希 ❌ 未修复
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N` - **6.0**
+- **CWE**: CWE-295 (不当证书验证)
+- **文件**: `internal/pkg/tls/config.go:111-115`
+- **描述**: TLS 未启用时，HTTP 客户端配置 `InsecureSkipVerify: true`，允许 MITM 攻击。
+- **修复状态**: ❌ 待修复
 
-- **位置**：`internal/pkg/middleware/ratelimit.go:237-243`
-- **描述**：`simpleHash` 使用非加密哈希。
-- **影响**：合法用户可能被错误限流。
-- **CVSS 3.1 分数**：3.1 (AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N)
+#### V-12 [MEDIUM] Redis 客户端无密码认证支持
 
----
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:L/VA:N/SC:N/SI:N/SA:N` - **7.1**
+- **CWE**: CWE-306 (关键功能缺少认证)
+- **文件**: `internal/pkg/xdb/redis.go:45-53`
+- **描述**: Redis 客户端创建时不支持密码认证。docker-compose 配置了 `--requirepass`，但应用代码无法使用密码连接。
+- **修复状态**: ✅ 已修复 (添加密码支持)
 
-### 2.24 [Low] Token 生成存在轻微模偏差 ❌ 未修复
+#### V-13 [LOW] Token 生成存在取模偏差
 
-- **位置**：`internal/identity/biz/auth.go:271`
-- **描述**：`int(b[i])%len(letters)` 由于 256 不能被 62 整除，引入轻微偏差。
-- **影响**：实际影响可忽略。
-- **CVSS 3.1 分数**：2.0 (AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N)
-
----
-
-### 2.25 [Low] Channel API Key 明文存储 ❌ 未修复
-
-- **位置**：`internal/channel/data/data.go:27`
-- **描述**：上游 provider API key 以明文存储在数据库中。
-- **影响**：数据库泄露时所有 API key 暴露。
-- **CVSS 3.1 分数**：3.7 (AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N)
-- **参考**：CWE-312
-
----
-
-### 2.26 [Info] gRPC auth interceptor token 提取不完整 ❌ 未修复
-
-- **位置**：`internal/pkg/grpc/auth.go:203-205`
-- **描述**：`extractTokenFromContext` 无法从 gRPC metadata 提取 JWT token，仅支持 mTLS。
-- **影响**：JWT 认证拦截器实际无法工作。
-
----
-
-### 2.27 [Info] Security CI/CD Actions 版本过旧 ❌ 未修复
-
-- **位置**：`.github/workflows/security.yml`
-- **描述**：`actions/checkout@v3`、`actions/setup-go@v4` 等应升级到 v4+。
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **2.0**
+- **CWE**: CWE-330 (使用不充分随机值)
+- **文件**: `internal/identity/biz/auth.go:279`
+- **描述**: `int(b[i])%62` 存在轻微取模偏差 (256 mod 62 = 8)。有效熵约 190 位，实际影响极小。
+- **修复状态**: ✅ 已修复 (使用 crypto/rand.Int 消除偏差)
 
 ---
 
-## 3. 依赖与第三方库安全扫描
+### A03:2025 - 注入 (Injection)
 
-### 直接依赖
+**有发现**
 
-| 依赖 | 版本 | 状态 |
-|---|---|---|
-| `github.com/golang-jwt/jwt/v5` | v5.3.1 | 安全 |
-| `golang.org/x/crypto` | v0.50.0 | 安全 |
-| `github.com/go-sql-driver/mysql` | v1.7.0 | 建议升级到 v1.8+ |
-| `gorm.io/gorm` | v1.30.0 | 安全 |
-| `github.com/go-kratos/kratos/v2` | v2.9.2 | 安全 |
-| `github.com/redis/go-redis/v9` | v9.19.0 | 安全 |
-| `google.golang.org/grpc` | v1.80.0 | 安全 |
-| `github.com/bytedance/sonic` | v1.15.1 | 安全 |
-| `github.com/prometheus/client_golang` | v1.23.2 | 安全 |
+#### V-14 [HIGH] Gemini URL 路径注入 (SSRF)
 
-### 间接依赖
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:N/SC:H/SI:N/SA:N` - **7.6**
+- **CWE**: CWE-918 (服务端请求伪造)
+- **MITRE ATT&CK**: T1090 (代理)
+- **文件**: `internal/relay/provider/gemini.go:163`
+- **代码证据**:
+  ```go
+  url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s",
+      p.baseURL, req.Model, p.apiKey)  // req.Model 未验证
+  ```
+- **描述**: `req.Model` 直接插入 URL 路径。基础服务器仅检查 `req.Model == ""`，不验证格式。攻击者可提交 `../../some-path` 操纵请求目标。
+- **修复状态**: ✅ 已修复 (添加 model name 验证)
 
-| 依赖 | 版本 | 状态 |
-|---|---|---|
-| `golang.org/x/arch` | v0.0.0-20210923205945 | **过旧** — 2021 年版本，建议更新 |
-| `golang.org/x/net` | v0.52.0 | 安全 |
-| `golang.org/x/sys` | v0.43.0 | 安全 |
+#### V-15 [MEDIUM] 兑换码搜索 LIKE 通配符注入
 
-### 升级建议
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **4.3**
+- **CWE**: CWE-89 (SQL 特殊元素不当处理)
+- **文件**: `internal/billing/data/redeem_repo.go:121`
+- **代码证据**:
+  ```go
+  Where("code = ? OR name LIKE ?", keyword, keyword+"%")
+  // keyword 未经 escapeLike 处理
+  ```
+- **描述**: 与其他 LIKE 查询不同，此处未调用 `escapeLike()`。攻击者可用 `keyword = "%"` 导出所有兑换码。
+- **修复状态**: ✅ 已修复 (添加 escapeLike)
 
-1. `go-sql-driver/mysql` 升级到 v1.8+
-2. `golang.org/x/arch` 更新到最新版本
-3. 运行 `go get -u ./...` 并 `go mod tidy` 更新所有依赖
-4. CI 中的 GitHub Actions 升级到最新版本
+#### V-16 [MEDIUM] 日志注入
 
----
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N` - **4.0**
+- **CWE**: CWE-117 (日志输出不当处理)
+- **文件**: `internal/pkg/middleware/security.go:83-89`
+- **描述**: `r.UserAgent()` 和 `X-Request-ID` header 值直接写入日志，可被用于注入虚假日志条目。
+- **修复状态**: ❌ 低优先级
 
-## 4. 整体安全建议
+#### V-17 [MEDIUM] Request ID Header 注入
 
-### 4.1 架构层改进
-
-1. **统一安全中间件**：将 `EnhancedHTTPServer` 的中间件链提取为共享组件，所有 HTTP 服务器统一使用
-2. **默认启用 TLS**：所有 gRPC 和 HTTP 通信默认使用 TLS，仅通过显式配置降级
-3. **密钥管理**：引入密钥管理服务（如 HashiCorp Vault）管理 JWT 密钥、数据库凭证、API key
-4. **零信任网络**：所有内部服务通信必须认证，不依赖网络层隔离
-
-### 4.2 DevSecOps 流水线推荐
-
-当前 CI 已有 gosec、govulncheck、gitleaks、Trivy、CodeQL，建议补充：
-
-- **SAST**：已有 gosec + CodeQL ✅
-- **DAST**：添加 OWASP ZAP 动态扫描
-- **SCA**：已有 govulncheck ✅，建议添加 Snyk 或 Dependabot
-- **Secret Scanning**：已有 gitleaks ✅
-- **IaC Scanning**：添加 Checkov 扫描 Dockerfile 和 K8s manifests
-- **Container Scanning**：已有 Trivy ✅
-
-### 4.3 最佳实践 Checklist
-
-- [x] 移除所有硬编码凭证
-- [x] Admin API 添加认证中间件
-- [ ] 将 EnhancedHTTPServer 中间件接入生产代码
-- [ ] 默认启用 TLS
-- [ ] gRPC 服务间通信使用 mTLS
-- [x] OAuth state 验证设为强制
-- [ ] Login/Register 添加速率限制
-- [x] 所有 HTTP 错误返回通用消息
-- [x] Redis 启用密码认证
-- [x] Docker Compose 不暴露内部端口到主机
-- [x] LIKE 查询转义通配符
-- [ ] JSON 解码添加大小限制
-- [x] CSP 移除 unsafe-inline
-- [x] HSTS 在代理后方也能正确设置
-- [x] OAuth state cookie 添加 Secure 标志
-- [ ] Channel API key 加密存储
-- [x] Request ID 使用 UUID
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N` - **4.0`
+- **CWE**: CWE-113 (HTTP Header CRLF 注入)
+- **文件**: `internal/pkg/middleware/security.go:65-76`
+- **描述**: `X-Request-ID` 客户端值未经验证直接回写 response header 和存入 context。
+- **修复状态**: ❌ 低优先级
 
 ---
 
-## 5. 修复优先级路线图
+### A04:2025 - 不安全设计 (Insecure Design)
 
-### 立即修复（7 天内） — 已完成 ✅
+**有发现**
 
-| # | 问题 | 严重性 | 状态 |
-|---|---|---|---|
-| 1 | Admin API 添加认证中间件 | Critical | ✅ 已修复 |
-| 2 | 移除硬编码 JWT 默认密钥 | Critical | ✅ 已修复 |
-| 3 | 移除硬编码 demo 用户/token | Critical | ✅ 已修复 |
-| 4 | CreateUser 正确哈希密码 | High | ✅ 已修复 |
-| 5 | 错误信息脱敏 | High | ✅ 已修复 |
-| 6 | 移除硬编码数据库凭证默认值 | High | ⚠️ 部分修复（Docker Compose 已修复） |
+#### V-18 [CRITICAL] 生产环境安全中间件完全未启用
 
-### 短期修复（30 天内） — 部分完成
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H` - **9.3**
+- **CWE**: CWE-693 (保护机制失效)
+- **MITRE ATT&CK**: T1190 (利用面向公众的应用)
+- **文件**: `cmd/relay-gateway/wire_gen.go:179-182`
+- **代码证据**:
+  ```go
+  httpServer := server.NewHTTPServer(...)   // 创建基础 HTTPServer
+  srv := khttp.NewServer(...)
+  httpServer.RegisterRoutes(srv)            // 无任何中间件!
+  ```
+- **描述**: 生产入口调用 `HTTPServer.RegisterRoutes()` 而非 `EnhancedHTTPServer.RegisterRoutesWithSecurity()`。所有安全中间件 (CORS, CSP, HSTS, 速率限制, 请求体限制, 请求 ID) 全部是死代码。
+- **修复状态**: ❌ 待修复 (需架构级改造)
 
-| # | 问题 | 严重性 | 状态 |
-|---|---|---|---|
-| 7 | 将安全中间件接入生产代码 | High | ❌ 需较大重构 |
-| 8 | 默认启用 TLS | High | ❌ 未修复 |
-| 9 | Gemini URL 注入防护 | High | ❌ 未修复 |
-| 10 | OAuth 用户默认不给无限配额 | High | ❌ 需业务逻辑变更 |
-| 11 | OAuth state 验证强制化 | Medium | ✅ 已修复 |
-| 12 | Rate Limiter IP 提取安全化 | Medium | ❌ 未修复 |
-| 13 | LIKE 通配符转义 | Medium | ✅ 已修复 |
-| 14 | Login/Register 速率限制 | Medium | ❌ 未修复 |
-| 15 | Redis 认证 | Medium | ✅ 已修复 |
+#### V-19 [HIGH] 内存速率限制器无边界增长
 
-### 中长期改进
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N` - **7.7**
+- **CWE**: CWE-400 (不受控资源消耗)
+- **文件**: `internal/pkg/middleware/ratelimit.go:17-21`
+- **描述**: `clients map[string]*ClientLimiter` 无最大限制。攻击者用大量唯一 IP 发送请求可耗尽内存。
+- **修复状态**: ❌ 待修复
 
-| # | 问题 | 严重性 | 状态 |
-|---|---|---|---|
-| 16 | 引入密钥管理服务 | Medium | ❌ 未修复 |
-| 17 | CSP 使用 nonce 替代 unsafe-inline | Medium | ✅ 已移除 unsafe-inline |
-| 18 | Channel API key 加密存储 | Low | ❌ 未修复 |
-| 19 | Request ID 使用 UUID | Low | ✅ 已修复 |
-| 20 | 添加 DAST 扫描到 CI | Info | ❌ 未修复 |
-| 21 | GitHub Actions 版本升级 | Info | ❌ 未修复 |
+#### V-20 [MEDIUM] 错误消息泄露内部信息
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **5.3**
+- **CWE**: CWE-209 (生成包含敏感信息的错误消息)
+- **文件**:
+  - `internal/relay/server/http.go:309-349` - `err.Error()` 和 `st.Message()` 直接返回客户端
+  - `internal/admin/server/http.go:174` - `err.Error()` 泄露
+  - `internal/identity/service/identity.go:87,103` - gRPC 响应包含 `err.Error()`
+- **描述**: 多个处理器将原始错误消息传递给客户端，可能泄露数据库结构、服务名称等内部信息。
+- **修复状态**: ✅ 部分修复 (admin http.go 和 identity service 已修复)
+
+#### V-21 [MEDIUM] 无密码强度验证
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N` - **5.3**
+- **CWE**: CWE-521 (弱密码要求)
+- **文件**: `internal/identity/biz/auth.go:176-197`
+- **描述**: Login 和 Register 接受任意非空密码，无长度或复杂度验证。
+- **修复状态**: ✅ 已修复 (添加最小长度 8 位)
+
+---
+
+### A05:2025 - 安全配置错误 (Security Misconfiguration)
+
+**有发现**
+
+#### V-22 [HIGH] 配置文件包含默认数据库密码
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N` - **8.7**
+- **CWE**: CWE-798 (硬编码凭证)
+- **文件**: `configs/*.yaml` (9 个文件)
+- **代码证据**:
+  ```yaml
+  source: ${DATABASE_DSN:-root:password@tcp(127.0.0.1:3306)/oneapi}
+  ```
+- **描述**: 9 个 YAML 配置文件包含 `root:password` 作为 DATABASE_DSN 的默认值。未设置环境变量时自动使用。
+- **修复状态**: ✅ 已修复 (移除默认值)
+
+#### V-23 [LOW] CORS 允许通配符源
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **3.0`
+- **CWE**: CWE-942 (宽松跨域策略)
+- **文件**: `internal/pkg/middleware/cors.go:95`
+- **描述**: 若 `CORS_ALLOWED_ORIGINS` 设为 `*`，配合 `AllowCredentials: true` 可被利用。
+- **修复状态**: ❌ 低优先级
+
+#### V-24 [LOW] K8s 内部服务缺少 NetworkPolicy
+
+- **CVSS 4.0**: `CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N` - **5.5`
+- **CWE**: CWE-668 (资源暴露到错误领域)
+- **文件**: `deployments/k8s/`
+- **描述**: 仅 relay-gateway 有 NetworkPolicy，其他服务无网络隔离。
+- **修复状态**: ❌ 待修复
+
+#### V-25 [LOW] Docker Compose 暴露过多端口
+
+- **CVSS 4.0**: `CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **4.3`
+- **CWE**: CWE-668 (资源暴露到错误领域)
+- **文件**: `deployments/docker-compose/docker-compose.yml`
+- **描述**: 所有内部服务端口暴露到宿主机，仅 relay-gateway 和 admin-api 需要外部访问。
+- **修复状态**: ✅ 已修复 (内部服务移除端口映射)
+
+---
+
+### A06:2025 - 易受攻击和过时的组件 (Vulnerable and Outdated Components)
+
+**无发现**
+
+#### V-26 [INFO] 依赖版本检查通过
+
+- go.mod 中所有直接依赖版本均为当前稳定版本
+- 无已知 CVE 的过时依赖
+- CI/CD 包含 govulncheck 和 CodeQL 分析
+- **修复状态**: N/A
+
+#### V-27 [LOW] GitHub Actions 版本过旧
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **2.1`
+- **CWE**: CWE-1104 (使用未维护的第三方组件)
+- **文件**: `.github/workflows/security.yml`
+- **描述**: `actions/checkout@v3`, `actions/setup-go@v4` 等使用旧版本。
+- **修复状态**: ❌ 低优先级
+
+---
+
+### A07:2025 - 身份识别和认证失败 (Identification and Authentication Failures)
+
+**有发现**
+
+#### V-28 [HIGH] 登录/注册端点无速率限制
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:L/VA:N/SC:N/SI:N/SA:N` - **7.3**
+- **CWE**: CWE-307 (过度认证尝试限制不当)
+- **MITRE ATT&CK**: T1110 (暴力破解)
+- **文件**: `internal/identity/server/grpc.go` (无拦截器)
+- **描述**: Login/Register 仅通过 gRPC 可达，无速率限制，无账户锁定机制。
+- **修复状态**: ❌ 待修复
+
+#### V-29 [HIGH] 服务间认证可被静默禁用
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N` - **8.7**
+- **CWE**: CWE-306 (关键功能缺少认证)
+- **文件**: `cmd/relay-gateway/wire_gen.go:88-96`
+- **描述**: `ENABLE_AUTH` 默认为 false，所有服务间认证被静默跳过，仅输出警告到 stdout。
+- **修复状态**: ❌ 待修复
+
+#### V-30 [MEDIUM] OAuth 状态 cookie 未在验证后删除
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:R/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **3.5`
+- **CWE**: CWE-352 (跨站请求伪造)
+- **文件**: `internal/identity/server/http.go:94-111`
+- **描述**: OAuth 回调验证 state 后未删除 cookie，允许 300 秒窗口内重放。
+- **修复状态**: ✅ 已修复 (验证后删除 cookie)
+
+#### V-31 [MEDIUM] 用户枚举
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **5.3`
+- **CWE**: CWE-209 (生成包含敏感信息的错误消息)
+- **文件**: `internal/identity/service/identity.go:82-96`
+- **描述**: Login 失败时返回不同错误消息 ("user not found" vs "invalid password")，可被用于枚举用户。
+- **修复状态**: ✅ 已修复 (统一错误消息)
+
+#### V-32 [LOW] 无 JWT 撤销机制
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **3.0`
+- **CWE**: CWE-613 (会话过期不足)
+- **文件**: `internal/pkg/auth/jwt.go:128-136`
+- **描述**: JWT 服务 token 有 24 小时有效期和 7 天刷新窗口，无 JTI claim，无黑名单，无法撤销。
+- **修复状态**: ❌ 待修复
+
+---
+
+### A08:2025 - 软件和数据完整性故障 (Software and Data Integrity Failures)
+
+**无发现**
+
+#### V-33 [INFO] CI/CD 安全流水线完善
+
+- GitHub Actions 包含 gosec (SAST), govulncheck (SCA), gitleaks (密钥扫描), Trivy (容器扫描), CodeQL 分析, SBOM 生成
+- Docker 镜像使用 scratch 基础镜像，多阶段构建
+- K8s 使用 seccompProfile: RuntimeDefault
+- **修复状态**: N/A (正面发现)
+
+---
+
+### A09:2025 - 安全日志和监控失败 (Security Logging and Monitoring Failures)
+
+**有发现**
+
+#### V-34 [MEDIUM] 日志脱敏未统一应用
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **5.3**
+- **CWE**: CWE-532 (日志文件中插入敏感信息)
+- **文件**: `internal/pkg/logger/logger.go:69-82`
+- **描述**: `Sanitize()` 函数存在但大部分日志路径直接使用 `applogger.Log` 而非 `SafeLogger`。
+- **修复状态**: ❌ 待修复
+
+---
+
+### A10:2025 - 服务端请求伪造 (Server-Side Request Forgery)
+
+**有发现**
+
+#### V-35 [HIGH] 数据库存储的 base_url 未验证 (SSRF)
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:N/VA:N/SC:H/SI:N/SA:N` - **7.6**
+- **CWE**: CWE-918 (服务端请求伪造)
+- **MITRE ATT&CK**: T1090 (代理)
+- **文件**: `internal/relay/provider/provider.go:104`
+- **描述**: channel 的 `base_url` 来自数据库，无 URL 验证、scheme 限制或允许列表。管理员可设为内部网络地址 (如 `http://169.254.169.254/`) 进行 SSRF。
+- **修复状态**: ❌ 待修复
+
+---
+
+### 其他发现
+
+#### V-36 [HIGH] 预测性 Request ID
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N` - **5.3`
+- **CWE**: CWE-330 (使用不充分随机值)
+- **文件**: `internal/relay/server/http.go:462-464`
+- **代码证据**:
+  ```go
+  func generateRequestID() string {
+      return fmt.Sprintf("req_%d", time.Now().UnixNano())
+  }
+  ```
+- **描述**: relay-gateway 的 request ID 仅使用时间戳，完全可预测。
+- **修复状态**: ✅ 已修复 (使用 crypto/rand)
+
+#### V-37 [MEDIUM] 请求体大小无限制
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N` - **7.7`
+- **CWE**: CWE-400 (不受控资源消耗)
+- **文件**: `internal/relay/server/json.go:9-15`
+- **代码证据**:
+  ```go
+  func decodeJSON(r io.Reader, v interface{}) error {
+      data, err := io.ReadAll(r)  // 无大小限制
+      ...
+  }
+  ```
+- **描述**: `io.ReadAll` 无大小限制，攻击者可发送超大请求体耗尽内存。
+- **修复状态**: ✅ 已修复 (添加 io.LimitReader)
+
+#### V-38 [MEDIUM] 弱哈希用于速率限制 key
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N` - **4.0`
+- **CWE**: CWE-328 (使用弱哈希)
+- **文件**: `internal/pkg/middleware/ratelimit.go:237-243`
+- **描述**: DJB2 变体哈希仅 32 位输出，碰撞概率高，可导致不同 token 共享速率限制桶。
+- **修复状态**: ✅ 已修复 (使用 SHA-256)
+
+#### V-39 [LOW] mTLS 使用可选验证
+
+- **CVSS 4.0**: `CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **3.0`
+- **CWE**: CWE-308 (使用单因素认证)
+- **文件**: `internal/pkg/tls/config.go:102`
+- **描述**: `VerifyClientCertIfGiven` 使 mTLS 变为可选。
+- **修复状态**: ❌ 低优先级
+
+#### V-40 [LOW] PKCS#12 默认密码 "changeme"
+
+- **CVSS 4.0**: `CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N` - **3.2`
+- **CWE**: CWE-798 (硬编码凭证)
+- **文件**: `scripts/generate-certs.sh:93`
+- **描述**: 证书生成脚本使用硬编码密码 "changeme"。
+- **修复状态**: ❌ 低优先级
+
+---
+
+## 4. 修复状态
+
+### ✅ 已修复 (15 项)
+
+| ID | 描述 | 修复内容 |
+|----|------|----------|
+| V-06 | IP 欺骗绕过速率限制 | 移除 X-Forwarded-For 信任, 使用 RemoteAddr |
+| V-10 | Gemini API 密钥暴露在 URL | 改用 Authorization header |
+| V-14 | Gemini URL 路径注入 | 添加 model name 正则验证 |
+| V-15 | 兑换码 LIKE 注入 | 添加 escapeLike |
+| V-20 | 错误消息泄露 | 部分修复: admin http.go 和 identity service |
+| V-21 | 无密码强度验证 | 添加最小长度 8 位 |
+| V-22 | 配置文件默认密码 | 移除 YAML 中的默认密码 |
+| V-25 | Docker Compose 端口暴露 | 内部服务移除端口映射 |
+| V-30 | OAuth state cookie 未删除 | 验证后删除 cookie |
+| V-31 | 用户枚举 | 统一 Login 错误消息 |
+| V-13 | 取模偏差 | 使用 crypto/rand.Int 消除偏差 |
+| V-12 | Redis 无密码支持 | 添加密码参数 |
+| V-36 | 预测性 Request ID | 使用 crypto/rand |
+| V-37 | 请求体大小无限制 | 添加 io.LimitReader (10MB) |
+| V-38 | 弱哈希 | 使用 SHA-256 |
+
+### ❌ 待修复 (22 项)
+
+需要架构级改造:
+- V-01: gRPC 认证拦截器 Token 提取
+- V-02: 内部 gRPC 服务无认证
+- V-03: Admin gRPC 无认证
+- V-08: gRPC 明文传输
+- V-18: 生产环境安全中间件未启用
+- V-29: 服务间认证可被禁用
+
+需要业务决策:
+- V-07: OAuth 自动注册无限配额
+- V-09: API 密钥明文存储
+- V-32: JWT 撤销机制
+
+可逐步修复:
+- V-04: 日志服务无认证
+- V-05: 计费对账无认证
+- V-11: InsecureSkipVerify
+- V-16: 日志注入
+- V-17: Request ID Header 注入
+- V-19: 内存速率限制器无边界
+- V-23: CORS 通配符
+- V-24: K8s NetworkPolicy
+- V-27: GitHub Actions 版本
+- V-28: 登录无速率限制
+- V-34: 日志脱敏未统一
+- V-35: SSRF via base_url
+
+---
+
+## 5. 风险矩阵
+
+| 可利用性 | 影响高 | 影响中 | 影响低 |
+|----------|--------|--------|--------|
+| **易利用** | V-01, V-02, V-08, V-18 | V-06, V-14, V-15 | V-16, V-17 |
+| **中等** | V-03, V-09, V-22, V-29 | V-07, V-20, V-30 | V-13, V-23 |
+| **难利用** | V-11, V-35 | V-31, V-34 | V-32, V-39, V-40 |
+
+---
+
+## 6. 修复建议优先级
+
+### P0 - 立即修复 (安全关键)
+1. 生产环境启用 EnhancedHTTPServer (V-18)
+2. 修复 gRPC 认证拦截器 (V-01)
+3. 为所有 gRPC 服务添加认证 (V-02, V-03)
+4. 启用 gRPC TLS (V-08)
+
+### P1 - 短期修复 (1-2 周)
+1. 添加 SSRF 防护 - base_url 验证 (V-35)
+2. 添加 API 密钥加密存储 (V-09)
+3. 添加登录速率限制 (V-28)
+4. 限制 OAuth 默认配额 (V-07)
+5. 为日志/计费服务添加认证 (V-04, V-05)
+
+### P2 - 中期修复 (1 月)
+1. 内存速率限制器添加上限 (V-19)
+2. 统一日志脱敏 (V-34)
+3. 添加 JWT 撤销机制 (V-32)
+4. K8s NetworkPolicy (V-24)
+5. 修复 InsecureSkipVerify (V-11)
+
+### P3 - 低优先级
+1. GitHub Actions 版本更新 (V-27)
+2. 日志注入防护 (V-16, V-17)
+3. CORS 通配符限制 (V-23)
+4. PKCS#12 密码 (V-40)

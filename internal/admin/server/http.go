@@ -171,7 +171,7 @@ func handleGetSystemOptions(w http.ResponseWriter, r *http.Request, svc *service
 	case http.MethodGet:
 		resp, err := svc.GetSystemOptions(r.Context(), &adminv1.GetSystemOptionsRequest{})
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 			return
 		}
 		writeJSON(w, http.StatusOK, resp)

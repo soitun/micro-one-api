@@ -52,11 +52,10 @@ services:
       - CONF_PATH=configs/identity-service.yaml
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       - LOG_LEVEL=info
       - LOG_FORMAT=json
-    ports:
-      - "9001:9001"
     depends_on:
       mysql:
         condition: service_healthy
@@ -84,10 +83,9 @@ services:
       - CONF_PATH=configs/channel-service.yaml
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       - LOG_LEVEL=info
       - LOG_FORMAT=json
-    ports:
-      - "9002:9002"
     depends_on:
       mysql:
         condition: service_healthy
@@ -115,11 +113,9 @@ services:
       - CONF_PATH=configs/billing-service.yaml
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       - LOG_LEVEL=info
       - LOG_FORMAT=json
-    ports:
-      - "8004:8004"
-      - "9004:9004"
     depends_on:
       mysql:
         condition: service_healthy
@@ -182,11 +178,9 @@ services:
       - CONF_PATH=configs/config-service.yaml
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       - LOG_LEVEL=info
       - LOG_FORMAT=json
-    ports:
-      - "8005:8005"
-      - "9005:9005"
     depends_on:
       mysql:
         condition: service_healthy
@@ -214,11 +208,9 @@ services:
       - CONF_PATH=configs/log-service.yaml
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       - LOG_LEVEL=info
       - LOG_FORMAT=json
-    ports:
-      - "8006:8006"
-      - "9006:9006"
     depends_on:
       mysql:
         condition: service_healthy
@@ -246,11 +238,9 @@ services:
       - CONF_PATH=configs/monitor-worker.yaml
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       - LOG_LEVEL=info
       - LOG_FORMAT=json
-    ports:
-      - "8007:8007"
-      - "9007:9007"
     depends_on:
       mysql:
         condition: service_healthy
@@ -278,11 +268,9 @@ services:
       - CONF_PATH=configs/notify-worker.yaml
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       - LOG_LEVEL=info
       - LOG_FORMAT=json
-    ports:
-      - "8008:8008"
-      - "9008:9008"
     depends_on:
       mysql:
         condition: service_healthy

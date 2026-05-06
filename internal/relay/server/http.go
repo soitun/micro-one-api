@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	crypto_rand "crypto/rand"
 	"fmt"
 	"net/http"
 	"strings"
@@ -309,15 +310,15 @@ func (s *HTTPServer) applyModelWhitelist(availableModels []string, allowedModels
 func (s *HTTPServer) handleRelayPlanError(w http.ResponseWriter, err error) {
 	// Check for structured errors
 	if errors.IsUnauthorized(err) {
-		s.writeError(w, http.StatusUnauthorized, err.Error())
+		s.writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	if errors.IsForbidden(err) {
-		s.writeError(w, http.StatusForbidden, err.Error())
+		s.writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
 	if errors.IsServiceUnavailable(err) {
-		s.writeError(w, http.StatusServiceUnavailable, err.Error())
+		s.writeError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}
 
@@ -326,36 +327,36 @@ func (s *HTTPServer) handleRelayPlanError(w http.ResponseWriter, err error) {
 	if ok {
 		switch st.Code() {
 		case codes.NotFound:
-			s.writeError(w, http.StatusUnauthorized, st.Message())
+			s.writeError(w, http.StatusUnauthorized, "unauthorized")
 		case codes.PermissionDenied:
-			s.writeError(w, http.StatusForbidden, st.Message())
+			s.writeError(w, http.StatusForbidden, "forbidden")
 		case codes.ResourceExhausted:
-			s.writeError(w, http.StatusTooManyRequests, st.Message())
+			s.writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		case codes.Unavailable:
-			s.writeError(w, http.StatusServiceUnavailable, st.Message())
+			s.writeError(w, http.StatusServiceUnavailable, "service unavailable")
 		default:
-			s.writeError(w, http.StatusInternalServerError, st.Message())
+			s.writeError(w, http.StatusInternalServerError, "internal server error")
 		}
 		return
 	}
 
 	// Model not allowed (string match from biz layer)
 	if strings.Contains(err.Error(), "not allowed") {
-		s.writeError(w, http.StatusForbidden, err.Error())
+		s.writeError(w, http.StatusForbidden, "model not allowed")
 		return
 	}
 
-	s.writeError(w, http.StatusInternalServerError, err.Error())
+	s.writeError(w, http.StatusInternalServerError, "internal server error")
 }
 
 func (s *HTTPServer) handleIdentityError(w http.ResponseWriter, err error) {
 	// Check for structured errors first
 	if errors.IsUnauthorized(err) {
-		s.writeError(w, http.StatusUnauthorized, err.Error())
+		s.writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	if errors.IsForbidden(err) {
-		s.writeError(w, http.StatusForbidden, err.Error())
+		s.writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
 
@@ -364,26 +365,26 @@ func (s *HTTPServer) handleIdentityError(w http.ResponseWriter, err error) {
 	if ok {
 		switch st.Code() {
 		case codes.NotFound:
-			s.writeError(w, http.StatusUnauthorized, st.Message())
+			s.writeError(w, http.StatusUnauthorized, "unauthorized")
 		case codes.PermissionDenied:
-			s.writeError(w, http.StatusForbidden, st.Message())
+			s.writeError(w, http.StatusForbidden, "forbidden")
 		case codes.ResourceExhausted:
-			s.writeError(w, http.StatusTooManyRequests, st.Message())
+			s.writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		default:
-			s.writeError(w, http.StatusInternalServerError, st.Message())
+			s.writeError(w, http.StatusInternalServerError, "internal server error")
 		}
 		return
 	}
 
-	s.writeError(w, http.StatusInternalServerError, err.Error())
+	s.writeError(w, http.StatusInternalServerError, "internal server error")
 }
 
 func (s *HTTPServer) handleChannelError(w http.ResponseWriter, err error) {
 	if errors.IsServiceUnavailable(err) {
-		s.writeError(w, http.StatusServiceUnavailable, err.Error())
+		s.writeError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}
-	s.writeError(w, http.StatusInternalServerError, err.Error())
+	s.writeError(w, http.StatusInternalServerError, "internal server error")
 }
 
 func (s *HTTPServer) writeError(w http.ResponseWriter, statusCode int, message string) {
@@ -460,6 +461,10 @@ func (s *HTTPServer) calculateActualTokens(resp *relayprovider.ChatCompletionsRe
 }
 
 func generateRequestID() string {
-	return fmt.Sprintf("req_%d", time.Now().UnixNano())
+	b := make([]byte, 16)
+	if _, err := crypto_rand.Read(b); err != nil {
+		return fmt.Sprintf("req_%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("req_%x", b)
 }
 

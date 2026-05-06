@@ -30,12 +30,12 @@ func DefaultRedisPoolConfig() *RedisPoolConfig {
 }
 
 // NewRedisClient creates a new Redis client with default pool settings. Returns nil if addr is empty.
-func NewRedisClient(addr string) *redis.Client {
-	return NewRedisClientWithPool(addr, DefaultRedisPoolConfig())
+func NewRedisClient(addr, password string) *redis.Client {
+	return NewRedisClientWithPool(addr, password, DefaultRedisPoolConfig())
 }
 
 // NewRedisClientWithPool creates a new Redis client with custom pool settings. Returns nil if addr is empty.
-func NewRedisClientWithPool(addr string, pool *RedisPoolConfig) *redis.Client {
+func NewRedisClientWithPool(addr, password string, pool *RedisPoolConfig) *redis.Client {
 	if addr == "" {
 		return nil
 	}
@@ -44,6 +44,7 @@ func NewRedisClientWithPool(addr string, pool *RedisPoolConfig) *redis.Client {
 	}
 	return redis.NewClient(&redis.Options{
 		Addr:            addr,
+		Password:        password,
 		DialTimeout:     pool.DialTimeout,
 		ReadTimeout:     pool.ReadTimeout,
 		WriteTimeout:    pool.WriteTimeout,

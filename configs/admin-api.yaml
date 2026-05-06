@@ -18,5 +18,5 @@ clients:
 data:
   database:
     driver: mysql
-    source: ${DATABASE_DSN:-root:password@tcp(127.0.0.1:3306)/oneapi}
+    source: ${DATABASE_DSN}
 

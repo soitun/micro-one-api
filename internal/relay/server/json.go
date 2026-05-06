@@ -7,7 +7,8 @@ import (
 )
 
 func decodeJSON(r io.Reader, v interface{}) error {
-	data, err := io.ReadAll(r)
+	limitedReader := io.LimitReader(r, 10*1024*1024) // 10MB limit
+	data, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return err
 	}

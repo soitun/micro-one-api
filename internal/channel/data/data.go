@@ -65,7 +65,8 @@ func NewRepositoryFromEnv(dsn ...string) (*Repository, error) {
 		return nil, err
 	}
 	redisAddr := os.Getenv("REDIS_ADDR")
-	rdb := xdb.NewRedisClient(redisAddr)
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	rdb := xdb.NewRedisClient(redisAddr, redisPassword)
 	if rdb != nil {
 		if pingErr := rdb.Ping(context.Background()).Err(); pingErr != nil {
 			rdb.Close()

@@ -18,8 +18,8 @@ func TestGeminiProvider_ChatCompletions(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "generateContent") {
 			t.Fatalf("expected generateContent path, got %s", r.URL.Path)
 		}
-		if r.URL.Query().Get("key") != "test-api-key" {
-			t.Fatalf("expected key=test-api-key, got %s", r.URL.Query().Get("key"))
+		if r.Header.Get("x-goog-api-key") != "test-api-key" {
+			t.Fatalf("expected x-goog-api-key=test-api-key, got %s", r.Header.Get("x-goog-api-key"))
 		}
 
 		w.Header().Set("Content-Type", "application/json")

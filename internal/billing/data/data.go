@@ -40,7 +40,8 @@ func NewData(dsn ...string) (*Data, error) {
 	}
 
 	redisAddr := os.Getenv("REDIS_ADDR")
-	rdb := xdb.NewRedisClient(redisAddr)
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	rdb := xdb.NewRedisClient(redisAddr, redisPassword)
 	if rdb != nil {
 		if pingErr := xdb.PingRedis(context.Background(), rdb); pingErr != nil {
 			rdb.Close()

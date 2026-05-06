@@ -110,6 +110,17 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request, provider oauth.
 		return
 	}
 
+	// Delete state cookie after validation to prevent replay
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		MaxAge:   -1,
+		SameSite: http.SameSiteStrictMode,
+	})
+
 	userInfo, err := provider.Exchange(r.Context(), code)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "oauth provider error"})

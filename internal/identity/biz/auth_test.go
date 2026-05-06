@@ -593,7 +593,7 @@ func TestIdentityUsecase_Login_CreatesToken(t *testing.T) {
 func TestIdentityUsecase_Register_Success(t *testing.T) {
 	repo := &mockIdentityRepo{users: make(map[int64]*User), tokens: make(map[string]*Token)}
 	uc := NewIdentityUsecase(repo)
-	user, err := uc.Register(context.Background(), "bob", "pass", "bob@example.com", "vip")
+	user, err := uc.Register(context.Background(), "bob", "password123", "bob@example.com", "vip")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -619,7 +619,7 @@ func TestIdentityUsecase_Register_UserExists(t *testing.T) {
 		tokens: make(map[string]*Token),
 	}
 	uc := NewIdentityUsecase(repo)
-	_, err := uc.Register(context.Background(), "alice", "pass", "alice@example.com", "default")
+	_, err := uc.Register(context.Background(), "alice", "password123", "alice@example.com", "default")
 	if !errors.Is(err, ErrUserExists) {
 		t.Fatalf("expected ErrUserExists, got: %v", err)
 	}
