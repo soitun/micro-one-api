@@ -7,17 +7,49 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// NewRedisClient creates a new Redis client. Returns nil if addr is empty.
+// RedisPoolConfig holds Redis connection pool configuration
+type RedisPoolConfig struct {
+	PoolSize        int
+	MinIdleConns    int
+	DialTimeout     time.Duration
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	ConnMaxIdleTime time.Duration
+}
+
+// DefaultRedisPoolConfig returns sensible defaults for Redis pooling
+func DefaultRedisPoolConfig() *RedisPoolConfig {
+	return &RedisPoolConfig{
+		PoolSize:        100,
+		MinIdleConns:    10,
+		DialTimeout:     5 * time.Second,
+		ReadTimeout:     3 * time.Second,
+		WriteTimeout:    3 * time.Second,
+		ConnMaxIdleTime: 5 * time.Minute,
+	}
+}
+
+// NewRedisClient creates a new Redis client with default pool settings. Returns nil if addr is empty.
 func NewRedisClient(addr string) *redis.Client {
+	return NewRedisClientWithPool(addr, DefaultRedisPoolConfig())
+}
+
+// NewRedisClientWithPool creates a new Redis client with custom pool settings. Returns nil if addr is empty.
+func NewRedisClientWithPool(addr string, pool *RedisPoolConfig) *redis.Client {
 	if addr == "" {
 		return nil
 	}
+	if pool == nil {
+		pool = DefaultRedisPoolConfig()
+	}
 	return redis.NewClient(&redis.Options{
-		Addr:         addr,
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
-		PoolSize:     10,
+		Addr:            addr,
+		DialTimeout:     pool.DialTimeout,
+		ReadTimeout:     pool.ReadTimeout,
+		WriteTimeout:    pool.WriteTimeout,
+		PoolSize:        pool.PoolSize,
+		MinIdleConns:    pool.MinIdleConns,
+		ConnMaxIdleTime: pool.ConnMaxIdleTime,
 	})
 }
 

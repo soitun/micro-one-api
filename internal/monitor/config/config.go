@@ -1,10 +1,13 @@
 package config
 
+import appregistry "micro-one-api/internal/pkg/registry"
+
 // Config holds the monitor-worker configuration.
 type Config struct {
-	Server  ServerConfig     `json:"server"`
-	Data    DataConfig       `json:"data"`
-	Monitor MonitorSVCConfig `json:"monitor_svc"`
+	Server   ServerConfig       `json:"server"`
+	Data     DataConfig         `json:"data"`
+	Monitor  MonitorSVCConfig   `json:"monitor_svc"`
+	Registry appregistry.Config `json:"registry"`
 }
 
 type ServerConfig struct {

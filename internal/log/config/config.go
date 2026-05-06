@@ -1,10 +1,13 @@
 package config
 
+import appregistry "micro-one-api/internal/pkg/registry"
+
 // Config holds the log-service configuration.
 type Config struct {
-	Server ServerConfig  `json:"server"`
-	Data   DataConfig    `json:"data"`
-	Log    LogSVCConfig  `json:"log_svc"`
+	Server   ServerConfig       `json:"server"`
+	Data     DataConfig         `json:"data"`
+	Log      LogSVCConfig       `json:"log_svc"`
+	Registry appregistry.Config `json:"registry"`
 }
 
 type ServerConfig struct {

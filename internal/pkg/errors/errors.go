@@ -3,6 +3,7 @@ package errors
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -37,6 +38,24 @@ const (
 	// Notify domain
 	ReasonNotificationNotFound = "NOTIFICATION_NOT_FOUND"
 	ReasonInvalidNotification  = "INVALID_NOTIFICATION"
+
+	// Billing domain
+	ReasonAccountNotFound      = "ACCOUNT_NOT_FOUND"
+	ReasonReservationNotFound  = "RESERVATION_NOT_FOUND"
+	ReasonReservationExpired   = "RESERVATION_EXPIRED"
+	ReasonReservationCommitted = "RESERVATION_ALREADY_COMMITTED"
+	ReasonReservationReleased  = "RESERVATION_ALREADY_RELEASED"
+	ReasonRedeemCodeNotFound   = "REDEEM_CODE_NOT_FOUND"
+	ReasonRedeemCodeDisabled   = "REDEEM_CODE_DISABLED"
+	ReasonRedeemCodeUsedUp     = "REDEEM_CODE_USED_UP"
+	ReasonIdempotencyConflict  = "IDEMPOTENCY_CONFLICT"
+
+	// Relay domain
+	ReasonProviderError     = "PROVIDER_ERROR"
+	ReasonStreamError       = "STREAM_ERROR"
+	ReasonModelNotMapped    = "MODEL_NOT_MAPPED"
+	ReasonUpstreamTimeout   = "UPSTREAM_TIMEOUT"
+	ReasonUpstreamRateLimit = "UPSTREAM_RATE_LIMIT"
 )
 
 // HTTPStatusCode defines the mapping from error reasons to HTTP status codes
@@ -64,6 +83,24 @@ var HTTPStatusCode = map[string]int{
 	ReasonInvalidAlertRule:   400,
 	ReasonNotificationNotFound: 404,
 	ReasonInvalidNotification:  400,
+
+	// Billing domain
+	ReasonAccountNotFound:      404,
+	ReasonReservationNotFound:  404,
+	ReasonReservationExpired:   410,
+	ReasonReservationCommitted: 409,
+	ReasonReservationReleased:  409,
+	ReasonRedeemCodeNotFound:   404,
+	ReasonRedeemCodeDisabled:   403,
+	ReasonRedeemCodeUsedUp:     410,
+	ReasonIdempotencyConflict:  409,
+
+	// Relay domain
+	ReasonProviderError:     502,
+	ReasonStreamError:       502,
+	ReasonModelNotMapped:    400,
+	ReasonUpstreamTimeout:   504,
+	ReasonUpstreamRateLimit: 429,
 }
 
 // GetHTTPStatusCode returns the HTTP status code for a given error reason
@@ -244,4 +281,68 @@ func MapNotifyError(err error) error {
 	default:
 		return &Error{Reason: ReasonUnknown, Message: err.Error()}
 	}
+}
+
+// MapBillingError maps billing biz errors to structured errors
+func MapBillingError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch err.Error() {
+	case "account not found":
+		return &Error{Reason: ReasonAccountNotFound, Message: "account not found"}
+	case "insufficient quota":
+		return &Error{Reason: ReasonQuotaNotEnough, Message: "insufficient quota"}
+	case "reservation not found":
+		return &Error{Reason: ReasonReservationNotFound, Message: "reservation not found"}
+	case "reservation expired":
+		return &Error{Reason: ReasonReservationExpired, Message: "reservation expired"}
+	case "reservation already committed":
+		return &Error{Reason: ReasonReservationCommitted, Message: "reservation already committed"}
+	case "reservation already released":
+		return &Error{Reason: ReasonReservationReleased, Message: "reservation already released"}
+	case "redeem code not found":
+		return &Error{Reason: ReasonRedeemCodeNotFound, Message: "redeem code not found"}
+	case "redeem code disabled":
+		return &Error{Reason: ReasonRedeemCodeDisabled, Message: "redeem code disabled"}
+	case "redeem code used up":
+		return &Error{Reason: ReasonRedeemCodeUsedUp, Message: "redeem code used up"}
+	default:
+		return &Error{Reason: ReasonUnknown, Message: err.Error()}
+	}
+}
+
+// MapRelayError maps relay biz errors to structured errors
+func MapRelayError(err error) error {
+	if err == nil {
+		return nil
+	}
+	errorMsg := err.Error()
+	switch {
+	case strings.Contains(errorMsg, "model not mapped"):
+		return &Error{Reason: ReasonModelNotMapped, Message: errorMsg}
+	case strings.Contains(errorMsg, "upstream timeout"):
+		return &Error{Reason: ReasonUpstreamTimeout, Message: errorMsg}
+	case strings.Contains(errorMsg, "rate limit"):
+		return &Error{Reason: ReasonUpstreamRateLimit, Message: errorMsg}
+	case strings.Contains(errorMsg, "stream error"):
+		return &Error{Reason: ReasonStreamError, Message: errorMsg}
+	case strings.Contains(errorMsg, "upstream error") || strings.Contains(errorMsg, "provider error"):
+		return &Error{Reason: ReasonProviderError, Message: errorMsg}
+	default:
+		return &Error{Reason: ReasonUnknown, Message: err.Error()}
+	}
+}
+
+// IsRetryable checks if an error represents a retryable condition
+func IsRetryable(err error) bool {
+	var e *Error
+	if !errors.As(err, &e) {
+		return false
+	}
+	return e.Reason == ReasonUpstreamRateLimit ||
+		e.Reason == ReasonUpstreamTimeout ||
+		e.Reason == ReasonProviderError ||
+		e.Reason == ReasonBadGateway ||
+		e.Reason == ReasonServiceUnavailable
 }

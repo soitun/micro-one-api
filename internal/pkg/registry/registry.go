@@ -19,8 +19,12 @@ type Config struct {
 }
 
 type ConsulConfig struct {
-	Address             string `json:"address"`
-	HealthCheckInterval int    `json:"health_check_interval"` // seconds
+	Address             string            `json:"address"`
+	HealthCheckInterval int               `json:"health_check_interval"` // seconds
+	HealthCheckPath     string            `json:"health_check_path"`     // HTTP health check path, default /healthz
+	HealthCheckTimeout  string            `json:"health_check_timeout"`  // timeout for health check, default 5s
+	DeregisterAfter     string            `json:"deregister_after"`      // deregister critical after, default 30m
+	Metadata            map[string]string `json:"metadata"`              // service metadata tags
 }
 
 // NewRegistrar creates a Registrar based on config. Returns nil if no registry type is set.
@@ -66,6 +70,33 @@ func newConsulRegistry(cfg ConsulConfig) (*consulregistry.Registry, error) {
 	}
 
 	return consulregistry.New(client, opts...), nil
+}
+
+// ServiceRegistration holds metadata for service registration
+type ServiceRegistration struct {
+	ServiceName string
+	Version     string
+	Metadata    map[string]string
+}
+
+// DefaultServiceRegistration creates a ServiceRegistration with sensible defaults
+func DefaultServiceRegistration(name, version string) *ServiceRegistration {
+	return &ServiceRegistration{
+		ServiceName: name,
+		Version:     version,
+		Metadata: map[string]string{
+			"version": version,
+		},
+	}
+}
+
+// WithMetadata adds metadata to the service registration
+func (sr *ServiceRegistration) WithMetadata(key, value string) *ServiceRegistration {
+	if sr.Metadata == nil {
+		sr.Metadata = make(map[string]string)
+	}
+	sr.Metadata[key] = value
+	return sr
 }
 
 // ResolveHost returns the preferred outbound IP for service registration.

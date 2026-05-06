@@ -1,0 +1,22 @@
+server:
+  http:
+    addr: 0.0.0.0:8008
+  grpc:
+    addr: 0.0.0.0:9008
+data:
+  database:
+    driver: mysql
+    source: ${DATABASE_DSN:-root:password@tcp(127.0.0.1:3306)/oneapi}
+  redis:
+    addr: ${REDIS_ADDR:-127.0.0.1:6379}
+registry:
+  type: ${REGISTRY_TYPE:-}
+  consul:
+    address: ${CONSUL_ADDR:-127.0.0.1:8500}
+    health_check_interval: 10
+notify_svc:
+  webhook_url: ${NOTIFY_WEBHOOK_URL:-}
+  smtp_host: ${NOTIFY_SMTP_HOST:-}
+  smtp_port: ${NOTIFY_SMTP_PORT:-587}
+  smtp_user: ${NOTIFY_SMTP_USER:-}
+  smtp_from: ${NOTIFY_SMTP_FROM:-}

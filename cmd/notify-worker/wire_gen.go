@@ -3,6 +3,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/go-kratos/kratos/v2"
 	kconfig "github.com/go-kratos/kratos/v2/config"
 	"github.com/go-kratos/kratos/v2/config/file"
@@ -12,6 +14,7 @@ import (
 	"micro-one-api/internal/notify/data"
 	"micro-one-api/internal/notify/server"
 	"micro-one-api/internal/notify/service"
+	appregistry "micro-one-api/internal/pkg/registry"
 )
 
 func loadConfig(confPath string) (*notifycfg.Config, error) {
@@ -45,10 +48,20 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
 	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc)
 
-	app := kratos.New(
+	registrar, rErr := appregistry.NewRegistrar(cfg.Registry)
+	if rErr != nil {
+		fmt.Printf("Warning: Failed to create registrar: %v\n", rErr)
+	}
+
+	kratosOpts := []kratos.Option{
 		kratos.Name("notify-worker"),
 		kratos.Server(grpcSrv, httpSrv),
-	)
+	}
+	if registrar != nil {
+		kratosOpts = append(kratosOpts, kratos.Registrar(registrar))
+	}
+
+	app := kratos.New(kratosOpts...)
 
 	return app, func() {}, nil
 }

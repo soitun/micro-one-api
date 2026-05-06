@@ -24,6 +24,8 @@ func (f *ProviderFactory) CreateProvider(channelType int32, baseURL, apiKey stri
 	switch channelType {
 	case ChannelTypeAnthropic: // Anthropic Claude
 		return NewAnthropicProvider(baseURL, apiKey, f.defaultTimeout), nil
+	case ChannelTypeGemini: // Google Gemini
+		return NewGeminiProvider(baseURL, apiKey, f.defaultTimeout), nil
 	default:
 		// Default to OpenAI-compatible for unknown types
 		return NewOpenAIProvider(baseURL, apiKey, f.defaultTimeout), nil

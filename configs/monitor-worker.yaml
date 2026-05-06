@@ -1,0 +1,20 @@
+server:
+  http:
+    addr: 0.0.0.0:8007
+  grpc:
+    addr: 0.0.0.0:9007
+data:
+  database:
+    driver: mysql
+    source: ${DATABASE_DSN:-root:password@tcp(127.0.0.1:3306)/oneapi}
+  redis:
+    addr: ${REDIS_ADDR:-127.0.0.1:6379}
+registry:
+  type: ${REGISTRY_TYPE:-}
+  consul:
+    address: ${CONSUL_ADDR:-127.0.0.1:8500}
+    health_check_interval: 10
+monitor_svc:
+  collect_interval_sec: ${MONITOR_COLLECT_INTERVAL:-60}
+  alert_retention_days: ${MONITOR_ALERT_RETENTION:-30}
+  notify_email: ${MONITOR_NOTIFY_EMAIL:-}

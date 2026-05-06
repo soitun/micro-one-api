@@ -573,8 +573,8 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 | `cmd/` 9 个服务入口 | ✅ | 5 个一期服务 + 4 个二期服务（config / log / monitor / notify） |
 | `internal/` DDD 目录 | ✅ | biz / data / service / server 四层均已创建 |
 | `api/` proto 定义 | ✅ | 6 个 .proto 文件均已生成（identity / channel / billing / admin / relay / common） |
-| `configs/` 配置文件 | ✅ | 9 个 .yaml 文件均已创建，支持环境变量覆盖 |
-| `internal/pkg/` 共享包 | ✅ | auth / errors / events / grpc / middleware / model / logger / timeout / tls / validation / xdb / xgrpc / xhttp / xtrace（已集成 OpenTelemetry + Jaeger） |
+| `configs/` 配置文件 | ✅ | 10 个 .yaml 文件均已创建（含 models.yaml），支持环境变量覆盖 |
+| `internal/pkg/` 共享包 | ✅ | auth / errors（含 billing/relay 域错误码） / events / grpc / middleware（含 cache / endpoint_ratelimit） / model / logger / registry（含 Consul 集成） / timeout / tls / validation / xdb（含连接池配置） / xgrpc / xhttp / xtrace（已集成 OpenTelemetry + Jaeger） |
 | `third_party/` | ✅ | google / validate proto 依赖 |
 | `migrations/billing/` | ✅ | 6 个 SQL 迁移文件 |
 | `deployments/` | ✅ | Docker / K8s 部署文件（含二期服务） |
@@ -636,8 +636,9 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 | 账务预扣/提交/释放调用 `billing-service` | ✅ 已集成（ReserveQuota / CommitQuota / ReleaseQuota） |
 | 鉴权调用 `identity-service` | ✅ 已集成（GetAuthSnapshot） |
 | `data/client/` 服务间调用封装 | ✅ 已存在（`internal/relay/data/` 包含 gRPC client + 适配器） |
-| `data/provider/` 上游模型适配 | ✅ 已存在（internal/relay/provider/ 包含 factory.go / provider.go / anthropic.go / stream_test.go） |
+| `data/provider/` 上游模型适配 | ✅ 已存在（internal/relay/provider/ 包含 factory.go / provider.go / anthropic.go / gemini.go / stream_test.go） |
 | Anthropic Provider | ✅ 已实现 — 支持 Claude API 格式转换（请求/响应/流式），x-api-key 认证 |
+| Gemini Provider | ✅ 已实现 — 支持 Google Gemini API 格式转换（generateContent / streamGenerateContent），SSE 流式 |
 | 重试策略 `biz/retry.go` | ✅ 已实现 — `RetryPolicy` + `RetryExecutor`，指数退避 + channel fallback |
 | 流式处理 `biz/stream.go` | ✅ 已存在（在 provider 中实现） |
 | 模型映射 `biz/model_mapping.go` | ✅ 已实现 — 支持 YAML/JSON 格式，已接入 `RelayUsecase.Plan()` |
@@ -656,6 +657,11 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 | 第二阶段服务 | config-service / log-service / monitor-worker / notify-worker | ✅ 已创建并实现 HTTP API |
 | 链路追踪 | OpenTelemetry + Jaeger | ✅ 已集成 — xtrace 包支持 OTLP HTTP exporter，可配置采样率 |
 | 对账调度 | 定时任务 | ✅ 已实现 — billing-service 内置 ReconciliationJob（每小时） |
+| 响应缓存 | HTTP 响应缓存中间件 | ✅ 已实现 — `internal/pkg/middleware/cache.go`，支持 TTL / maxSize / 路径匹配 |
+| 按端点限流 | 细粒度限流 | ✅ 已实现 — `internal/pkg/middleware/endpoint_ratelimit.go`，chat/completions 和 models 独立配额 |
+| 连接池配置 | MySQL / Redis 连接池 | ✅ 已实现 — `xdb/mysql.go`（MaxOpenConns/MaxIdleConns）+ `xdb/redis.go`（PoolSize/MinIdleConns） |
+| 统一错误码 | billing + relay 域 | ✅ 已完善 — 15 个新错误码 + MapBillingError / MapRelayError / IsRetryable |
+| 服务治理 | 9 服务统一 Consul | ✅ 已完成 — 二期 4 服务已添加 Registry 配置 + wire_gen.go 集成 |
 
 ### 16.4 配置一致性 — ✅ 已修复
 
@@ -670,6 +676,8 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 | log-service | http=:8006, grpc=:9006 | http=:8006, grpc=:9006 | ✅ 一致 |
 | monitor-worker | http=:8007, grpc=:9007 | http=:8007, grpc=:9007 | ✅ 一致 |
 | notify-worker | http=:8008, grpc=:9008 | http=:8008, grpc=:9008 | ✅ 一致 |
+
+二期服务配置文件已补齐（`configs/config-service.yaml` / `configs/log-service.yaml` / `configs/monitor-worker.yaml` / `configs/notify-worker.yaml`），均支持环境变量覆盖。
 
 所有服务配置文件与实际运行端口完全一致，且支持环境变量覆盖（如 `${DATABASE_DSN:-default}` 语法）。
 
@@ -695,6 +703,17 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 
 所有二期服务均遵循 Kratos DDD 分层架构（biz / data / service / server / config），支持 MySQL + Redis，具备完整的 HTTP API 端点。
 
+### 16.7 二期服务配置文件 — ✅ 已补齐
+
+| 服务 | 配置文件 | 端口 | 状态 |
+|------|----------|------|------|
+| `config-service` | `configs/config-service.yaml` | HTTP :8005, gRPC :9005 | ✅ 已创建 |
+| `log-service` | `configs/log-service.yaml` | HTTP :8006, gRPC :9006 | ✅ 已创建 |
+| `monitor-worker` | `configs/monitor-worker.yaml` | HTTP :8007, gRPC :9007 | ✅ 已创建 |
+| `notify-worker` | `configs/notify-worker.yaml` | HTTP :8008, gRPC :9008 | ✅ 已创建 |
+
+所有二期服务配置文件均支持环境变量覆盖，包含 Consul 注册中心配置。
+
 ---
 
 ## 17. 遗漏汇总与优先级建议
@@ -715,14 +734,14 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 ### 低优先级（P2） - 扩展功能
 
 8. ~~**第二阶段服务**~~ — ✅ 已完成 — 4 个服务已创建并实现 HTTP API
-9. **性能优化** — 缓存策略、连接池配置、限流细化
+9. ~~**性能优化**~~ — ✅ 已完成 — 响应缓存中间件（`middleware/cache.go`）、按端点限流（`middleware/endpoint_ratelimit.go`）、MySQL/Redis 连接池配置（`xdb/mysql.go` / `xdb/redis.go`）
 10. ~~**监控告警**~~ — ✅ 已完成 — 9/9 服务 `/metrics` 端点，Prometheus 指标（HTTP/gRPC 请求计数、延迟、活跃连接）
 
 ### 架构改进建议（可选）
 
-1. **统一错误处理** — 建议在 internal/pkg/errors/ 中进一步完善错误码体系
+1. ~~**统一错误处理**~~ — ✅ 已完成 — `internal/pkg/errors/` 已完善 billing 域（9 个错误码）+ relay 域（5 个错误码），含 `MapBillingError` / `MapRelayError` / `IsRetryable`
 2. ~~**链路追踪**~~ — ✅ 已完成 — OpenTelemetry + Jaeger OTLP HTTP 集成，支持采样率配置
-3. **服务治理** — 可考虑接入 consul/nacos 等注册中心，替代静态端点配置
+3. ~~**服务治理**~~ — ✅ 已完成 — 9 个服务统一接入 Consul 注册中心，二期 4 个服务已添加 Registry 配置 + wire_gen.go 集成
 4. **API 文档** — 可考虑接入 swagger/OpenAPI 自动生成 API 文档
 5. ~~**gRPC Proto 定义**~~ — ✅ 已完成 — 所有服务均有完整 proto 定义 + gRPC server 注册（含 relay-gateway）
 
@@ -742,6 +761,7 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 ### 多模型支持（P2）— ✅ 已完成
 
 - ~~Anthropic Provider~~ — ✅ 已实现（`internal/relay/provider/anthropic.go`），支持 Claude API 格式转换
+- ~~Gemini Provider~~ — ✅ 已实现（`internal/relay/provider/gemini.go`），支持 Google Gemini API 格式转换（generateContent + streamGenerateContent SSE）
 - ~~对账定时调度~~ — ✅ 已实现（`internal/billing/biz/reconciliation_job.go`），每小时自动执行
 - ~~二期服务集成测试~~ — ✅ 已实现（`test/integration/phase2_test.go`），覆盖 config/log/monitor/notify 四个服务
 
@@ -773,8 +793,12 @@ Kratos 不限制 ORM，但结合当前项目，建议：
 11. ~~**二期服务 Proto 定义**~~ — ✅ 已完成 — config/log/monitor/notify/relay 均有完整 proto 定义 + gRPC server 注册
 12. ~~**二期服务单元测试**~~ — ✅ 已完成 — 4 个服务 biz + data 层单元测试
 13. ~~**集成测试增强**~~ — ✅ 已完成 — `test/integration/phase2_test.go` 覆盖 config/log/monitor/notify 四个服务端到端测试
-14. **性能优化** — 缓存策略、连接池配置、限流细化
+14. ~~**性能优化**~~ — ✅ 已完成 — 响应缓存、按端点限流、MySQL/Redis 连接池配置
 15. ~~**监控告警**~~ — ✅ 已完成 — Prometheus metrics + Grafana 指标
 16. ~~**链路追踪集成**~~ — ✅ 已完成 — OpenTelemetry + Jaeger（`internal/pkg/xtrace/trace.go`）
 17. ~~**对账定时调度**~~ — ✅ 已完成 — ReconciliationJob 每小时自动执行（`internal/billing/biz/reconciliation_job.go`）
 18. ~~**Anthropic Provider**~~ — ✅ 已完成 — Claude API 格式转换（`internal/relay/provider/anthropic.go`）
+19. ~~**Gemini Provider**~~ — ✅ 已完成 — Google Gemini API 格式转换（`internal/relay/provider/gemini.go`），支持 generateContent + streamGenerateContent
+20. ~~**二期服务配置文件**~~ — ✅ 已补齐 — 4 个 yaml 配置文件（config-service / log-service / monitor-worker / notify-worker）
+21. ~~**统一错误码体系**~~ — ✅ 已完善 — billing 域 9 个 + relay 域 5 个错误码，含 Map 函数和 IsRetryable 判断
+22. ~~**服务治理统一接入**~~ — ✅ 已完成 — 9 个服务统一 Consul 注册中心集成
