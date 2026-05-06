@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"strings"
 	"time"
@@ -263,8 +264,12 @@ func (uc *IdentityUsecase) DeleteUser(ctx context.Context, userID int64) error {
 func (uc *IdentityUsecase) generateToken() string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback should never happen; crypto/rand uses OS CSPRNG
+		panic("crypto/rand failed: " + err.Error())
+	}
 	for i := range b {
-		b[i] = letters[time.Now().UnixNano()%int64(len(letters))]
+		b[i] = letters[int(b[i])%len(letters)]
 	}
 	return string(b)
 }

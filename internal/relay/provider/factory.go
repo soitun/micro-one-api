@@ -22,8 +22,8 @@ func NewProviderFactory(defaultTimeout time.Duration) *ProviderFactory {
 // CreateProvider creates a provider based on channel type
 func (f *ProviderFactory) CreateProvider(channelType int32, baseURL, apiKey string) (Provider, error) {
 	switch channelType {
-	case 1: // OpenAI-compatible
-		return NewOpenAIProvider(baseURL, apiKey, f.defaultTimeout), nil
+	case ChannelTypeAnthropic: // Anthropic Claude
+		return NewAnthropicProvider(baseURL, apiKey, f.defaultTimeout), nil
 	default:
 		// Default to OpenAI-compatible for unknown types
 		return NewOpenAIProvider(baseURL, apiKey, f.defaultTimeout), nil

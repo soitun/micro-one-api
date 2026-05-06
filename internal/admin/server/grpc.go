@@ -1,4 +1,15 @@
 package server
 
-// NewGRPCServer wires gRPC transport for admin-api.
-func NewGRPCServer() {}
+import (
+	adminv1 "micro-one-api/api/admin/v1"
+	"micro-one-api/internal/admin/service"
+
+	"google.golang.org/grpc"
+)
+
+// NewGRPCServer creates a gRPC server and registers the AdminService.
+func NewGRPCServer(svc *service.AdminService) *grpc.Server {
+	srv := grpc.NewServer()
+	adminv1.RegisterAdminServiceServer(srv, svc)
+	return srv
+}
