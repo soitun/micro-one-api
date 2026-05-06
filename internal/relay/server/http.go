@@ -85,7 +85,7 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 
 	var req relayprovider.ChatCompletionsRequest
 	if err := decodeJSON(r.Body, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -144,7 +144,7 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 	})
 
 	if result.Err != nil {
-		s.writeError(w, mapUpstreamError(relaybiz.UpstreamStatus(result.Err)), fmt.Sprintf("upstream error after %d attempts: %v", result.Attempt+1, result.Err))
+		s.writeError(w, mapUpstreamError(relaybiz.UpstreamStatus(result.Err)), "upstream service error")
 	}
 }
 
@@ -153,7 +153,7 @@ func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		// 流式请求失败，释放预扣配额
 		_ = s.releaseQuota(r.Context(), reservation.ReservationId, "upstream stream error")
-		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("upstream stream error: %v", err))
+		s.writeError(w, http.StatusBadGateway, "upstream stream error")
 		return
 	}
 

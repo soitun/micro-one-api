@@ -79,26 +79,8 @@ func NewRepositoryFromEnv(dsn ...string) (*Repository, error) {
 
 func newMemoryRepository() *Repository {
 	return &Repository{
-		usersByID: map[int64]*biz.User{
-			1: {
-				ID:           1,
-				Username:     "root",
-				DisplayName:  "Root User",
-				Group:        "default",
-				Status:       biz.UserStatusEnabled,
-				PasswordHash: "$2a$10$PizUqaAa4Zkpmbt0zcR3ouRiWZunVYRrA7I3UD64K0Qqcdh2Cq132", // "password"
-			},
-		},
-		tokensByKey: map[string]*biz.Token{
-			"demo-token": {
-				ID:             1,
-				UserID:         1,
-				Key:            "demo-token",
-				Status:         biz.TokenStatusEnabled,
-				UnlimitedQuota: true,
-				Models:         []string{"gpt-4o-mini", "gpt-4.1", "claude-3-5-sonnet"},
-			},
-		},
+		usersByID:   make(map[int64]*biz.User),
+		tokensByKey: make(map[string]*biz.Token),
 	}
 }
 
@@ -352,7 +334,7 @@ func (r *Repository) listUsersDB(ctx context.Context, page, pageSize int32, keyw
 	var models []userModel
 	query := r.db.WithContext(ctx).Model(&userModel{})
 	if keyword != "" {
-		query = query.Where("username LIKE ?", "%"+keyword+"%")
+		query = query.Where("username LIKE ?", "%"+escapeLike(keyword)+"%")
 	}
 	if group != "" {
 		query = query.Where("`group` = ?", group)
@@ -383,6 +365,13 @@ func (r *Repository) listUsersDB(ctx context.Context, page, pageSize int32, keyw
 }
 
 func strPtr(s string) *string { return &s }
+
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
+}
 
 func (r *Repository) findTokenByKeyMemory(_ context.Context, key string) (*biz.Token, error) {
 	r.identityLock.RLock()

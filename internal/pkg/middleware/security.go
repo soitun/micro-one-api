@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"context"
+	crypto_rand "crypto/rand"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -23,18 +25,17 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 
 		// Content Security Policy
-		// Note: This is a basic CSP - adjust based on your application needs
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline'; "+
-				"style-src 'self' 'unsafe-inline'; "+
+				"script-src 'self'; "+
+				"style-src 'self'; "+
 				"img-src 'self' data: https:; "+
 				"font-src 'self' data:; "+
 				"connect-src 'self'; "+
 				"frame-ancestors 'none';")
 
-		// Enable HSTS (only for HTTPS)
-		if r.TLS != nil {
+		// Enable HSTS (for direct TLS or behind TLS-terminating proxy)
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
 		}
 
@@ -130,5 +131,9 @@ func GetRequestID(ctx context.Context) string {
 }
 
 func generateRequestID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	b := make([]byte, 16)
+	if _, err := crypto_rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%x", b)
 }

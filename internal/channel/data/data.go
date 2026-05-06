@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 
 	"micro-one-api/internal/channel/biz"
@@ -76,30 +77,7 @@ func NewRepositoryFromEnv(dsn ...string) (*Repository, error) {
 
 func newMemoryRepository() *Repository {
 	return &Repository{
-		channels: map[int64]*biz.Channel{
-			1: {
-				ID:       1,
-				Type:     1,
-				Name:     "openai-primary",
-				Status:   biz.ChannelStatusEnabled,
-				BaseURL:  "https://api.openai.com/v1",
-				Group:    "default",
-				Models:   []string{"gpt-4o-mini", "gpt-4.1"},
-				Priority: 10,
-				Key:      "upstream-openai-key",
-			},
-			2: {
-				ID:       2,
-				Type:     2,
-				Name:     "anthropic-backup",
-				Status:   biz.ChannelStatusEnabled,
-				BaseURL:  "https://api.anthropic.com",
-				Group:    "default",
-				Models:   []string{"claude-3-5-sonnet"},
-				Priority: 5,
-				Key:      "upstream-anthropic-key",
-			},
-		},
+		channels: make(map[int64]*biz.Channel),
 	}
 }
 
@@ -321,7 +299,7 @@ func (r *Repository) listAvailableModelsMemory(_ context.Context, group string) 
 func (r *Repository) listChannelsDB(ctx context.Context, page, pageSize int32, keyword, group string, status, chType int32) ([]*biz.Channel, int64, error) {
 	query := r.db.WithContext(ctx).Model(&channelModel{})
 	if keyword != "" {
-		query = query.Where("name LIKE ?", "%"+keyword+"%")
+		query = query.Where("name LIKE ?", "%"+escapeLike(keyword)+"%")
 	}
 	if group != "" {
 		query = query.Where("`group` = ?", group)
@@ -414,3 +392,10 @@ func channelToModel(ch *biz.Channel) *channelModel {
 
 func strPtr(s string) *string { return &s }
 func int64Ptr(i int64) *int64 { return &i }
+
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
+}

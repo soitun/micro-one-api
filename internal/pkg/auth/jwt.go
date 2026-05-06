@@ -31,9 +31,7 @@ type JWTManager struct {
 func NewJWTManager() (*JWTManager, error) {
 	secretKey := os.Getenv("JWT_SECRET_KEY")
 	if secretKey == "" {
-		// Generate a default secret key for development
-		secretKey = "dev-secret-key-change-in-production"
-		applogger.Log.Warn("Using default JWT secret key - change for production!")
+		return nil, fmt.Errorf("JWT_SECRET_KEY environment variable is required")
 	}
 
 	issuer := os.Getenv("JWT_ISSUER")
@@ -175,22 +173,10 @@ func LoadServiceAuthConfig() (*ServiceAuthConfig, error) {
 		roles[i] = strings.TrimSpace(role)
 	}
 
-	// Get or generate token
+	// Get token — must be provided via environment
 	token := os.Getenv("SERVICE_TOKEN")
 	if token == "" {
-		jm, err := NewJWTManager()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create JWT manager: %w", err)
-		}
-
-		token, err = jm.GenerateServiceToken(serviceName, serviceType, roles)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate service token: %w", err)
-		}
-
-		applogger.Log.Warn("Generated service token - set SERVICE_TOKEN in production",
-			zap.String("token", token[:10]+"..."),
-		)
+		return nil, fmt.Errorf("SERVICE_TOKEN environment variable is required")
 	}
 
 	return &ServiceAuthConfig{

@@ -1,9 +1,12 @@
 package server
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 
 	adminv1 "micro-one-api/api/admin/v1"
 	"micro-one-api/internal/admin/service"
@@ -12,13 +15,36 @@ import (
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
+// AdminAuth creates a middleware that validates Bearer token against ADMIN_TOKEN env var.
+// If ADMIN_TOKEN is not set, the middleware rejects all requests to protected endpoints.
+func AdminAuth(next http.HandlerFunc) http.HandlerFunc {
+	adminToken := os.Getenv("ADMIN_TOKEN")
+	return func(w http.ResponseWriter, r *http.Request) {
+		if adminToken == "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin token not configured"})
+			return
+		}
+		authHeader := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing or invalid authorization header"})
+			return
+		}
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(token), []byte(adminToken)) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid admin token"})
+			return
+		}
+		next(w, r)
+	}
+}
+
 // NewHTTPServer wires HTTP transport for admin-api.
 func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv := khttp.NewServer(
 		khttp.Address(addr),
 	)
 
-	// Health and metrics
+	// Health and metrics (unauthenticated)
 	srv.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		metrics.Handler().ServeHTTP(w, r)
 	})
@@ -28,35 +54,30 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// User management
-	srv.HandleFunc("/v1/users", func(w http.ResponseWriter, r *http.Request) {
+	// Protected admin endpoints
+	srv.HandleFunc("/v1/users", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleListUsers(w, r, svc)
-	})
+	}))
 
-	// Channel management
-	srv.HandleFunc("/v1/channels", func(w http.ResponseWriter, r *http.Request) {
+	srv.HandleFunc("/v1/channels", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleListChannels(w, r, svc)
-	})
+	}))
 
-	// System options
-	srv.HandleFunc("/v1/system/options", func(w http.ResponseWriter, r *http.Request) {
+	srv.HandleFunc("/v1/system/options", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleGetSystemOptions(w, r, svc)
-	})
+	}))
 
-	// Logs
-	srv.HandleFunc("/v1/logs", func(w http.ResponseWriter, r *http.Request) {
+	srv.HandleFunc("/v1/logs", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleListLogs(w, r, svc)
-	})
+	}))
 
-	// Account
-	srv.HandleFunc("/v1/account", func(w http.ResponseWriter, r *http.Request) {
+	srv.HandleFunc("/v1/account", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleGetAccount(w, r, svc)
-	})
+	}))
 
-	// Redeem codes
-	srv.HandleFunc("/v1/redeem-codes", func(w http.ResponseWriter, r *http.Request) {
+	srv.HandleFunc("/v1/redeem-codes", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleListRedeemCodes(w, r, svc)
-	})
+	}))
 
 	return srv
 }
@@ -111,7 +132,7 @@ func handleListUsers(w http.ResponseWriter, r *http.Request, svc *service.AdminS
 		Status:   status,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -139,7 +160,7 @@ func handleListChannels(w http.ResponseWriter, r *http.Request, svc *service.Adm
 		Type:     chType,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -162,7 +183,7 @@ func handleGetSystemOptions(w http.ResponseWriter, r *http.Request, svc *service
 		}
 		resp, err := svc.UpdateSystemOptions(r.Context(), &req)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 			return
 		}
 		writeJSON(w, http.StatusOK, resp)
@@ -193,7 +214,7 @@ func handleListLogs(w http.ResponseWriter, r *http.Request, svc *service.AdminSe
 		EndTime:   endTime,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -215,7 +236,7 @@ func handleGetAccount(w http.ResponseWriter, r *http.Request, svc *service.Admin
 		UserId: userID,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -235,7 +256,7 @@ func handleListRedeemCodes(w http.ResponseWriter, r *http.Request, svc *service.
 		PageSize: pageSize,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)

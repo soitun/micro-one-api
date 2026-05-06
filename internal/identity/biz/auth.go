@@ -233,6 +233,13 @@ func (uc *IdentityUsecase) CreateUser(ctx context.Context, username, displayName
 		Group:       group,
 		Status:      UserStatusEnabled,
 	}
+	if password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, err
+		}
+		user.PasswordHash = string(hash)
+	}
 	if err := uc.repo.CreateUser(ctx, user); err != nil {
 		return nil, err
 	}

@@ -79,12 +79,12 @@ func handleOAuth(w http.ResponseWriter, r *http.Request, registry *oauth.Provide
 
 func handleOAuthAuthorize(w http.ResponseWriter, r *http.Request, provider oauth.Provider) {
 	state := generateState()
-	// In production, store state in session/cookie for CSRF validation
 	http.SetCookie(w, &http.Cookie{
 		Name:     "oauth_state",
 		Value:    state,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   true,
 		MaxAge:   300,
 		SameSite: http.SameSiteLaxMode,
 	})
@@ -98,23 +98,27 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request, provider oauth.
 		return
 	}
 
-	// Validate state (optional but recommended)
+	// Validate state (CSRF protection — mandatory)
 	state := r.URL.Query().Get("state")
 	cookie, _ := r.Cookie("oauth_state")
-	if cookie != nil && cookie.Value != "" && cookie.Value != state {
+	if cookie == nil || cookie.Value == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing oauth state cookie"})
+		return
+	}
+	if cookie.Value != state {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid state"})
 		return
 	}
 
 	userInfo, err := provider.Exchange(r.Context(), code)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "oauth provider error"})
 		return
 	}
 
 	user, token, err := uc.OAuthLogin(r.Context(), userInfo.Provider, userInfo.ProviderID, userInfo.Username, userInfo.Email, userInfo.DisplayName)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
 
