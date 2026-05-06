@@ -85,13 +85,16 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cleanupJob := biz.NewCleanupJob(uc, 1*time.Minute)
+	reconJob := biz.NewReconciliationJob(reconUc, 1*time.Hour)
 	go cleanupJob.Start(ctx)
+	go reconJob.Start(ctx)
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
 		cancel()
 		cleanupJob.Stop()
+		reconJob.Stop()
 	}()
 
 	return app, func() { d.Close(); cancel() }, nil

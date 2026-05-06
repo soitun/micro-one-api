@@ -5,11 +5,77 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
 type contextKey string
 
 const traceIDKey contextKey = "traceID"
+
+// Config holds tracing configuration.
+type Config struct {
+	Enabled    bool    `yaml:"enabled"`
+	Endpoint   string  `yaml:"endpoint"`    // e.g. "http://jaeger:4318/v1/traces"
+	Service    string  `yaml:"service"`     // service name
+	SampleRate float64 `yaml:"sample_rate"` // 0.0 - 1.0
+}
+
+// InitTracer initializes OpenTelemetry tracing with OTLP HTTP exporter.
+// Returns a shutdown function that must be called on application exit.
+func InitTracer(cfg Config) (func(), error) {
+	if !cfg.Enabled {
+		return func() {}, nil
+	}
+
+	if cfg.SampleRate <= 0 {
+		cfg.SampleRate = 1.0
+	}
+
+	ctx := context.Background()
+
+	exporter, err := otlptracehttp.New(ctx,
+		otlptracehttp.WithEndpoint(cfg.Endpoint),
+		otlptracehttp.WithInsecure(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceName(cfg.Service),
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(cfg.SampleRate)),
+	)
+
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
+	shutdown := func() {
+		_ = tp.Shutdown(ctx)
+	}
+
+	return shutdown, nil
+}
 
 // GenerateTraceID creates a new random 16-byte hex trace ID.
 func GenerateTraceID() string {
