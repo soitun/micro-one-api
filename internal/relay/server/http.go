@@ -67,6 +67,8 @@ func (s *HTTPServer) RegisterRoutes(srv *khttp.Server) {
 	srv.HandleFunc("/v1/models", s.handleModels)
 	srv.HandlePrefix("/v1/models/", http.HandlerFunc(s.handleRetrieveModel))
 	srv.HandleFunc("/api/status", s.handleAPIStatus)
+	srv.HandleFunc("/api/models", s.handleDashboardModels)
+	srv.HandleFunc("/api/group", s.handleGroups)
 	srv.HandleFunc("/healthz", s.handleHealth)
 	srv.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		metrics.Handler().ServeHTTP(w, r)
@@ -508,6 +510,49 @@ func (s *HTTPServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 			"display_in_currency":  false,
 			"registration_enabled": true,
 		},
+	})
+}
+
+func (s *HTTPServer) handleDashboardModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	group := r.URL.Query().Get("group")
+	if group == "" {
+		group = "default"
+	}
+	modelsReply, err := s.listAvailableModels(r.Context(), group)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false,
+			"message": "failed to list models",
+			"data":    map[string][]string{},
+		})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "",
+		"data": map[string][]string{
+			group: modelsReply.Models,
+		},
+	})
+}
+
+func (s *HTTPServer) handleGroups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	group := r.URL.Query().Get("group")
+	if group == "" {
+		group = "default"
+	}
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "",
+		"data":    []string{group},
 	})
 }
 

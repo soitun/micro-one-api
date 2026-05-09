@@ -39,12 +39,14 @@ func (userModel) TableName() string { return "users" }
 type tokenModel struct {
 	ID             int64   `gorm:"column:id"`
 	UserID         int64   `gorm:"column:user_id"`
+	Name           string  `gorm:"column:name"`
 	Key            string  `gorm:"column:key"`
 	Status         int32   `gorm:"column:status"`
 	ExpiredTime    int64   `gorm:"column:expired_time"`
 	RemainQuota    int64   `gorm:"column:remain_quota"`
 	UnlimitedQuota bool    `gorm:"column:unlimited_quota"`
 	Models         *string `gorm:"column:models"`
+	CreatedAt      int64   `gorm:"column:created_at"`
 }
 
 func (tokenModel) TableName() string { return "tokens" }
@@ -83,6 +85,10 @@ func newMemoryRepository() *Repository {
 		usersByID:   make(map[int64]*biz.User),
 		tokensByKey: make(map[string]*biz.Token),
 	}
+}
+
+func NewMemoryRepositoryForTest() *Repository {
+	return newMemoryRepository()
 }
 
 func (r *Repository) FindTokenByKey(ctx context.Context, key string) (*biz.Token, error) {
@@ -177,6 +183,91 @@ func (r *Repository) CreateToken(ctx context.Context, token *biz.Token) error {
 	return nil
 }
 
+func (r *Repository) FindTokenByID(ctx context.Context, userID, tokenID int64) (*biz.Token, error) {
+	if r.db != nil {
+		return r.findTokenByIDDB(ctx, userID, tokenID)
+	}
+	r.identityLock.RLock()
+	defer r.identityLock.RUnlock()
+	for _, token := range r.tokensByKey {
+		if token.ID == tokenID && token.UserID == userID {
+			cloned := *token
+			cloned.Models = append([]string(nil), token.Models...)
+			return &cloned, nil
+		}
+	}
+	return nil, biz.ErrTokenNotFound
+}
+
+func (r *Repository) ListTokens(ctx context.Context, userID int64, page, pageSize int32, keyword string) ([]*biz.Token, int64, error) {
+	if r.db != nil {
+		return r.listTokensDB(ctx, userID, page, pageSize, keyword)
+	}
+	r.identityLock.RLock()
+	defer r.identityLock.RUnlock()
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	var tokens []*biz.Token
+	for _, token := range r.tokensByKey {
+		if token.UserID != userID {
+			continue
+		}
+		if keyword != "" && !strings.Contains(token.Name, keyword) && !strings.Contains(token.Key, keyword) {
+			continue
+		}
+		cloned := *token
+		cloned.Models = append([]string(nil), token.Models...)
+		tokens = append(tokens, &cloned)
+	}
+	total := int64(len(tokens))
+	start := int((page - 1) * pageSize)
+	if start >= len(tokens) {
+		return []*biz.Token{}, total, nil
+	}
+	end := start + int(pageSize)
+	if end > len(tokens) {
+		end = len(tokens)
+	}
+	return tokens[start:end], total, nil
+}
+
+func (r *Repository) UpdateToken(ctx context.Context, token *biz.Token) error {
+	if r.db != nil {
+		return r.updateTokenDB(ctx, token)
+	}
+	r.identityLock.Lock()
+	defer r.identityLock.Unlock()
+	for key, existing := range r.tokensByKey {
+		if existing.ID == token.ID && existing.UserID == token.UserID {
+			if key != token.Key {
+				delete(r.tokensByKey, key)
+			}
+			r.tokensByKey[token.Key] = token
+			return nil
+		}
+	}
+	return biz.ErrTokenNotFound
+}
+
+func (r *Repository) DeleteToken(ctx context.Context, userID, tokenID int64) error {
+	if r.db != nil {
+		return r.deleteTokenDB(ctx, userID, tokenID)
+	}
+	r.identityLock.Lock()
+	defer r.identityLock.Unlock()
+	for key, token := range r.tokensByKey {
+		if token.ID == tokenID && token.UserID == userID {
+			delete(r.tokensByKey, key)
+			return nil
+		}
+	}
+	return biz.ErrTokenNotFound
+}
+
 func (r *Repository) ListUsers(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*biz.User, int64, error) {
 	if r.db != nil {
 		return r.listUsersDB(ctx, page, pageSize, keyword, group, status)
@@ -208,16 +299,18 @@ func (r *Repository) findTokenByKeyDB(ctx context.Context, key string) (*biz.Tok
 		}
 		return nil, err
 	}
-	return &biz.Token{
-		ID:             model.ID,
-		UserID:         model.UserID,
-		Key:            model.Key,
-		Status:         model.Status,
-		ExpiredAt:      model.ExpiredTime,
-		RemainQuota:    model.RemainQuota,
-		UnlimitedQuota: model.UnlimitedQuota,
-		Models:         biz.SplitCSVPtr(model.Models),
-	}, nil
+	return tokenModelToBiz(model), nil
+}
+
+func (r *Repository) findTokenByIDDB(ctx context.Context, userID, tokenID int64) (*biz.Token, error) {
+	var model tokenModel
+	if err := r.db.WithContext(ctx).Where("id = ? AND user_id = ?", tokenID, userID).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, biz.ErrTokenNotFound
+		}
+		return nil, err
+	}
+	return tokenModelToBiz(model), nil
 }
 
 func (r *Repository) findUserByIDDB(ctx context.Context, userID int64) (*biz.User, error) {
@@ -304,9 +397,9 @@ func (r *Repository) createUserDB(ctx context.Context, user *biz.User) error {
 func (r *Repository) updateUserDB(ctx context.Context, user *biz.User) error {
 	return r.db.WithContext(ctx).Model(&userModel{}).Where("id = ?", user.ID).Updates(map[string]interface{}{
 		"display_name": user.DisplayName,
-		"email":       user.Email,
-		"group":       user.Group,
-		"status":      user.Status,
+		"email":        user.Email,
+		"group":        user.Group,
+		"status":       user.Status,
 	}).Error
 }
 
@@ -317,18 +410,87 @@ func (r *Repository) deleteUserDB(ctx context.Context, userID int64) error {
 func (r *Repository) createTokenDB(ctx context.Context, token *biz.Token) error {
 	model := tokenModel{
 		UserID:         token.UserID,
+		Name:           token.Name,
 		Key:            token.Key,
 		Status:         token.Status,
 		ExpiredTime:    token.ExpiredAt,
 		RemainQuota:    token.RemainQuota,
 		UnlimitedQuota: token.UnlimitedQuota,
 		Models:         strPtr(strings.Join(token.Models, ",")),
+		CreatedAt:      token.CreatedAt,
 	}
 	if err := r.db.WithContext(ctx).Create(&model).Error; err != nil {
 		return err
 	}
 	token.ID = model.ID
 	return nil
+}
+
+func (r *Repository) listTokensDB(ctx context.Context, userID int64, page, pageSize int32, keyword string) ([]*biz.Token, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	var models []tokenModel
+	query := r.db.WithContext(ctx).Model(&tokenModel{}).Where("user_id = ?", userID)
+	if keyword != "" {
+		like := "%" + escapeLike(keyword) + "%"
+		query = query.Where("name LIKE ? OR `key` LIKE ?", like, like)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * pageSize
+	if err := query.Order("id DESC").Offset(int(offset)).Limit(int(pageSize)).Find(&models).Error; err != nil {
+		return nil, 0, err
+	}
+	tokens := make([]*biz.Token, len(models))
+	for i, model := range models {
+		tokens[i] = tokenModelToBiz(model)
+	}
+	return tokens, total, nil
+}
+
+func (r *Repository) updateTokenDB(ctx context.Context, token *biz.Token) error {
+	return r.db.WithContext(ctx).Model(&tokenModel{}).
+		Where("id = ? AND user_id = ?", token.ID, token.UserID).
+		Updates(map[string]interface{}{
+			"name":            token.Name,
+			"status":          token.Status,
+			"expired_time":    token.ExpiredAt,
+			"remain_quota":    token.RemainQuota,
+			"unlimited_quota": token.UnlimitedQuota,
+			"models":          strings.Join(token.Models, ","),
+		}).Error
+}
+
+func (r *Repository) deleteTokenDB(ctx context.Context, userID, tokenID int64) error {
+	result := r.db.WithContext(ctx).Where("id = ? AND user_id = ?", tokenID, userID).Delete(&tokenModel{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return biz.ErrTokenNotFound
+	}
+	return nil
+}
+
+func tokenModelToBiz(model tokenModel) *biz.Token {
+	return &biz.Token{
+		ID:             model.ID,
+		UserID:         model.UserID,
+		Name:           model.Name,
+		Key:            model.Key,
+		Status:         model.Status,
+		ExpiredAt:      model.ExpiredTime,
+		RemainQuota:    model.RemainQuota,
+		UnlimitedQuota: model.UnlimitedQuota,
+		Models:         biz.SplitCSVPtr(model.Models),
+		CreatedAt:      model.CreatedAt,
+	}
 }
 
 func (r *Repository) listUsersDB(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*biz.User, int64, error) {

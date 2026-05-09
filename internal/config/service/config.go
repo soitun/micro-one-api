@@ -167,6 +167,28 @@ func (s *ConfigService) HandleDeleteConfig(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (s *ConfigService) HandleOneAPIContent(namespace, key, defaultValue string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{
+				"success": false,
+				"message": "method not allowed",
+			})
+			return
+		}
+		value := defaultValue
+		entry, err := s.uc.GetConfig(r.Context(), namespace, key)
+		if err == nil && entry != nil {
+			value = entry.Value
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"message": "",
+			"data":    value,
+		})
+	}
+}
+
 // helpers
 
 func parseTwoSegments(path, prefix string) (string, string) {

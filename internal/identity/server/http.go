@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"micro-one-api/internal/identity/biz"
 	"micro-one-api/internal/pkg/metrics"
@@ -39,7 +41,299 @@ func NewHTTPServer(addr string, uc *biz.IdentityUsecase, oauthRegistry *oauth.Pr
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	srv.HandleFunc("/api/user/register", func(w http.ResponseWriter, r *http.Request) {
+		handleRegister(w, r, uc)
+	})
+	srv.HandleFunc("/api/user/login", func(w http.ResponseWriter, r *http.Request) {
+		handleLogin(w, r, uc)
+	})
+	srv.HandleFunc("/api/user/self", func(w http.ResponseWriter, r *http.Request) {
+		handleSelf(w, r, uc)
+	})
+	srv.HandleFunc("/api/user/available_models", func(w http.ResponseWriter, r *http.Request) {
+		handleAvailableModels(w, r, uc)
+	})
+	srv.HandleFunc("/api/user/token", func(w http.ResponseWriter, r *http.Request) {
+		handleCreateUserToken(w, r, uc)
+	})
+	srv.HandleFunc("/api/token/", func(w http.ResponseWriter, r *http.Request) {
+		handleTokens(w, r, uc)
+	})
+	srv.HandleFunc("/api/token", func(w http.ResponseWriter, r *http.Request) {
+		handleTokens(w, r, uc)
+	})
 	return srv
+}
+
+type apiResponse struct {
+	Success bool        `json:"success"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+}
+
+func handleRegister(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
+		Group    string `json:"group"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Group == "" {
+		req.Group = "default"
+	}
+	user, err := uc.Register(r.Context(), req.Username, req.Password, req.Email, req.Group)
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{"user_id": user.ID}})
+}
+
+func handleLogin(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	user, token, err := uc.Login(r.Context(), req.Username, req.Password)
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "invalid credentials"})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{
+		Success: true,
+		Message: "",
+		Data: map[string]interface{}{
+			"token":   token,
+			"user_id": user.ID,
+			"user":    userToMap(user),
+		},
+	})
+}
+
+func handleSelf(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	user, err := uc.GetUser(r.Context(), snapshot.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: userToMap(user)})
+}
+
+func handleAvailableModels(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: snapshot.AllowedModels})
+}
+
+func handleCreateUserToken(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	token, err := uc.CreateAccessToken(r.Context(), snapshot.UserID, "default", nil, 0)
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: tokenToMap(token, true)})
+}
+
+func handleTokens(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	tokenID, hasTokenID := parseTokenID(r.URL.Path)
+	switch r.Method {
+	case http.MethodGet:
+		if hasTokenID {
+			token, err := uc.GetAccessToken(r.Context(), snapshot.UserID, tokenID)
+			if err != nil {
+				writeJSON(w, http.StatusNotFound, apiResponse{Success: false, Message: "token not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: tokenToMap(token, true)})
+			return
+		}
+		page := queryInt32(r, "page", 1)
+		pageSize := queryInt32(r, "page_size", 20)
+		keyword := r.URL.Query().Get("keyword")
+		tokens, total, err := uc.ListAccessTokens(r.Context(), snapshot.UserID, page, pageSize, keyword)
+		if err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+			return
+		}
+		items := make([]map[string]interface{}, 0, len(tokens))
+		for _, token := range tokens {
+			items = append(items, tokenToMap(token, false))
+		}
+		writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{"items": items, "total": total}})
+	case http.MethodPost:
+		var req struct {
+			Name      string   `json:"name"`
+			Models    []string `json:"models"`
+			ExpiredAt int64    `json:"expired_time"`
+			ExpireAt  int64    `json:"expire_at"`
+		}
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		expireAt := req.ExpiredAt
+		if expireAt == 0 {
+			expireAt = req.ExpireAt
+		}
+		token, err := uc.CreateAccessToken(r.Context(), snapshot.UserID, req.Name, req.Models, expireAt)
+		if err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: tokenToMap(token, true)})
+	case http.MethodPut:
+		if !hasTokenID {
+			writeJSON(w, http.StatusBadRequest, apiResponse{Success: false, Message: "token id is required"})
+			return
+		}
+		var req struct {
+			Name           string   `json:"name"`
+			Models         []string `json:"models"`
+			ExpiredAt      int64    `json:"expired_time"`
+			Status         int32    `json:"status"`
+			RemainQuota    int64    `json:"remain_quota"`
+			UnlimitedQuota bool     `json:"unlimited_quota"`
+		}
+		req.RemainQuota = -1
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		token, err := uc.UpdateAccessToken(r.Context(), snapshot.UserID, tokenID, req.Name, req.Models, req.ExpiredAt, req.Status, req.RemainQuota, req.UnlimitedQuota)
+		if err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: tokenToMap(token, true)})
+	case http.MethodDelete:
+		if !hasTokenID {
+			writeJSON(w, http.StatusBadRequest, apiResponse{Success: false, Message: "token id is required"})
+			return
+		}
+		if err := uc.DeleteAccessToken(r.Context(), snapshot.UserID, tokenID); err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: ""})
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+	}
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst interface{}) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Success: false, Message: "invalid request body"})
+		return false
+	}
+	return true
+}
+
+func authSnapshotFromRequest(r *http.Request, uc *biz.IdentityUsecase) (*biz.AuthSnapshot, error) {
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return nil, biz.ErrInvalidToken
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if token == "" {
+		return nil, biz.ErrInvalidToken
+	}
+	return uc.GetAuthSnapshot(r.Context(), token)
+}
+
+func parseTokenID(path string) (int64, bool) {
+	rest := strings.TrimPrefix(path, "/api/token")
+	rest = strings.Trim(rest, "/")
+	if rest == "" || strings.Contains(rest, "/") {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(rest, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+func queryInt32(r *http.Request, key string, defaultVal int32) int32 {
+	value := r.URL.Query().Get(key)
+	if value == "" {
+		return defaultVal
+	}
+	n, err := strconv.ParseInt(value, 10, 32)
+	if err != nil {
+		return defaultVal
+	}
+	return int32(n)
+}
+
+func userToMap(user *biz.User) map[string]interface{} {
+	return map[string]interface{}{
+		"id":           user.ID,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"email":        user.Email,
+		"group":        user.Group,
+		"status":       user.Status,
+	}
+}
+
+func tokenToMap(token *biz.Token, includeKey bool) map[string]interface{} {
+	data := map[string]interface{}{
+		"id":              token.ID,
+		"name":            token.Name,
+		"status":          token.Status,
+		"expired_time":    token.ExpiredAt,
+		"remain_quota":    token.RemainQuota,
+		"unlimited_quota": token.UnlimitedQuota,
+		"models":          token.Models,
+		"created_at":      token.CreatedAt,
+	}
+	if includeKey {
+		data["key"] = token.Key
+	}
+	return data
 }
 
 // handleOAuth routes /v1/oauth/{provider}/{action} requests.
@@ -134,9 +428,9 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request, provider oauth.
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"token":   token,
-		"user_id": user.ID,
+		"success":  true,
+		"token":    token,
+		"user_id":  user.ID,
 		"username": user.Username,
 	})
 }

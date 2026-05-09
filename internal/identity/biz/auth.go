@@ -26,15 +26,15 @@ const (
 )
 
 var (
-	ErrInvalidToken   = errors.New("invalid token")
-	ErrTokenExpired   = errors.New("token expired")
-	ErrTokenExhausted = errors.New("token exhausted")
-	ErrTokenDisabled  = errors.New("token disabled")
-	ErrUserDisabled   = errors.New("user disabled")
-	ErrUserNotFound   = errors.New("user not found")
-	ErrTokenNotFound  = errors.New("token not found")
-	ErrUserExists     = errors.New("user already exists")
-	ErrInvalidPassword = errors.New("invalid password")
+	ErrInvalidToken      = errors.New("invalid token")
+	ErrTokenExpired      = errors.New("token expired")
+	ErrTokenExhausted    = errors.New("token exhausted")
+	ErrTokenDisabled     = errors.New("token disabled")
+	ErrUserDisabled      = errors.New("user disabled")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrTokenNotFound     = errors.New("token not found")
+	ErrUserExists        = errors.New("user already exists")
+	ErrInvalidPassword   = errors.New("invalid password")
 	ErrOAuthUserNotFound = errors.New("oauth user not found")
 )
 
@@ -53,12 +53,14 @@ type User struct {
 type Token struct {
 	ID             int64
 	UserID         int64
+	Name           string
 	Key            string
 	Status         int32
 	ExpiredAt      int64
 	RemainQuota    int64
 	UnlimitedQuota bool
 	Models         []string
+	CreatedAt      int64
 }
 
 // AuthSnapshot is the minimum authorization view returned to relay-gateway.
@@ -80,6 +82,10 @@ type IdentityRepo interface {
 	UpdateUser(ctx context.Context, user *User) error
 	DeleteUser(ctx context.Context, userID int64) error
 	CreateToken(ctx context.Context, token *Token) error
+	FindTokenByID(ctx context.Context, userID, tokenID int64) (*Token, error)
+	ListTokens(ctx context.Context, userID int64, page, pageSize int32, keyword string) ([]*Token, int64, error)
+	UpdateToken(ctx context.Context, token *Token) error
+	DeleteToken(ctx context.Context, userID, tokenID int64) error
 	ListUsers(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*User, int64, error)
 }
 
@@ -297,16 +303,61 @@ func (uc *IdentityUsecase) CreateAccessToken(ctx context.Context, userID int64, 
 		return nil, ErrUserDisabled
 	}
 	token := &Token{
-		UserID:    userID,
-		Key:       uc.generateToken(),
-		Status:    TokenStatusEnabled,
-		ExpiredAt: expireAt,
-		Models:   models,
+		UserID:      userID,
+		Name:        name,
+		Key:         uc.generateToken(),
+		Status:      TokenStatusEnabled,
+		ExpiredAt:   expireAt,
+		RemainQuota: uc.defaultQuota,
+		Models:      models,
+		CreatedAt:   uc.now().Unix(),
 	}
 	if err := uc.repo.CreateToken(ctx, token); err != nil {
 		return nil, err
 	}
 	return token, nil
+}
+
+func (uc *IdentityUsecase) ListAccessTokens(ctx context.Context, userID int64, page, pageSize int32, keyword string) ([]*Token, int64, error) {
+	if _, err := uc.repo.FindUserByID(ctx, userID); err != nil {
+		return nil, 0, err
+	}
+	return uc.repo.ListTokens(ctx, userID, page, pageSize, keyword)
+}
+
+func (uc *IdentityUsecase) GetAccessToken(ctx context.Context, userID, tokenID int64) (*Token, error) {
+	return uc.repo.FindTokenByID(ctx, userID, tokenID)
+}
+
+func (uc *IdentityUsecase) UpdateAccessToken(ctx context.Context, userID, tokenID int64, name string, models []string, expireAt int64, status int32, remainQuota int64, unlimitedQuota bool) (*Token, error) {
+	token, err := uc.repo.FindTokenByID(ctx, userID, tokenID)
+	if err != nil {
+		return nil, err
+	}
+	if name != "" {
+		token.Name = name
+	}
+	if models != nil {
+		token.Models = models
+	}
+	if expireAt != 0 {
+		token.ExpiredAt = expireAt
+	}
+	if status != 0 {
+		token.Status = status
+	}
+	if remainQuota >= 0 {
+		token.RemainQuota = remainQuota
+	}
+	token.UnlimitedQuota = unlimitedQuota
+	if err := uc.repo.UpdateToken(ctx, token); err != nil {
+		return nil, err
+	}
+	return token, nil
+}
+
+func (uc *IdentityUsecase) DeleteAccessToken(ctx context.Context, userID, tokenID int64) error {
+	return uc.repo.DeleteToken(ctx, userID, tokenID)
 }
 
 func (uc *IdentityUsecase) ListUsers(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*User, int64, error) {

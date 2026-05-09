@@ -68,6 +68,48 @@ func (m *mockIdentityRepo) CreateToken(ctx context.Context, token *Token) error 
 	return nil
 }
 
+func (m *mockIdentityRepo) FindTokenByID(ctx context.Context, userID, tokenID int64) (*Token, error) {
+	for _, token := range m.tokens {
+		if token.ID == tokenID && token.UserID == userID {
+			return token, nil
+		}
+	}
+	return nil, ErrTokenNotFound
+}
+
+func (m *mockIdentityRepo) ListTokens(ctx context.Context, userID int64, page, pageSize int32, keyword string) ([]*Token, int64, error) {
+	var result []*Token
+	for _, token := range m.tokens {
+		if token.UserID == userID {
+			result = append(result, token)
+		}
+	}
+	return result, int64(len(result)), nil
+}
+
+func (m *mockIdentityRepo) UpdateToken(ctx context.Context, token *Token) error {
+	for key, existing := range m.tokens {
+		if existing.ID == token.ID && existing.UserID == token.UserID {
+			if key != token.Key {
+				delete(m.tokens, key)
+			}
+			m.tokens[token.Key] = token
+			return nil
+		}
+	}
+	return ErrTokenNotFound
+}
+
+func (m *mockIdentityRepo) DeleteToken(ctx context.Context, userID, tokenID int64) error {
+	for key, token := range m.tokens {
+		if token.ID == tokenID && token.UserID == userID {
+			delete(m.tokens, key)
+			return nil
+		}
+	}
+	return ErrTokenNotFound
+}
+
 func (m *mockIdentityRepo) ListUsers(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*User, int64, error) {
 	var result []*User
 	for _, u := range m.users {

@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	identityv1 "micro-one-api/api/identity/v1"
 	channelv1 "micro-one-api/api/channel/v1"
+	identityv1 "micro-one-api/api/identity/v1"
 	channelbiz "micro-one-api/internal/channel/biz"
 	channelservice "micro-one-api/internal/channel/service"
 	identitybiz "micro-one-api/internal/identity/biz"
@@ -251,6 +251,48 @@ func (m *testIdentityRepo) CreateToken(ctx context.Context, token *identitybiz.T
 	token.ID = int64(len(m.tokens) + 1)
 	m.tokens[token.Key] = token
 	return nil
+}
+
+func (m *testIdentityRepo) FindTokenByID(ctx context.Context, userID, tokenID int64) (*identitybiz.Token, error) {
+	for _, token := range m.tokens {
+		if token.ID == tokenID && token.UserID == userID {
+			return token, nil
+		}
+	}
+	return nil, identitybiz.ErrTokenNotFound
+}
+
+func (m *testIdentityRepo) ListTokens(ctx context.Context, userID int64, page, pageSize int32, keyword string) ([]*identitybiz.Token, int64, error) {
+	var result []*identitybiz.Token
+	for _, token := range m.tokens {
+		if token.UserID == userID {
+			result = append(result, token)
+		}
+	}
+	return result, int64(len(result)), nil
+}
+
+func (m *testIdentityRepo) UpdateToken(ctx context.Context, token *identitybiz.Token) error {
+	for key, existing := range m.tokens {
+		if existing.ID == token.ID && existing.UserID == token.UserID {
+			if key != token.Key {
+				delete(m.tokens, key)
+			}
+			m.tokens[token.Key] = token
+			return nil
+		}
+	}
+	return identitybiz.ErrTokenNotFound
+}
+
+func (m *testIdentityRepo) DeleteToken(ctx context.Context, userID, tokenID int64) error {
+	for key, token := range m.tokens {
+		if token.ID == tokenID && token.UserID == userID {
+			delete(m.tokens, key)
+			return nil
+		}
+	}
+	return identitybiz.ErrTokenNotFound
 }
 
 func (m *testIdentityRepo) ListUsers(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*identitybiz.User, int64, error) {
