@@ -43,6 +43,7 @@ ifneq ($(strip $(API_PROTO_FILES)),)
 		--go_out=paths=source_relative:. \
 		--go-http_out=paths=source_relative:. \
 		--go-grpc_out=paths=source_relative,require_unimplemented_servers=false:. \
+		--openapi_out=fq_schema_naming=true,default_response=false:. \
 		$(API_PROTO_FILES)
 else
 	@echo "no api proto files"
