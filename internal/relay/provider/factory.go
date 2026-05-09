@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -26,34 +27,86 @@ func (f *ProviderFactory) CreateProvider(channelType int32, baseURL, apiKey stri
 		return NewAnthropicProvider(baseURL, apiKey, f.defaultTimeout), nil
 	case ChannelTypeGemini: // Google Gemini
 		return NewGeminiProvider(baseURL, apiKey, f.defaultTimeout), nil
+	case ChannelTypeAzure:
+		if baseURL == "" {
+			return nil, fmt.Errorf("azure channel requires base_url with deployment path")
+		}
+		return NewOpenAIProvider(baseURL, apiKey, f.defaultTimeout)
+	case ChannelTypeOpenAI,
+		ChannelTypeDeepSeek,
+		ChannelTypeMistral,
+		ChannelTypeMoonshot,
+		ChannelTypeGroq,
+		ChannelTypeCohere,
+		ChannelTypeBaichuan,
+		ChannelTypeMinimax,
+		ChannelTypeTogether,
+		ChannelTypeFireworks,
+		ChannelTypePerplexity,
+		ChannelTypeNovita:
+		return NewOpenAIProvider(resolveOpenAICompatibleBaseURL(channelType, baseURL), apiKey, f.defaultTimeout)
 	default:
 		// Default to OpenAI-compatible for unknown types
-		return NewOpenAIProvider(baseURL, apiKey, f.defaultTimeout)
+		return NewOpenAIProvider(resolveOpenAICompatibleBaseURL(channelType, baseURL), apiKey, f.defaultTimeout)
+	}
+}
+
+func resolveOpenAICompatibleBaseURL(channelType int32, baseURL string) string {
+	if baseURL != "" {
+		return baseURL
+	}
+	switch channelType {
+	case ChannelTypeOpenAI:
+		return "https://api.openai.com/v1"
+	case ChannelTypeDeepSeek:
+		return "https://api.deepseek.com/v1"
+	case ChannelTypeMistral:
+		return "https://api.mistral.ai/v1"
+	case ChannelTypeMoonshot:
+		return "https://api.moonshot.cn/v1"
+	case ChannelTypeGroq:
+		return "https://api.groq.com/openai/v1"
+	case ChannelTypeCohere:
+		return "https://api.cohere.com/compatibility/v1"
+	case ChannelTypeBaichuan:
+		return "https://api.baichuan-ai.com/v1"
+	case ChannelTypeMinimax:
+		return "https://api.minimax.chat/v1"
+	case ChannelTypeTogether:
+		return "https://api.together.xyz/v1"
+	case ChannelTypeFireworks:
+		return "https://api.fireworks.ai/inference/v1"
+	case ChannelTypePerplexity:
+		return "https://api.perplexity.ai"
+	case ChannelTypeNovita:
+		return "https://api.novita.ai/v3/openai"
+	default:
+		return "https://api.openai.com/v1"
 	}
 }
 
 // Common channel types (these should align with one-api channel types)
 const (
-	ChannelTypeOpenAI      int32 = 1
-	ChannelTypeAnthropic   int32 = 2
-	ChannelTypeGemini      int32 = 3
-	ChannelTypeClaude      int32 = 4
-	ChannelTypeAzure       int32 = 5
-	ChannelTypeDeepSeek    int32 = 6
-	ChannelTypeMistral     int32 = 7
-	ChannelTypeZhipu       int32 = 8
-	ChannelTypeMoonshot    int32 = 9
-	ChannelTypeGroq        int32 = 10
-	ChannelTypeCohere      int32 = 11
-	ChannelTypeBaichuan    int32 = 12
-	ChannelTypeTongyi      int32 = 13
-	ChannelTypeHunyuan     int32 = 14
-	ChannelTypeMinimax      int32 = 15
-	ChannelTypeXingchen    int32 = 16
-	ChannelTypeBedrock     int32 = 17
-	ChannelTypeTogether    int32 = 18
-	ChannelTypeFireworks   int32 = 19
-	ChannelTypePerplexity  int32 = 20
-	ChannelTypeNovita      int32 = 21
-	ChannelTypeVoyageAI    int32 = 22
+	ChannelTypeOpenAI     int32 = 1
+	ChannelTypeAnthropic  int32 = 2
+	ChannelTypeGemini     int32 = 3
+	ChannelTypeClaude     int32 = 4
+	ChannelTypeAzure      int32 = 5
+	ChannelTypeDeepSeek   int32 = 6
+	ChannelTypeMistral    int32 = 7
+	ChannelTypeZhipu      int32 = 8
+	ChannelTypeMoonshot   int32 = 9
+	ChannelTypeGroq       int32 = 10
+	ChannelTypeCohere     int32 = 11
+	ChannelTypeBaichuan   int32 = 12
+	ChannelTypeTongyi     int32 = 13
+	ChannelTypeHunyuan    int32 = 14
+	ChannelTypeMinimax    int32 = 15
+	ChannelTypeXingchen   int32 = 16
+	ChannelTypeBedrock    int32 = 17
+	ChannelTypeTogether   int32 = 18
+	ChannelTypeFireworks  int32 = 19
+	ChannelTypePerplexity int32 = 20
+	ChannelTypeNovita     int32 = 21
+	ChannelTypeVoyageAI   int32 = 22
 )
