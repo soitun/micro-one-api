@@ -13,12 +13,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	identityv1 "micro-one-api/api/identity/v1"
-	channelv1 "micro-one-api/api/channel/v1"
 	billingv1 "micro-one-api/api/billing/v1"
+	channelv1 "micro-one-api/api/channel/v1"
+	identityv1 "micro-one-api/api/identity/v1"
 	"micro-one-api/internal/pkg/errors"
-	"micro-one-api/internal/pkg/metrics"
 	applogger "micro-one-api/internal/pkg/logger"
+	"micro-one-api/internal/pkg/metrics"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relayprovider "micro-one-api/internal/relay/provider"
 
@@ -28,8 +28,8 @@ import (
 // HTTPServer handles HTTP requests for relay-gateway.
 type HTTPServer struct {
 	identityClient  identityv1.IdentityServiceClient
-	channelClient  channelv1.ChannelServiceClient
-	billingClient  billingv1.BillingServiceClient
+	channelClient   channelv1.ChannelServiceClient
+	billingClient   billingv1.BillingServiceClient
 	providerFactory *relayprovider.ProviderFactory
 	relayUsecase    *relaybiz.RelayUsecase
 }
@@ -105,12 +105,14 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	clientModel := req.Model
+
 	// Use resolved model name for upstream calls
 	req.Model = plan.ResolvedModel
 
 	// Use RetryExecutor for upstream calls with channel fallback
 	retryExecutor := s.relayUsecase.NewRetryExecutor()
-	result := retryExecutor.Execute(r.Context(), plan.Auth.Group, plan.ResolvedModel, func(ctx context.Context, ch *relaybiz.Channel) error {
+	result := retryExecutor.Execute(r.Context(), plan.Auth.Group, clientModel, func(ctx context.Context, ch *relaybiz.Channel) error {
 		// Reserve quota
 		requestID := generateRequestID()
 		estimatedTokens := s.estimateTokens(&req)
@@ -407,11 +409,11 @@ func (s *HTTPServer) writeJSON(w http.ResponseWriter, statusCode int, data inter
 
 func (s *HTTPServer) reserveQuota(ctx context.Context, userID, requestID string, estimatedTokens int64, model, channelID string) (*billingv1.ReserveQuotaResponse, error) {
 	req := &billingv1.ReserveQuotaRequest{
-		UserId:         userID,
-		RequestId:      requestID,
+		UserId:          userID,
+		RequestId:       requestID,
 		EstimatedTokens: estimatedTokens,
-		Model:          model,
-		ChannelId:      channelID,
+		Model:           model,
+		ChannelId:       channelID,
 	}
 	return s.billingClient.ReserveQuota(ctx, req)
 }
@@ -467,4 +469,3 @@ func generateRequestID() string {
 	}
 	return fmt.Sprintf("req_%x", b)
 }
-

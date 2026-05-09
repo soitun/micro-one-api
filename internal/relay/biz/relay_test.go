@@ -29,6 +29,19 @@ func (testChannelClient) SelectChannel(_ context.Context, group, model string, _
 	}, nil
 }
 
+type recordingChannelClient struct {
+	models []string
+}
+
+func (c *recordingChannelClient) SelectChannel(_ context.Context, group, model string, _ bool) (*Channel, error) {
+	c.models = append(c.models, model)
+	return &Channel{
+		ID:      1,
+		Name:    group + ":" + model,
+		BaseURL: "https://api.openai.com/v1",
+	}, nil
+}
+
 func TestRelayUsecasePlan(t *testing.T) {
 	uc := NewRelayUsecase(testIdentityClient{}, testChannelClient{}, nil, nil)
 	plan, err := uc.Plan(context.Background(), RelayRequest{
@@ -104,13 +117,17 @@ func TestRelayUsecasePlan_WithModelMapping(t *testing.T) {
 		},
 	}
 	// testIdentityClient allows "gpt-4o-mini" but we'll use a custom one that allows "gpt-4o"
-	uc := NewRelayUsecase(&testIdentityClientAllowAll{}, testChannelClient{}, mapper, nil)
+	channelClient := &recordingChannelClient{}
+	uc := NewRelayUsecase(&testIdentityClientAllowAll{}, channelClient, mapper, nil)
 	plan, err := uc.Plan(context.Background(), RelayRequest{Token: "demo-token", Model: "gpt-4o"})
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
 	if plan.ResolvedModel != "gpt-4o-2024-08-06" {
 		t.Fatalf("expected resolved model gpt-4o-2024-08-06, got %s", plan.ResolvedModel)
+	}
+	if len(channelClient.models) != 1 || channelClient.models[0] != "gpt-4o" {
+		t.Fatalf("expected channel selection with client model gpt-4o, got %v", channelClient.models)
 	}
 }
 

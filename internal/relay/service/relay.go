@@ -78,7 +78,7 @@ func (s *RelayGrpcService) ChatCompletion(ctx context.Context, req *relayv1.Chat
 	retryExecutor := s.relayUsecase.NewRetryExecutor()
 	var resp *relayprovider.ChatCompletionsResponse
 
-	result := retryExecutor.Execute(ctx, plan.Auth.Group, plan.ResolvedModel, func(ctx context.Context, ch *relaybiz.Channel) error {
+	result := retryExecutor.Execute(ctx, plan.Auth.Group, req.Model, func(ctx context.Context, ch *relaybiz.Channel) error {
 		requestID := fmt.Sprintf("grpc_%d", time.Now().UnixNano())
 		estimatedTokens := estimateTokensForGRPC(providerReq)
 
@@ -181,14 +181,14 @@ func extractTokenFromMetadata(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("missing metadata")
 	}
 
- vals := md.Get("authorization")
- if len(vals) == 0 {
-  vals = md.Get("x-api-key")
-  if len(vals) == 0 {
-   return "", fmt.Errorf("missing authorization header")
-  }
-  return vals[0], nil
- }
+	vals := md.Get("authorization")
+	if len(vals) == 0 {
+		vals = md.Get("x-api-key")
+		if len(vals) == 0 {
+			return "", fmt.Errorf("missing authorization header")
+		}
+		return vals[0], nil
+	}
 
 	token := vals[0]
 	if len(token) > 7 && token[:7] == "Bearer " {

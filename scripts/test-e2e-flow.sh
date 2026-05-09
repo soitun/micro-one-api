@@ -22,6 +22,7 @@ COMPOSE_DIR="$PROJECT_ROOT/deployments/docker-compose"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 COMPOSE_TEST="$COMPOSE_DIR/docker-compose.test.yml"
 E2E_DIR="$PROJECT_ROOT/test/e2e"
+ENV_FILE="$COMPOSE_DIR/.env"
 
 # Colors
 RED='\033[0;31m'
@@ -40,7 +41,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
+load_env_var() {
+    local key="$1"
+    local value
+    value=$(grep -E "^${key}=" "$ENV_FILE" | tail -1 | cut -d= -f2- || true)
+    if [ -n "$value" ] && [ -z "${!key:-}" ]; then
+        export "$key=$value"
+    fi
+}
+
+if [ -f "$ENV_FILE" ]; then
+    load_env_var "MYSQL_ROOT_PASSWORD"
+    load_env_var "ADMIN_TOKEN"
+fi
+
 # ── Step 0: Start environment ──
+
+cleanup
 
 log "Starting docker-compose with test override..."
 cd "$COMPOSE_DIR"
@@ -92,11 +109,11 @@ log "All services ready."
 # ── Step 1: Update test channel to point to mock upstream ──
 
 log "Updating test channel to point to mock-upstream..."
-docker exec mysql mysql -uroot -proot123456 oneapi -e \
+docker exec mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}" oneapi -e \
     "UPDATE channels SET base_url='http://mock-upstream:9999', \`key\`='sk-mock-key' WHERE id=1;" 2>/dev/null
 
 # Verify update
-channel_url=$(docker exec mysql mysql -uroot -proot123456 oneapi -N -e \
+channel_url=$(docker exec mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}" oneapi -N -e \
     "SELECT base_url FROM channels WHERE id=1;" 2>/dev/null)
 if [ "$channel_url" = "http://mock-upstream:9999" ]; then
     log "Channel updated: $channel_url"
@@ -126,7 +143,7 @@ log "Registered user_id=$E2E_USER_ID"
 
 # Set quota for the test user (registration doesn't set default quota)
 log "Setting quota for test user..."
-docker exec mysql mysql -uroot -proot123456 oneapi -e \
+docker exec mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}" oneapi -e \
     "UPDATE users SET quota=1000000 WHERE id=$E2E_USER_ID;" 2>/dev/null
 log "Quota set to 1000000"
 

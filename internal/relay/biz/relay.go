@@ -42,8 +42,8 @@ type Channel struct {
 // RelayPlan is the result of relay planning, containing all resolved
 // information needed to execute an upstream provider call.
 type RelayPlan struct {
-	Auth         *AuthSnapshot
-	Channel      *Channel
+	Auth          *AuthSnapshot
+	Channel       *Channel
 	ResolvedModel string
 }
 
@@ -99,8 +99,9 @@ func (uc *RelayUsecase) Plan(ctx context.Context, req RelayRequest) (*RelayPlan,
 		}
 	}
 
-	// 4. Select channel
-	channel, err := uc.channel.SelectChannel(ctx, authSnapshot.Group, resolvedModel, false)
+	// 4. Select channel using the client-facing model name. Channel abilities are
+	// keyed by the models exposed to clients; resolvedModel is only for upstream calls.
+	channel, err := uc.channel.SelectChannel(ctx, authSnapshot.Group, req.Model, false)
 	if err != nil {
 		return nil, err
 	}

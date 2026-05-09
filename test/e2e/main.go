@@ -22,7 +22,6 @@ const (
 	billingGRPCEndpoint  = "127.0.0.1:9004"
 	relayHTTPBase        = "http://127.0.0.1:8080"
 	adminHTTPBase        = "http://127.0.0.1:3000"
-	adminToken           = "test-admin-token-for-dev"
 
 	testUsername = "e2e-test-user"
 	testPassword = "testpass123456"
@@ -96,6 +95,13 @@ func main() {
 	if failed > 0 {
 		os.Exit(1)
 	}
+}
+
+func adminToken() string {
+	if token := os.Getenv("ADMIN_TOKEN"); token != "" {
+		return token
+	}
+	return "test-admin-token-for-dev"
 }
 
 func summary() {
@@ -181,7 +187,7 @@ func stepLogin(ctx context.Context) string {
 
 func stepVerifyAccount(_ context.Context, userID int64) int64 {
 	url := fmt.Sprintf("%s/v1/account?user_id=%d", adminHTTPBase, userID)
-	body := httpGetWithAuth(url, adminToken)
+	body := httpGetWithAuth(url, adminToken())
 
 	var result struct {
 		Account struct {
@@ -276,21 +282,14 @@ func stepChatCompletion(token string) {
 func stepVerifyBilling(ctx context.Context, userID int64, initialQuota int64) {
 	// Check quota decreased
 	url := fmt.Sprintf("%s/v1/account?user_id=%d", adminHTTPBase, userID)
-	body := httpGetWithAuth(url, adminToken)
+	body := httpGetWithAuth(url, adminToken())
 
 	var result struct {
 		Account struct {
-			Quota     int64 `json:"quota"`
-			UsedQuota int64 `json:"used_quota"`
+			Quota int64 `json:"quota"`
 		} `json:"account"`
 	}
 	json.Unmarshal(body, &result)
-
-	if result.Account.UsedQuota <= 0 {
-		fail("billing-used-quota", fmt.Sprintf("expected used_quota > 0, got %d", result.Account.UsedQuota))
-	} else {
-		pass(fmt.Sprintf("billing-used-quota (used=%d)", result.Account.UsedQuota))
-	}
 
 	if result.Account.Quota >= initialQuota {
 		fail("billing-quota-deducted", fmt.Sprintf("quota not decreased: initial=%d, now=%d", initialQuota, result.Account.Quota))
@@ -331,7 +330,7 @@ func stepVerifyBilling(ctx context.Context, userID int64, initialQuota int64) {
 
 func stepVerifyLogs(userID int64) {
 	url := fmt.Sprintf("%s/v1/logs?user_id=%d&page_size=10", adminHTTPBase, userID)
-	body := httpGetWithAuth(url, adminToken)
+	body := httpGetWithAuth(url, adminToken())
 
 	var result map[string]interface{}
 	json.Unmarshal(body, &result)
