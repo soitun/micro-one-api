@@ -7,9 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	billingv1 "micro-one-api/api/billing/v1"
+	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/internal/identity/biz"
 	identitydata "micro-one-api/internal/identity/data"
 	"micro-one-api/internal/pkg/oauth"
+
+	"google.golang.org/grpc"
 )
 
 func TestIdentityHTTPRegisterLoginAndSelf(t *testing.T) {
@@ -135,6 +139,157 @@ func TestIdentityHTTPRegisterRejectsInvalidAffCode(t *testing.T) {
 	}
 }
 
+func TestIdentityHTTPDashboardRequiresAuth(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/dashboard", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestIdentityHTTPDashboardRequiresBillingClient(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":false`) {
+		t.Fatalf("dashboard response mismatch: %s", rec.Body.String())
+	}
+}
+
+func TestIdentityHTTPDashboardReturnsAccountSnapshot(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
+		snapshot: &commonv1.AccountSnapshot{
+			Quota:        1000,
+			UsedQuota:    100,
+			RequestCount: 10,
+			Group:        "default",
+			GroupRatio:   1,
+			FrozenQuota:  0,
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`"success":true`,
+		`"quota":1000`,
+		`"used_quota":100`,
+		`"request_count":10`,
+		`"group":"default"`,
+		`"group_ratio":1`,
+		`"frozen_quota":0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("dashboard response missing %s: %s", want, body)
+		}
+	}
+}
+
+func TestIdentityHTTPTopUpRequiresAuth(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/user/topup", strings.NewReader(`{"key":"CODE-1000"}`))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestIdentityHTTPTopUpRejectsEmptyKey(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/user/topup", strings.NewReader(`{"key":""}`))
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":false`) {
+		t.Fatalf("topup response mismatch: %s", rec.Body.String())
+	}
+}
+
+func TestIdentityHTTPTopUpReturnsRedeemedAmount(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	billingClient := &identityHTTPBillingClient{
+		redeemResponse: &billingv1.RedeemCodeResponse{Success: true, Amount: 1000, NewQuota: 2000},
+	}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/user/topup", strings.NewReader(`{"key":"CODE-1000"}`))
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if billingClient.redeemCode != "CODE-1000" {
+		t.Fatalf("redeem code = %q, want CODE-1000", billingClient.redeemCode)
+	}
+	if !strings.Contains(rec.Body.String(), `"success":true`) || !strings.Contains(rec.Body.String(), `"data":1000`) {
+		t.Fatalf("topup response mismatch: %s", rec.Body.String())
+	}
+}
+
+func TestIdentityHTTPTopUpReturnsBillingFailure(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
+		redeemResponse: &billingv1.RedeemCodeResponse{Success: false, ErrorMessage: "invalid code"},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/user/topup", strings.NewReader(`{"key":"BAD"}`))
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":false`) || !strings.Contains(rec.Body.String(), `"message":"invalid code"`) {
+		t.Fatalf("topup response mismatch: %s", rec.Body.String())
+	}
+}
+
 func TestIdentityHTTPTokenCRUD(t *testing.T) {
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)
@@ -225,6 +380,38 @@ func TestIdentityHTTPOAuthLegacyAliasRedirects(t *testing.T) {
 	if location := rec.Header().Get("Location"); !strings.Contains(location, "github.com/login/oauth/authorize") {
 		t.Fatalf("unexpected redirect location: %s", location)
 	}
+}
+
+type identityHTTPBillingClient struct {
+	billingv1.BillingServiceClient
+	snapshot       *commonv1.AccountSnapshot
+	redeemResponse *billingv1.RedeemCodeResponse
+	redeemCode     string
+}
+
+func (c *identityHTTPBillingClient) GetAccountSnapshot(ctx context.Context, req *billingv1.GetAccountSnapshotRequest, opts ...grpc.CallOption) (*billingv1.GetAccountSnapshotResponse, error) {
+	return &billingv1.GetAccountSnapshotResponse{Snapshot: c.snapshot}, nil
+}
+
+func (c *identityHTTPBillingClient) RedeemCode(ctx context.Context, req *billingv1.RedeemCodeRequest, opts ...grpc.CallOption) (*billingv1.RedeemCodeResponse, error) {
+	c.redeemCode = req.Code
+	if c.redeemResponse == nil {
+		return &billingv1.RedeemCodeResponse{Success: true}, nil
+	}
+	return c.redeemResponse, nil
+}
+
+func registerAndLoginForHTTPTest(t *testing.T, uc *biz.IdentityUsecase) (*biz.User, string) {
+	t.Helper()
+	user, err := uc.Register(context.Background(), "alice", "password123", "alice@example.com", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, authToken, err := uc.Login(context.Background(), user.Username, "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return user, authToken
 }
 
 func extractJSONField(body, key string) string {

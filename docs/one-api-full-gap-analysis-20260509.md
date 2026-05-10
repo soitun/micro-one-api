@@ -42,13 +42,15 @@
 | One API 管理充值兼容入口缺失 | 新增 `/api/topup`，同时保留 `/v1/topup` |
 | 路由行为缺少测试 | 新增 admin HTTP 测试和 relay 兼容端点测试 |
 | 用户邀请缺失 | 新增 aff code 设计和实现：用户邀请码、注册绑定邀请关系、`/api/user/aff`、可配置邀请奖励 |
+| 用户账务自助入口缺失 | 新增 `/api/user/dashboard` 账户快照和 `/api/user/topup` 兑换码充值兼容入口 |
 
 ## 仍未完全实现
 
 | 分类 | one-api 能力 | 当前缺口 |
 | --- | --- | --- |
 | Web 前端 | `web/default`、`web/air`、`web/berry` 三套主题与页面 | 当前仓库没有完整前端应用 |
-| 用户自助 API | `/api/user/*` 注册、登录、self、dashboard、token、aff、topup、available_models | identity 已有部分 gRPC 能力，但 HTTP 用户端兼容 API 未完整暴露 |
+| 用户自助 API | `/api/user/*` 完整用户资料编辑、邮箱绑定、删除自身等 | 已补注册、登录、self、dashboard 账户快照、token、aff、topup、available_models；仍缺 One API 更完整用户资料操作 |
+| 用户 dashboard 图表 | One API `dashboard` 返回按天/模型日志统计 | 当前先返回 billing account snapshot，仍缺 usage log 的按天/模型聚合图表 |
 | Token 管理 | `/api/token/*` 列表、搜索、创建、更新、删除、状态 | 缺完整 token 管理 HTTP API 和数据模型对齐 |
 | OAuth/SSO | GitHub、OIDC、飞书、微信、绑定邮箱 | 当前只具备部分 OAuth 基础能力，未对齐 One API 的完整路由和前端流程 |
 | 公告/内容 | `/api/notice`、`/api/about`、`/api/home_page_content` | 系统配置已有基础字段，但兼容 API 未完整暴露 |
@@ -65,10 +67,10 @@
 
 目标：让已有微服务能力通过 One API 风格 HTTP 路由可用。
 
-1. 补 `/api/user/register`、`/api/user/login`、`/api/user/self`、`/api/user/available_models`。
-2. 补 `/api/token/*`，并在 identity-service 中明确 token 管理数据模型。
-3. 补 `/api/notice`、`/api/about`、`/api/home_page_content`，映射到 system options。
-4. 补 `/api/group`，从渠道和账务配置聚合可用分组。
+1. 补完整用户资料操作、邮箱绑定、删除自身等 `/api/user/*` 剩余路由。
+2. 补 `/api/notice`、`/api/about`、`/api/home_page_content`，映射到 system options。
+3. 补 `/api/group`，从渠道和账务配置聚合可用分组。
+4. 补 dashboard 按天/模型 usage log 聚合图表。
 
 ### Phase 2：管理端能力对齐
 

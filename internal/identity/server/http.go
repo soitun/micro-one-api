@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	billingv1 "micro-one-api/api/billing/v1"
 	"micro-one-api/internal/identity/biz"
 	"micro-one-api/internal/pkg/metrics"
 	"micro-one-api/internal/pkg/oauth"
@@ -18,10 +19,14 @@ import (
 )
 
 // NewHTTPServer wires HTTP transport for identity-service.
-func NewHTTPServer(addr string, uc *biz.IdentityUsecase, oauthRegistry *oauth.ProviderRegistry) *khttp.Server {
+func NewHTTPServer(addr string, uc *biz.IdentityUsecase, oauthRegistry *oauth.ProviderRegistry, billingClients ...billingv1.BillingServiceClient) *khttp.Server {
 	srv := khttp.NewServer(
 		khttp.Address(addr),
 	)
+	var billingClient billingv1.BillingServiceClient
+	if len(billingClients) > 0 {
+		billingClient = billingClients[0]
+	}
 
 	// OAuth endpoints
 	if oauthRegistry != nil {
@@ -67,6 +72,12 @@ func NewHTTPServer(addr string, uc *biz.IdentityUsecase, oauthRegistry *oauth.Pr
 	})
 	srv.HandleFunc("/api/user/aff", func(w http.ResponseWriter, r *http.Request) {
 		handleAffCode(w, r, uc)
+	})
+	srv.HandleFunc("/api/user/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		handleUserDashboard(w, r, uc, billingClient)
+	})
+	srv.HandleFunc("/api/user/topup", func(w http.ResponseWriter, r *http.Request) {
+		handleUserTopUp(w, r, uc, billingClient)
 	})
 	srv.HandleFunc("/api/verification", func(w http.ResponseWriter, r *http.Request) {
 		handleEmailVerification(w, r)
@@ -149,6 +160,81 @@ func handleAffCode(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUseca
 		return
 	}
 	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: code})
+}
+
+func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, billingClient billingv1.BillingServiceClient) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	if billingClient == nil {
+		writeJSON(w, http.StatusServiceUnavailable, apiResponse{Success: false, Message: "billing service unavailable"})
+		return
+	}
+	resp, err := billingClient.GetAccountSnapshot(r.Context(), &billingv1.GetAccountSnapshotRequest{
+		UserId: strconv.FormatInt(snapshot.UserID, 10),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+		return
+	}
+	account := resp.GetSnapshot()
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{
+		"quota":         account.GetQuota(),
+		"used_quota":    account.GetUsedQuota(),
+		"request_count": account.GetRequestCount(),
+		"group":         account.GetGroup(),
+		"group_ratio":   account.GetGroupRatio(),
+		"frozen_quota":  account.GetFrozenQuota(),
+	}})
+}
+
+func handleUserTopUp(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, billingClient billingv1.BillingServiceClient) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	if billingClient == nil {
+		writeJSON(w, http.StatusServiceUnavailable, apiResponse{Success: false, Message: "billing service unavailable"})
+		return
+	}
+	var req struct {
+		Key string `json:"key"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Key) == "" {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "key is required"})
+		return
+	}
+	resp, err := billingClient.RedeemCode(r.Context(), &billingv1.RedeemCodeRequest{
+		UserId: strconv.FormatInt(snapshot.UserID, 10),
+		Code:   req.Key,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+		return
+	}
+	if !resp.GetSuccess() {
+		message := resp.GetErrorMessage()
+		if message == "" {
+			message = "redeem failed"
+		}
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: message})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: resp.GetAmount()})
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
