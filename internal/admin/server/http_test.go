@@ -62,9 +62,10 @@ func (c *adminHTTPChannelClient) ListChannels(ctx context.Context, req *channelv
 
 type adminHTTPBillingClient struct {
 	billingv1.BillingServiceClient
-	topupUserID  string
-	topupAmount  int64
-	batchCreated bool
+	topupUserID       string
+	topupAmount       int64
+	batchCreated      bool
+	deletedRedeemCode string
 }
 
 func (c *adminHTTPBillingClient) TopUpQuota(ctx context.Context, req *billingv1.TopUpQuotaRequest, opts ...grpc.CallOption) (*billingv1.TopUpQuotaResponse, error) {
@@ -85,6 +86,28 @@ func (c *adminHTTPBillingClient) GetAccountSnapshot(ctx context.Context, req *bi
 func (c *adminHTTPBillingClient) CreateRedeemCodesBatch(ctx context.Context, req *billingv1.CreateRedeemCodesBatchRequest, opts ...grpc.CallOption) (*billingv1.CreateRedeemCodesBatchResponse, error) {
 	c.batchCreated = true
 	return &billingv1.CreateRedeemCodesBatchResponse{Success: true, Codes: []string{"code-a", "code-b"}}, nil
+}
+
+func (c *adminHTTPBillingClient) ListRedeemCodes(ctx context.Context, req *billingv1.ListRedeemCodesRequest, opts ...grpc.CallOption) (*billingv1.ListRedeemCodesResponse, error) {
+	return &billingv1.ListRedeemCodesResponse{
+		Codes: []*commonv1.RedeemCode{
+			{Code: "code-a", Name: "alpha", Amount: 100, Count: 1, Status: 1, CreatedBy: "root", CreatedAt: timestamppb.Now()},
+		},
+		Total: 1,
+	}, nil
+}
+
+func (c *adminHTTPBillingClient) SearchRedeemCodes(ctx context.Context, req *billingv1.SearchRedeemCodesRequest, opts ...grpc.CallOption) (*billingv1.SearchRedeemCodesResponse, error) {
+	return &billingv1.SearchRedeemCodesResponse{
+		Codes: []*commonv1.RedeemCode{
+			{Code: req.Keyword + "-code", Name: "matched", Amount: 200, Count: 1, Status: 1, CreatedBy: "root", CreatedAt: timestamppb.Now()},
+		},
+	}, nil
+}
+
+func (c *adminHTTPBillingClient) DeleteRedeemCode(ctx context.Context, req *billingv1.DeleteRedeemCodeRequest, opts ...grpc.CallOption) (*billingv1.DeleteRedeemCodeResponse, error) {
+	c.deletedRedeemCode = req.Code
+	return &billingv1.DeleteRedeemCodeResponse{Success: true}, nil
 }
 
 func (c *adminHTTPBillingClient) ListLedger(ctx context.Context, req *billingv1.ListLedgerRequest, opts ...grpc.CallOption) (*billingv1.ListLedgerResponse, error) {
@@ -282,6 +305,71 @@ func TestAdminHTTPCreateRedeemCodesBatch(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"code-a"`) {
 		t.Fatalf("batch response missing codes: %s", rec.Body.String())
+	}
+}
+
+func TestAdminHTTPRedemptionRequiresAuth(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+	req := httptest.NewRequest(http.MethodGet, "/api/redemption/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminHTTPRedemptionListRoute(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+	req := httptest.NewRequest(http.MethodGet, "/api/redemption/", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"code-a"`) {
+		t.Fatalf("redemption list response mismatch: %s", rec.Body.String())
+	}
+}
+
+func TestAdminHTTPRedemptionSearchRoute(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+	req := httptest.NewRequest(http.MethodGet, "/api/redemption/search?keyword=alpha", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"alpha-code"`) {
+		t.Fatalf("redemption search response mismatch: %s", rec.Body.String())
+	}
+}
+
+func TestAdminHTTPRedemptionDeleteRoute(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	billingClient := &adminHTTPBillingClient{}
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, billingClient)
+	req := httptest.NewRequest(http.MethodDelete, "/api/redemption/code-a", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if billingClient.deletedRedeemCode != "code-a" {
+		t.Fatalf("deleted code = %q, want code-a", billingClient.deletedRedeemCode)
 	}
 }
 

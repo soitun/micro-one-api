@@ -122,6 +122,12 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandlePrefix("/v1/redeem-codes/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleRedeemCodeByCode(w, r, svc)
 	}))
+	srv.HandleFunc("/api/redemption/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleRedeemCodes(w, r, svc)
+	}))
+	srv.HandlePrefix("/api/redemption/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIRedemptionByCode(w, r, svc)
+	}))
 	srv.HandleFunc("/v1/topup", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleTopUp(w, r, svc)
 	}))
@@ -648,6 +654,36 @@ func handleRedeemCodeByCode(w http.ResponseWriter, r *http.Request, svc *service
 	code, ok := parsePathValue(r.URL.Path, "/v1/redeem-codes/")
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid redeem code"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		resp, err := svc.GetRedeemCode(r.Context(), &adminv1.GetRedeemCodeRequest{Code: code})
+		writeServiceResponse(w, resp, err)
+	case http.MethodDelete:
+		resp, err := svc.DeleteRedeemCode(r.Context(), &adminv1.DeleteRedeemCodeRequest{Code: code})
+		writeServiceResponse(w, resp, err)
+	case http.MethodPut:
+		var req adminv1.UpdateRedeemCodeRequest
+		if !decodeBody(w, r, &req) {
+			return
+		}
+		req.Code = code
+		resp, err := svc.UpdateRedeemCode(r.Context(), &req)
+		writeServiceResponse(w, resp, err)
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func handleOneAPIRedemptionByCode(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if strings.Trim(r.URL.Path, "/") == "api/redemption/search" {
+		handleRedeemCodes(w, r, svc)
+		return
+	}
+	code, ok := parsePathValue(r.URL.Path, "/api/redemption/")
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid redemption code"})
 		return
 	}
 	switch r.Method {

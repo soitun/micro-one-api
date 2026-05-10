@@ -51,6 +51,7 @@
 | 邮箱绑定缺失 | identity-service 新增 `/api/oauth/email/bind`，使用 `/api/verification` 验证码绑定当前用户邮箱 |
 | Token 路由兼容不足 | identity-service 补齐 `/api/token/search`、`/api/token/{id}` 和 `PUT /api/token/` body id 更新兼容 |
 | 系统选项兼容入口缺失 | admin-api 新增 `/api/option/` GET/PUT，映射现有 system options |
+| 兑换码管理路径兼容缺失 | admin-api 新增 `/api/redemption/`、`/api/redemption/search`、`/api/redemption/{code}` 兼容入口，复用 redeem-code 管理能力 |
 
 ## 仍未完全实现
 
@@ -64,6 +65,7 @@
 | 日志 API | `/api/log/*` 完整日志字段、管理日志搜索、删除历史日志 | 已补用户 self 查询/搜索/统计；仍缺 One API 完整日志字段和部分管理日志操作 |
 | 公告/内容 | `/api/notice`、`/api/about`、`/api/home_page_content` | 已有基础兼容入口；仍缺完整前端内容管理体验 |
 | 系统选项 | `/api/option/` 完整 One API option key | 已补基础 GET/PUT；仍缺全部 One API option key 对齐 |
+| 兑换码管理 | `/api/redemption/*` 完整 One API 字段和导出体验 | 已补基础列表、搜索、查询、创建、更新、删除路径兼容；当前以 code 作为路径标识 |
 | 渠道测试与余额 | `/api/channel/test`、`/update_balance` | 已有基础兼容入口；仍缺真实渠道余额查询实现 |
 | 分组管理 | `/api/group` | 已有基础查询入口；仍缺完整分组配置管理 API |
 | 全量 provider 适配 | one-api 支持数十种渠道专用适配器 | 当前以 OpenAI-compatible 原样转发为主，仅补了 Anthropic/Gemini 等有限适配 |
