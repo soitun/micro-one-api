@@ -97,8 +97,26 @@ func (c *adminHTTPBillingClient) ListLedger(ctx context.Context, req *billingv1.
 	}, nil
 }
 
+type adminHTTPSystemOptionsStore struct {
+	values map[string]string
+}
+
+func (s *adminHTTPSystemOptionsStore) Get(key string) (string, error) {
+	return s.values[key], nil
+}
+
+func (s *adminHTTPSystemOptionsStore) Set(key, value string) error {
+	s.values[key] = value
+	return nil
+}
+
 func newAdminHTTPTestServer(identity identityv1.IdentityServiceClient, channel channelv1.ChannelServiceClient, billing billingv1.BillingServiceClient) http.Handler {
 	adminSvc := service.NewAdminService(billing, identity, channel, nil)
+	return NewHTTPServer(":0", adminSvc)
+}
+
+func newAdminHTTPOptionTestServer(store service.SystemOptionsStore) http.Handler {
+	adminSvc := service.NewAdminService(nil, nil, nil, store)
 	return NewHTTPServer(":0", adminSvc)
 }
 
@@ -129,6 +147,63 @@ func TestAdminHTTPPageIsServed(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "micro-one-api admin") {
 		t.Fatalf("admin page was not served: %s", rec.Body.String())
+	}
+}
+
+func TestAdminHTTPOptionRequiresAuth(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPOptionTestServer(&adminHTTPSystemOptionsStore{values: map[string]string{}})
+	req := httptest.NewRequest(http.MethodGet, "/api/option/", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminHTTPOptionGetReturnsOneAPIShape(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPOptionTestServer(&adminHTTPSystemOptionsStore{values: map[string]string{
+		"site_title":           "Test API",
+		"registration_enabled": "false",
+	}})
+	req := httptest.NewRequest(http.MethodGet, "/api/option/", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"success":true`, `"site_title":"Test API"`, `"registration_enabled":false`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("option response missing %s: %s", want, body)
+		}
+	}
+}
+
+func TestAdminHTTPOptionPutAcceptsFlatBody(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	store := &adminHTTPSystemOptionsStore{values: map[string]string{}}
+	srv := newAdminHTTPOptionTestServer(store)
+	req := httptest.NewRequest(http.MethodPut, "/api/option/", strings.NewReader(`{"site_title":"Updated API","registration_enabled":false}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("option update response mismatch: %s", rec.Body.String())
+	}
+	if store.values["site_title"] != "Updated API" || store.values["registration_enabled"] != "false" {
+		t.Fatalf("stored values mismatch: %+v", store.values)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	adminv1 "micro-one-api/api/admin/v1"
+	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/internal/admin/service"
 	"micro-one-api/internal/pkg/metrics"
 
@@ -93,6 +94,9 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 
 	srv.HandleFunc("/v1/system/options", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleGetSystemOptions(w, r, svc)
+	}))
+	srv.HandleFunc("/api/option/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIOptions(w, r, svc)
 	}))
 
 	srv.HandleFunc("/v1/logs", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -452,6 +456,75 @@ func handleGetSystemOptions(w http.ResponseWriter, r *http.Request, svc *service
 		writeJSON(w, http.StatusOK, resp)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func handleOneAPIOptions(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	switch r.Method {
+	case http.MethodGet:
+		resp, err := svc.GetSystemOptions(r.Context(), &adminv1.GetSystemOptionsRequest{})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"message": "",
+			"data":    systemOptionsToOneAPIMap(resp.GetOptions()),
+		})
+	case http.MethodPut:
+		var raw struct {
+			SiteTitle           string `json:"site_title"`
+			RegistrationEnabled *bool  `json:"registration_enabled"`
+			Options             *struct {
+				SiteTitle           string `json:"site_title"`
+				RegistrationEnabled *bool  `json:"registration_enabled"`
+			} `json:"options"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		siteTitle := raw.SiteTitle
+		registrationEnabled := raw.RegistrationEnabled
+		if raw.Options != nil {
+			if raw.Options.SiteTitle != "" {
+				siteTitle = raw.Options.SiteTitle
+			}
+			if raw.Options.RegistrationEnabled != nil {
+				registrationEnabled = raw.Options.RegistrationEnabled
+			}
+		}
+		enabled := true
+		if registrationEnabled != nil {
+			enabled = *registrationEnabled
+		}
+		resp, err := svc.UpdateSystemOptions(r.Context(), &adminv1.UpdateSystemOptionsRequest{
+			Options: &commonv1.SystemOptions{
+				SiteTitle:           siteTitle,
+				RegistrationEnabled: enabled,
+			},
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": resp.GetSuccess(),
+			"message": resp.GetMessage(),
+		})
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func systemOptionsToOneAPIMap(options *commonv1.SystemOptions) map[string]interface{} {
+	if options == nil {
+		return map[string]interface{}{}
+	}
+	return map[string]interface{}{
+		"site_title":           options.GetSiteTitle(),
+		"registration_enabled": options.GetRegistrationEnabled(),
 	}
 }
 
