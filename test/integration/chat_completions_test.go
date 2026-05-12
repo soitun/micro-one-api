@@ -44,6 +44,27 @@ func startMockUpstream(t *testing.T, handler http.HandlerFunc) (string, func()) 
 	return fmt.Sprintf("http://%s", lis.Addr().String()), func() { srv.Close(); lis.Close() }
 }
 
+func startRelayHTTPServer(t *testing.T, httpServer *relayserver.HTTPServer) string {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen for relay HTTP server: %v", err)
+	}
+	srv := khttp.NewServer(khttp.Listener(lis))
+	httpServer.RegisterRoutes(srv)
+	go func() {
+		if err := srv.Start(context.Background()); err != nil && err != http.ErrServerClosed {
+			t.Logf("HTTP server error: %v", err)
+		}
+	}()
+	t.Cleanup(func() {
+		_ = srv.Stop(context.Background())
+		_ = lis.Close()
+	})
+	time.Sleep(100 * time.Millisecond)
+	return fmt.Sprintf("http://%s", lis.Addr().String())
+}
+
 // setupChannelWithUpstream creates a channel service pointing at the given upstream URL.
 func setupChannelWithUpstream(t *testing.T, addr, upstreamURL string) (func(), channelv1.ChannelServiceClient) {
 	t.Helper()
@@ -155,15 +176,10 @@ func TestChatCompletions_BasicFlow(t *testing.T) {
 	providerFactory := relayprovider.NewProviderFactory(10 * time.Second)
 	httpServer := relayserver.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
 
-	lis, _ := net.Listen("tcp", "127.0.0.1:19100")
-	srv := khttp.NewServer(khttp.Listener(lis))
-	httpServer.RegisterRoutes(srv)
-	go srv.Start(context.Background())
-	defer srv.Stop(context.Background())
-	time.Sleep(100 * time.Millisecond)
+	relayURL := startRelayHTTPServer(t, httpServer)
 
 	body := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}`
-	req, _ := http.NewRequest("POST", "http://127.0.0.1:19100/v1/chat/completions", bytes.NewBufferString(body))
+	req, _ := http.NewRequest("POST", relayURL+"/v1/chat/completions", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Content-Type", "application/json")
 
@@ -259,16 +275,11 @@ func TestChatCompletions_ModelMapping(t *testing.T) {
 	providerFactory := relayprovider.NewProviderFactory(10 * time.Second)
 	httpServer := relayserver.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
 
-	lis, _ := net.Listen("tcp", "127.0.0.1:19200")
-	srv := khttp.NewServer(khttp.Listener(lis))
-	httpServer.RegisterRoutes(srv)
-	go srv.Start(context.Background())
-	defer srv.Stop(context.Background())
-	time.Sleep(100 * time.Millisecond)
+	relayURL := startRelayHTTPServer(t, httpServer)
 
 	// Request "gpt-4o" which should be mapped to "gpt-4o-2024-08-06"
 	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"test"}]}`
-	req, _ := http.NewRequest("POST", "http://127.0.0.1:19200/v1/chat/completions", bytes.NewBufferString(body))
+	req, _ := http.NewRequest("POST", relayURL+"/v1/chat/completions", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Content-Type", "application/json")
 
@@ -317,7 +328,9 @@ func TestChatCompletions_ModelNotAllowed(t *testing.T) {
 	go identityGrpc.Serve(identityLis)
 	identityConn, _ := grpc.NewClient("127.0.0.1:19301", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	identityClient := identityv1.NewIdentityServiceClient(identityConn)
-	defer identityConn.Close(); defer identityGrpc.Stop(); defer identityLis.Close()
+	defer identityConn.Close()
+	defer identityGrpc.Stop()
+	defer identityLis.Close()
 
 	channelCleanup, channelClient := setupChannelWithUpstream(t, "127.0.0.1:19302", upstreamURL)
 	defer channelCleanup()
@@ -330,16 +343,11 @@ func TestChatCompletions_ModelNotAllowed(t *testing.T) {
 	providerFactory := relayprovider.NewProviderFactory(10 * time.Second)
 	httpServer := relayserver.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
 
-	lis, _ := net.Listen("tcp", "127.0.0.1:19300")
-	srv := khttp.NewServer(khttp.Listener(lis))
-	httpServer.RegisterRoutes(srv)
-	go srv.Start(context.Background())
-	defer srv.Stop(context.Background())
-	time.Sleep(100 * time.Millisecond)
+	relayURL := startRelayHTTPServer(t, httpServer)
 
 	// Request "gpt-4" which is NOT in the allowed list
 	body := `{"model":"gpt-4","messages":[{"role":"user","content":"test"}]}`
-	req, _ := http.NewRequest("POST", "http://127.0.0.1:19300/v1/chat/completions", bytes.NewBufferString(body))
+	req, _ := http.NewRequest("POST", relayURL+"/v1/chat/completions", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer restricted-token")
 	req.Header.Set("Content-Type", "application/json")
 
@@ -398,15 +406,10 @@ func TestChatCompletions_RetryOnFailure(t *testing.T) {
 	providerFactory := relayprovider.NewProviderFactory(10 * time.Second)
 	httpServer := relayserver.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
 
-	lis, _ := net.Listen("tcp", "127.0.0.1:19400")
-	srv := khttp.NewServer(khttp.Listener(lis))
-	httpServer.RegisterRoutes(srv)
-	go srv.Start(context.Background())
-	defer srv.Stop(context.Background())
-	time.Sleep(100 * time.Millisecond)
+	relayURL := startRelayHTTPServer(t, httpServer)
 
 	body := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"retry test"}]}`
-	req, _ := http.NewRequest("POST", "http://127.0.0.1:19400/v1/chat/completions", bytes.NewBufferString(body))
+	req, _ := http.NewRequest("POST", relayURL+"/v1/chat/completions", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Content-Type", "application/json")
 
@@ -446,16 +449,11 @@ func TestChatCompletions_MissingBody(t *testing.T) {
 	providerFactory := relayprovider.NewProviderFactory(10 * time.Second)
 	httpServer := relayserver.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
 
-	lis, _ := net.Listen("tcp", "127.0.0.1:19500")
-	srv := khttp.NewServer(khttp.Listener(lis))
-	httpServer.RegisterRoutes(srv)
-	go srv.Start(context.Background())
-	defer srv.Stop(context.Background())
-	time.Sleep(100 * time.Millisecond)
+	relayURL := startRelayHTTPServer(t, httpServer)
 
 	t.Run("MissingModel", func(t *testing.T) {
 		body := `{"messages":[{"role":"user","content":"test"}]}`
-		req, _ := http.NewRequest("POST", "http://127.0.0.1:19500/v1/chat/completions", bytes.NewBufferString(body))
+		req, _ := http.NewRequest("POST", relayURL+"/v1/chat/completions", bytes.NewBufferString(body))
 		req.Header.Set("Authorization", "Bearer test-token")
 		req.Header.Set("Content-Type", "application/json")
 		resp, _ := http.DefaultClient.Do(req)
@@ -466,7 +464,7 @@ func TestChatCompletions_MissingBody(t *testing.T) {
 	})
 
 	t.Run("InvalidJSON", func(t *testing.T) {
-		req, _ := http.NewRequest("POST", "http://127.0.0.1:19500/v1/chat/completions", bytes.NewBufferString("not json"))
+		req, _ := http.NewRequest("POST", relayURL+"/v1/chat/completions", bytes.NewBufferString("not json"))
 		req.Header.Set("Authorization", "Bearer test-token")
 		req.Header.Set("Content-Type", "application/json")
 		resp, _ := http.DefaultClient.Do(req)
@@ -477,7 +475,7 @@ func TestChatCompletions_MissingBody(t *testing.T) {
 	})
 
 	t.Run("WrongMethod", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "http://127.0.0.1:19500/v1/chat/completions", nil)
+		req, _ := http.NewRequest("GET", relayURL+"/v1/chat/completions", nil)
 		req.Header.Set("Authorization", "Bearer test-token")
 		resp, _ := http.DefaultClient.Do(req)
 		defer resp.Body.Close()

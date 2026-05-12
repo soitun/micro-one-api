@@ -29,36 +29,48 @@ func (c rawIdentityClient) GetAuthSnapshot(ctx context.Context, req *identityv1.
 
 type rawChannelClient struct {
 	channelv1.ChannelServiceClient
-	baseURL string
-	key     string
+	baseURL    string
+	key        string
+	chType     int32
+	apiVersion string
 }
 
 func (c rawChannelClient) SelectChannel(ctx context.Context, req *channelv1.SelectChannelRequest, opts ...grpc.CallOption) (*channelv1.SelectChannelReply, error) {
+	chType := c.chType
+	if chType == 0 {
+		chType = 1
+	}
 	return &channelv1.SelectChannelReply{
 		Channel: &commonv1.ChannelInfo{
 			Id:      11,
-			Type:    1,
+			Type:    chType,
 			Name:    "openai-compatible",
 			Status:  1,
 			BaseUrl: c.baseURL,
 			Key:     c.key,
 			Group:   req.Group,
 			Models:  req.Model,
+			Config:  &commonv1.ChannelConfig{ApiVersion: c.apiVersion},
 		},
 	}, nil
 }
 
 func (c rawChannelClient) GetChannel(ctx context.Context, req *channelv1.GetChannelRequest, opts ...grpc.CallOption) (*channelv1.GetChannelReply, error) {
+	chType := c.chType
+	if chType == 0 {
+		chType = 1
+	}
 	return &channelv1.GetChannelReply{
 		Channel: &commonv1.ChannelInfo{
 			Id:      req.ChannelId,
-			Type:    1,
+			Type:    chType,
 			Name:    "openai-compatible",
 			Status:  1,
 			BaseUrl: c.baseURL,
 			Key:     c.key,
 			Group:   "default",
 			Models:  "gpt-3.5-turbo",
+			Config:  &commonv1.ChannelConfig{ApiVersion: c.apiVersion},
 		},
 	}, nil
 }

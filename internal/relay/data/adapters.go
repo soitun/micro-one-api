@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	identityv1 "micro-one-api/api/identity/v1"
 	channelv1 "micro-one-api/api/channel/v1"
+	identityv1 "micro-one-api/api/identity/v1"
 	relaybiz "micro-one-api/internal/relay/biz"
 )
 
@@ -73,7 +73,7 @@ func (a *ChannelAdapter) SelectChannel(ctx context.Context, group, model string,
 	if ch == nil {
 		return nil, nil
 	}
-	return &relaybiz.Channel{
+	relayChannel := &relaybiz.Channel{
 		ID:       ch.Id,
 		Type:     ch.Type,
 		Name:     ch.Name,
@@ -83,5 +83,9 @@ func (a *ChannelAdapter) SelectChannel(ctx context.Context, group, model string,
 		Models:   splitModels(ch.Models),
 		Priority: ch.Priority,
 		Key:      ch.Key,
-	}, nil
+	}
+	if ch.Config != nil {
+		relayChannel.Config.APIVersion = ch.Config.ApiVersion
+	}
+	return relayChannel, nil
 }

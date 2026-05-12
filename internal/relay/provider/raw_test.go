@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -106,5 +107,58 @@ func TestOpenAIProviderForwardReturnsErrorForNon2xx(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "status=502") {
 		t.Fatalf("error = %q, want status=502", err.Error())
+	}
+}
+
+func TestAzureProviderForwardAddsDeploymentPathAndAPIVersion(t *testing.T) {
+	t.Setenv("PROVIDER_DISABLE_SSRF_CHECK", "true")
+
+	var gotPath string
+	var gotQuery string
+	var gotAuth string
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotAuth = r.Header.Get("api-key")
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		gotBody = string(body)
+		_, _ = w.Write([]byte(`{"usage":{"total_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	provider, err := NewAzureProvider(upstream.URL, "azure-key", "2024-02-15-preview", time.Second)
+	if err != nil {
+		t.Fatalf("NewAzureProvider: %v", err)
+	}
+	_, err = provider.Forward(context.Background(), &RawRequest{
+		Method: http.MethodPost,
+		Path:   "/embeddings",
+		Query:  "trace=1",
+		Header: http.Header{"Authorization": []string{"Bearer caller-token"}},
+		Body:   []byte(`{"model":"embedding-deploy","input":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("Forward returned error: %v", err)
+	}
+
+	if gotPath != "/openai/deployments/embedding-deploy/embeddings" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	values, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatalf("invalid query = %q: %v", gotQuery, err)
+	}
+	if values.Get("trace") != "1" || values.Get("api-version") != "2024-02-15-preview" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+	if gotAuth != "azure-key" {
+		t.Fatalf("api-key = %q", gotAuth)
+	}
+	if strings.Contains(gotBody, `"model"`) {
+		t.Fatalf("azure request should omit model from body, got %s", gotBody)
 	}
 }

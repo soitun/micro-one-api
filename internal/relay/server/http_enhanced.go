@@ -12,9 +12,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"micro-one-api/api/identity/v1"
 	channelv1 "micro-one-api/api/channel/v1"
 	commonv1 "micro-one-api/api/common/v1"
+	"micro-one-api/api/identity/v1"
 	"micro-one-api/internal/pkg/errors"
 	applogger "micro-one-api/internal/pkg/logger"
 	appmiddleware "micro-one-api/internal/pkg/middleware"
@@ -28,7 +28,7 @@ import (
 // EnhancedHTTPServer handles HTTP requests with all security features
 type EnhancedHTTPServer struct {
 	identityClient  identityv1.IdentityServiceClient
-	channelClient  channelv1.ChannelServiceClient
+	channelClient   channelv1.ChannelServiceClient
 	providerFactory *relayprovider.ProviderFactory
 }
 
@@ -147,7 +147,9 @@ func (s *EnhancedHTTPServer) handleChatCompletions(w http.ResponseWriter, r *htt
 	}
 
 	// Create provider
-	provider, err := s.providerFactory.CreateProvider(channel.Type, channel.BaseUrl, channel.Key)
+	provider, err := s.providerFactory.CreateProviderWithConfig(channel.Type, channel.BaseUrl, channel.Key, relayprovider.ProviderConfig{
+		APIVersion: channel.GetConfig().GetApiVersion(),
+	})
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "failed to create provider")
 		return
@@ -338,8 +340,8 @@ func (s *EnhancedHTTPServer) getAuthSnapshot(ctx context.Context, token string) 
 
 func (s *EnhancedHTTPServer) selectChannel(ctx context.Context, group, model string) (*commonv1.ChannelInfo, error) {
 	req := &channelv1.SelectChannelRequest{
-		Group:               group,
-		Model:               model,
+		Group:                group,
+		Model:                model,
 		ExcludeFirstPriority: false,
 	}
 	resp, err := s.channelClient.SelectChannel(ctx, req)
@@ -444,4 +446,3 @@ func (s *EnhancedHTTPServer) writeJSON(w http.ResponseWriter, statusCode int, da
 	w.WriteHeader(statusCode)
 	encodeJSON(w, data)
 }
-

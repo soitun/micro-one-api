@@ -313,6 +313,10 @@ func (p *OpenAIProvider) ChatCompletionsStream(ctx context.Context, req *ChatCom
 		return nil, fmt.Errorf("upstream error: status=%d, body=%s", resp.StatusCode, string(respBody))
 	}
 
+	return readOpenAIStream(resp), nil
+}
+
+func readOpenAIStream(resp *http.Response) <-chan StreamChunk {
 	chunkChan := make(chan StreamChunk, 10)
 
 	go func() {
@@ -349,5 +353,5 @@ func (p *OpenAIProvider) ChatCompletionsStream(ctx context.Context, req *ChatCom
 		}
 	}()
 
-	return chunkChan, nil
+	return chunkChan
 }

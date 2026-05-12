@@ -10,6 +10,10 @@ type ProviderFactory struct {
 	defaultTimeout time.Duration
 }
 
+type ProviderConfig struct {
+	APIVersion string
+}
+
 // NewProviderFactory creates a new provider factory
 func NewProviderFactory(defaultTimeout time.Duration) *ProviderFactory {
 	if defaultTimeout == 0 {
@@ -22,6 +26,10 @@ func NewProviderFactory(defaultTimeout time.Duration) *ProviderFactory {
 
 // CreateProvider creates a provider based on channel type
 func (f *ProviderFactory) CreateProvider(channelType int32, baseURL, apiKey string) (Provider, error) {
+	return f.CreateProviderWithConfig(channelType, baseURL, apiKey, ProviderConfig{})
+}
+
+func (f *ProviderFactory) CreateProviderWithConfig(channelType int32, baseURL, apiKey string, config ProviderConfig) (Provider, error) {
 	switch channelType {
 	case ChannelTypeAnthropic: // Anthropic Claude
 		return NewAnthropicProvider(baseURL, apiKey, f.defaultTimeout), nil
@@ -29,9 +37,9 @@ func (f *ProviderFactory) CreateProvider(channelType int32, baseURL, apiKey stri
 		return NewGeminiProvider(baseURL, apiKey, f.defaultTimeout), nil
 	case ChannelTypeAzure:
 		if baseURL == "" {
-			return nil, fmt.Errorf("azure channel requires base_url with deployment path")
+			return nil, fmt.Errorf("azure channel requires base_url")
 		}
-		return NewOpenAIProvider(baseURL, apiKey, f.defaultTimeout)
+		return NewAzureProvider(baseURL, apiKey, config.APIVersion, f.defaultTimeout)
 	case ChannelTypeOpenAI,
 		ChannelTypeDeepSeek,
 		ChannelTypeMistral,

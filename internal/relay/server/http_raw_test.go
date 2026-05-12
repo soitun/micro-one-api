@@ -206,6 +206,60 @@ func TestHTTPServerRawRelayForwardsResponseAndCommitsBilling(t *testing.T) {
 	}
 }
 
+func TestHTTPServerRawRelayForwardsAzureWithConfiguredAPIVersion(t *testing.T) {
+	t.Setenv("PROVIDER_DISABLE_SSRF_CHECK", "true")
+
+	var gotPath string
+	var gotQuery string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"usage":{"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	identityClient := rawIdentityClient{}
+	channelClient := rawChannelClient{
+		baseURL:    upstream.URL,
+		key:        "sk-upstream",
+		chType:     relayprovider.ChannelTypeAzure,
+		apiVersion: "2024-10-21",
+	}
+	billingClient := &rawBillingClient{}
+	relayUsecase := relaybiz.NewRelayUsecase(
+		relaydata.NewIdentityAdapter(identityClient),
+		relaydata.NewChannelAdapter(channelClient),
+		nil,
+		&relaybiz.RetryPolicy{MaxAttempts: 1},
+	)
+	httpServer := NewHTTPServer(
+		identityClient,
+		channelClient,
+		billingClient,
+		relayprovider.NewProviderFactory(time.Second),
+		relayUsecase,
+	)
+	srv := khttp.NewServer()
+	httpServer.RegisterRoutes(srv)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embedding-deploy","input":"hello"}`))
+	req.Header.Set("Authorization", "Bearer user-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/openai/deployments/embedding-deploy/embeddings" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if !strings.Contains(gotQuery, "api-version=2024-10-21") {
+		t.Fatalf("query = %q", gotQuery)
+	}
+}
+
 func TestHTTPServerChatCompletionWritesUsageLogOnSuccess(t *testing.T) {
 	t.Setenv("PROVIDER_DISABLE_SSRF_CHECK", "true")
 

@@ -17,6 +17,7 @@ import (
 
 	billingv1 "micro-one-api/api/billing/v1"
 	channelv1 "micro-one-api/api/channel/v1"
+	commonv1 "micro-one-api/api/common/v1"
 	identityv1 "micro-one-api/api/identity/v1"
 	logv1 "micro-one-api/api/log/v1"
 	"micro-one-api/internal/pkg/errors"
@@ -156,7 +157,9 @@ func (s *HTTPServer) handleRawRelay(upstreamPath string, requireModel bool) http
 				return &relaybiz.RetryableError{Status: http.StatusPaymentRequired, Err: reserveErr}
 			}
 
-			provider, provErr := s.providerFactory.CreateProvider(ch.Type, ch.BaseURL, ch.Key)
+			provider, provErr := s.providerFactory.CreateProviderWithConfig(ch.Type, ch.BaseURL, ch.Key, relayprovider.ProviderConfig{
+				APIVersion: ch.Config.APIVersion,
+			})
 			if provErr != nil {
 				_ = s.releaseQuota(ctx, reservation.ReservationId, "failed to create provider")
 				return fmt.Errorf("failed to create provider: %w", provErr)
@@ -201,6 +204,13 @@ func (s *HTTPServer) handleRawRelay(upstreamPath string, requireModel bool) http
 
 		writeRawResponse(w, upstreamResp)
 	}
+}
+
+func providerConfigFromChannelInfo(channel *commonv1.ChannelInfo) relayprovider.ProviderConfig {
+	if channel == nil || channel.Config == nil {
+		return relayprovider.ProviderConfig{}
+	}
+	return relayprovider.ProviderConfig{APIVersion: channel.Config.ApiVersion}
 }
 
 func (s *HTTPServer) handleUnsupportedOpenAIRoute(feature string) http.HandlerFunc {
@@ -285,7 +295,7 @@ func (s *HTTPServer) handleOneAPIProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	provider, err := s.providerFactory.CreateProvider(channelReply.Channel.Type, channelReply.Channel.BaseUrl, channelReply.Channel.Key)
+	provider, err := s.providerFactory.CreateProviderWithConfig(channelReply.Channel.Type, channelReply.Channel.BaseUrl, channelReply.Channel.Key, providerConfigFromChannelInfo(channelReply.Channel))
 	if err != nil {
 		_ = s.releaseQuota(r.Context(), reservation.ReservationId, "failed to create provider")
 		s.writeError(w, http.StatusInternalServerError, "failed to create provider")
@@ -370,7 +380,9 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 			return &relaybiz.RetryableError{Status: http.StatusPaymentRequired, Err: reserveErr}
 		}
 
-		provider, provErr := s.providerFactory.CreateProvider(ch.Type, ch.BaseURL, ch.Key)
+		provider, provErr := s.providerFactory.CreateProviderWithConfig(ch.Type, ch.BaseURL, ch.Key, relayprovider.ProviderConfig{
+			APIVersion: ch.Config.APIVersion,
+		})
 		if provErr != nil {
 			_ = s.releaseQuota(ctx, reservation.ReservationId, "failed to create provider")
 			return fmt.Errorf("failed to create provider: %w", provErr)

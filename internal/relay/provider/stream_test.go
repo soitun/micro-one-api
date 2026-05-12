@@ -244,6 +244,104 @@ func TestOpenAIProvider_ChatCompletions_Error(t *testing.T) {
 	}
 }
 
+func TestAzureProvider_ChatCompletionsUsesDeploymentPathAndAPIVersion(t *testing.T) {
+	var gotPath string
+	var gotQuery string
+	var gotAuth string
+	var gotModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotAuth = r.Header.Get("api-key")
+		var req ChatCompletionsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+		gotModel = req.Model
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ChatCompletionsResponse{
+			ID:      "chatcmpl-azure",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "gpt-4o-mini",
+			Choices: []Choice{{
+				Index:        0,
+				Message:      Message{Role: "assistant", Content: "ok"},
+				FinishReason: "stop",
+			}},
+			Usage: Usage{TotalTokens: 9},
+		})
+	}))
+	defer server.Close()
+
+	provider, err := NewAzureProvider(server.URL, "azure-key", "2024-02-15-preview", 30*time.Second)
+	if err != nil {
+		t.Fatalf("NewAzureProvider() error = %v", err)
+	}
+	_, err = provider.ChatCompletions(context.Background(), &ChatCompletionsRequest{
+		Model:    "gpt-4o-mini",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+
+	if gotPath != "/openai/deployments/gpt-4o-mini/chat/completions" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotQuery != "api-version=2024-02-15-preview" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+	if gotAuth != "azure-key" {
+		t.Fatalf("api-key = %q", gotAuth)
+	}
+	if gotModel != "" {
+		t.Fatalf("azure request should omit model from body, got %q", gotModel)
+	}
+}
+
+func TestAzureProvider_ChatCompletionsKeepsConfiguredDeploymentPath(t *testing.T) {
+	var gotPath string
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ChatCompletionsResponse{
+			ID:      "chatcmpl-azure",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "configured-deploy",
+			Choices: []Choice{{
+				Index:        0,
+				Message:      Message{Role: "assistant", Content: "ok"},
+				FinishReason: "stop",
+			}},
+			Usage: Usage{TotalTokens: 9},
+		})
+	}))
+	defer server.Close()
+
+	provider, err := NewAzureProvider(server.URL+"/openai/deployments/configured-deploy?api-version=2023-12-01-preview", "azure-key", "", 30*time.Second)
+	if err != nil {
+		t.Fatalf("NewAzureProvider() error = %v", err)
+	}
+	_, err = provider.ChatCompletions(context.Background(), &ChatCompletionsRequest{
+		Model:    "client-model",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+
+	if gotPath != "/openai/deployments/configured-deploy/chat/completions" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotQuery != "api-version=2023-12-01-preview" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+}
+
 func TestProviderFactory_CreateProvider(t *testing.T) {
 	factory := NewProviderFactory(30 * time.Second)
 

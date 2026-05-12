@@ -93,7 +93,9 @@ func (s *RelayGrpcService) ChatCompletion(ctx context.Context, req *relayv1.Chat
 			return reserveErr
 		}
 
-		provider, provErr := s.providerFactory.CreateProvider(ch.Type, ch.BaseURL, ch.Key)
+		provider, provErr := s.providerFactory.CreateProviderWithConfig(ch.Type, ch.BaseURL, ch.Key, relayprovider.ProviderConfig{
+			APIVersion: ch.Config.APIVersion,
+		})
 		if provErr != nil {
 			_, _ = s.billingClient.ReleaseQuota(ctx, &billingv1.ReleaseQuotaRequest{
 				ReservationId: reservation.ReservationId,

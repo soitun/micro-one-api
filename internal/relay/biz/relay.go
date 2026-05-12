@@ -37,6 +37,11 @@ type Channel struct {
 	Models   []string
 	Priority int64
 	Key      string
+	Config   ChannelConfig
+}
+
+type ChannelConfig struct {
+	APIVersion string
 }
 
 // RelayPlan is the result of relay planning, containing all resolved
