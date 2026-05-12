@@ -248,16 +248,14 @@ func TestAzureProvider_ChatCompletionsUsesDeploymentPathAndAPIVersion(t *testing
 	var gotPath string
 	var gotQuery string
 	var gotAuth string
-	var gotModel string
+	var gotBody map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
 		gotAuth = r.Header.Get("api-key")
-		var req ChatCompletionsRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("failed to decode request: %v", err)
 		}
-		gotModel = req.Model
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(ChatCompletionsResponse{
 			ID:      "chatcmpl-azure",
@@ -295,8 +293,8 @@ func TestAzureProvider_ChatCompletionsUsesDeploymentPathAndAPIVersion(t *testing
 	if gotAuth != "azure-key" {
 		t.Fatalf("api-key = %q", gotAuth)
 	}
-	if gotModel != "" {
-		t.Fatalf("azure request should omit model from body, got %q", gotModel)
+	if _, ok := gotBody["model"]; ok {
+		t.Fatalf("azure request should omit model from body, got %v", gotBody)
 	}
 }
 

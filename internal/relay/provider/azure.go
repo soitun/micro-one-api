@@ -50,9 +50,7 @@ func (p *AzureProvider) ChatCompletions(ctx context.Context, req *ChatCompletion
 	if err != nil {
 		return nil, err
 	}
-	bodyReq := *req
-	bodyReq.Model = ""
-	body, err := sonic.Marshal(&bodyReq)
+	body, err := azureChatBody(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -90,9 +88,7 @@ func (p *AzureProvider) ChatCompletionsStream(ctx context.Context, req *ChatComp
 	if err != nil {
 		return nil, err
 	}
-	bodyReq := *req
-	bodyReq.Model = ""
-	body, err := sonic.Marshal(&bodyReq)
+	body, err := azureChatBody(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -226,4 +222,12 @@ func removeModelFromRawBody(body []byte) []byte {
 		return body
 	}
 	return encoded
+}
+
+func azureChatBody(req *ChatCompletionsRequest) ([]byte, error) {
+	body, err := sonic.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	return removeModelFromRawBody(body), nil
 }
