@@ -836,6 +836,73 @@ func TestAdminHTTPOneAPILogRoutes(t *testing.T) {
 	}
 }
 
+func TestAdminHTTPOneAPILogDeleteProxiesToLogService(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	t.Setenv("SERVICE_TOKEN", "service-token")
+
+	var gotAuth string
+	var gotQuery string
+	logService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/logs" {
+			t.Fatalf("unexpected log-service request: %s %s", r.Method, r.URL.Path)
+		}
+		gotAuth = r.Header.Get("Authorization")
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"deleted":2}`))
+	}))
+	defer logService.Close()
+	t.Setenv("LOG_HTTP_ENDPOINT", logService.URL)
+
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+	req := httptest.NewRequest(http.MethodDelete, "/api/log/?type=info&user_id=42&start_time=1710000000&end_time=1710000100", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if gotAuth != "Bearer service-token" {
+		t.Fatalf("auth = %q", gotAuth)
+	}
+	for _, want := range []string{"type=info", "user_id=42", "start_time=1710000000", "end_time=1710000100"} {
+		if !strings.Contains(gotQuery, want) {
+			t.Fatalf("log-service query missing %s: %s", want, gotQuery)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"deleted":2`) {
+		t.Fatalf("delete response mismatch: %s", rec.Body.String())
+	}
+}
+
+func TestAdminHTTPOneAPILogDeleteRequiresEndTime(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	t.Setenv("SERVICE_TOKEN", "service-token")
+
+	called := false
+	logService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer logService.Close()
+	t.Setenv("LOG_HTTP_ENDPOINT", logService.URL)
+
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+	req := httptest.NewRequest(http.MethodDelete, "/api/log/?type=info", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	if called {
+		t.Fatal("log-service should not be called without end_time")
+	}
+}
+
 func TestAdminHTTPTestChannel(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})

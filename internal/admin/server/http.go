@@ -4,7 +4,9 @@ import (
 	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -999,12 +1001,20 @@ func handleLogStats(w http.ResponseWriter, r *http.Request, svc *service.AdminSe
 }
 
 func handleOneAPILogs(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	if strings.Trim(r.URL.Path, "/") == "api/log/search" {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		handleOneAPISearchLogs(w, r, svc)
 		return
 	}
-	if strings.Trim(r.URL.Path, "/") == "api/log/search" {
-		handleOneAPISearchLogs(w, r, svc)
+	if r.Method == http.MethodDelete {
+		handleOneAPIDeleteLogs(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 	handleOneAPIListLogs(w, r, svc)
@@ -1016,6 +1026,52 @@ func handleOneAPILogByID(w http.ResponseWriter, r *http.Request, svc *service.Ad
 		return
 	}
 	writeJSON(w, http.StatusNotImplemented, apiResponse(false, "log delete is not implemented", nil))
+}
+
+func handleOneAPIDeleteLogs(w http.ResponseWriter, r *http.Request) {
+	if getQueryInt64(r, "end_time", 0) <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "end_time is required", nil))
+		return
+	}
+	logEndpoint := strings.TrimRight(os.Getenv("LOG_HTTP_ENDPOINT"), "/")
+	serviceToken := os.Getenv("SERVICE_TOKEN")
+	if logEndpoint == "" || serviceToken == "" {
+		writeJSON(w, http.StatusNotImplemented, apiResponse(false, "log delete is not configured", nil))
+		return
+	}
+	targetURL, err := url.Parse(logEndpoint + "/v1/logs")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse(false, "invalid log service endpoint", nil))
+		return
+	}
+	targetURL.RawQuery = r.URL.RawQuery
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodDelete, targetURL.String(), nil)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse(false, "failed to create log delete request", nil))
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+serviceToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, apiResponse(false, "log service unavailable", nil))
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, apiResponse(false, "failed to read log service response", nil))
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		writeJSON(w, resp.StatusCode, apiResponse(false, string(body), nil))
+		return
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"raw": string(body)}))
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse(true, "", payload))
 }
 
 func handleOneAPIListLogs(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
