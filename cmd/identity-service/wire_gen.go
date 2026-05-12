@@ -8,14 +8,14 @@ import (
 	"github.com/go-kratos/kratos/v2"
 	kconfig "github.com/go-kratos/kratos/v2/config"
 
-	identitycfg "micro-one-api/internal/identity/config"
-	"micro-one-api/internal/pkg/xconfig"
 	"micro-one-api/internal/identity/biz"
+	identitycfg "micro-one-api/internal/identity/config"
 	"micro-one-api/internal/identity/data"
 	"micro-one-api/internal/identity/server"
 	"micro-one-api/internal/identity/service"
 	"micro-one-api/internal/pkg/oauth"
 	appregistry "micro-one-api/internal/pkg/registry"
+	"micro-one-api/internal/pkg/xconfig"
 )
 
 func loadConfig(confPath string) (*identitycfg.Config, error) {
@@ -50,7 +50,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 
 	// Setup OAuth providers
 	oauthRegistry := setupOAuth(cfg)
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, uc, oauthRegistry)
+	httpSrv := server.NewHTTPServerWithRegistrationPolicy(cfg.Server.HTTP.Addr, uc, oauthRegistry, registrationPolicyFromConfig(cfg))
 
 	// Setup service registration
 	registrar, rErr := appregistry.NewRegistrar(cfg.Registry)
@@ -68,6 +68,20 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	app := kratos.New(kratosOpts...)
 
 	return app, func() {}, nil
+}
+
+func registrationPolicyFromConfig(cfg *identitycfg.Config) server.RegistrationPolicy {
+	enabled := !cfg.Registration.Disabled
+	if cfg.Registration.Enabled {
+		enabled = true
+	}
+	return server.RegistrationPolicy{
+		Enabled:                       enabled,
+		EmailDomainRestrictionEnabled: cfg.Registration.EmailDomainRestrictionEnabled,
+		EmailDomainWhitelist:          cfg.Registration.EmailDomainWhitelist,
+		TurnstileCheckEnabled:         cfg.Registration.TurnstileCheckEnabled,
+		TurnstileSecret:               cfg.Registration.TurnstileSecret,
+	}
 }
 
 func setupOAuth(cfg *identitycfg.Config) *oauth.ProviderRegistry {

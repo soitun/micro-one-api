@@ -139,6 +139,93 @@ func TestIdentityHTTPRegisterRejectsInvalidAffCode(t *testing.T) {
 	}
 }
 
+func TestIdentityHTTPRegisterCanBeDisabled(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	srv := NewHTTPServerWithRegistrationPolicy(":0", uc, nil, RegistrationPolicy{Enabled: false})
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/user/register", strings.NewReader(`{"username":"alice","password":"password123","email":"alice@example.com"}`))
+	registerRec := httptest.NewRecorder()
+	srv.ServeHTTP(registerRec, registerReq)
+
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	if !strings.Contains(registerRec.Body.String(), `"success":false`) || !strings.Contains(registerRec.Body.String(), "registration disabled") {
+		t.Fatalf("registration disabled response mismatch: %s", registerRec.Body.String())
+	}
+}
+
+func TestIdentityHTTPRegisterEnforcesEmailDomainWhitelist(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	srv := NewHTTPServerWithRegistrationPolicy(":0", uc, nil, RegistrationPolicy{
+		Enabled:                       true,
+		EmailDomainRestrictionEnabled: true,
+		EmailDomainWhitelist:          []string{"example.com", "corp.test"},
+	})
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/user/register", strings.NewReader(`{"username":"alice","password":"password123","email":"alice@blocked.test"}`))
+	registerRec := httptest.NewRecorder()
+	srv.ServeHTTP(registerRec, registerReq)
+
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	if !strings.Contains(registerRec.Body.String(), `"success":false`) || !strings.Contains(registerRec.Body.String(), "email domain is not allowed") {
+		t.Fatalf("domain restriction response mismatch: %s", registerRec.Body.String())
+	}
+
+	registerReq = httptest.NewRequest(http.MethodPost, "/api/user/register", strings.NewReader(`{"username":"bob","password":"password123","email":"bob@example.com"}`))
+	registerRec = httptest.NewRecorder()
+	srv.ServeHTTP(registerRec, registerReq)
+
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	if !strings.Contains(registerRec.Body.String(), `"success":true`) {
+		t.Fatalf("allowed domain registration failed: %s", registerRec.Body.String())
+	}
+}
+
+func TestIdentityHTTPRegisterEnforcesTurnstileWhenEnabled(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	verifier := &fakeTurnstileVerifier{acceptedToken: "pass"}
+	srv := NewHTTPServerWithRegistrationPolicy(":0", uc, nil, RegistrationPolicy{
+		Enabled:                true,
+		TurnstileCheckEnabled:  true,
+		TurnstileSecret:        "secret",
+		TurnstileVerifyHandler: verifier,
+	})
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/user/register", strings.NewReader(`{"username":"alice","password":"password123","email":"alice@example.com","turnstile_token":"bad"}`))
+	registerReq.RemoteAddr = "203.0.113.10:1234"
+	registerRec := httptest.NewRecorder()
+	srv.ServeHTTP(registerRec, registerReq)
+
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	if !strings.Contains(registerRec.Body.String(), `"success":false`) || !strings.Contains(registerRec.Body.String(), "turnstile verification failed") {
+		t.Fatalf("turnstile reject response mismatch: %s", registerRec.Body.String())
+	}
+	if verifier.remoteIP != "203.0.113.10" {
+		t.Fatalf("turnstile remote ip = %q, want 203.0.113.10", verifier.remoteIP)
+	}
+
+	registerReq = httptest.NewRequest(http.MethodPost, "/api/user/register", strings.NewReader(`{"username":"bob","password":"password123","email":"bob@example.com","turnstile_token":"pass"}`))
+	registerRec = httptest.NewRecorder()
+	srv.ServeHTTP(registerRec, registerReq)
+
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	if !strings.Contains(registerRec.Body.String(), `"success":true`) {
+		t.Fatalf("turnstile accepted registration failed: %s", registerRec.Body.String())
+	}
+}
+
 func TestIdentityHTTPEmailBindRequiresAuth(t *testing.T) {
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)
@@ -831,6 +918,19 @@ type identityHTTPBillingClient struct {
 	snapshot       *commonv1.AccountSnapshot
 	redeemResponse *billingv1.RedeemCodeResponse
 	redeemCode     string
+}
+
+type fakeTurnstileVerifier struct {
+	acceptedToken string
+	remoteIP      string
+}
+
+func (v *fakeTurnstileVerifier) VerifyTurnstile(ctx context.Context, secret, token, remoteIP string) error {
+	v.remoteIP = remoteIP
+	if token != v.acceptedToken {
+		return biz.ErrInvalidToken
+	}
+	return nil
 }
 
 func (c *identityHTTPBillingClient) GetAccountSnapshot(ctx context.Context, req *billingv1.GetAccountSnapshotRequest, opts ...grpc.CallOption) (*billingv1.GetAccountSnapshotResponse, error) {

@@ -24,4 +24,9 @@ oauth:
     enabled: ${OAUTH_GOOGLE_ENABLED:-false}
     client_id: ${OAUTH_GOOGLE_CLIENT_ID:-}
     client_secret: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
-
+registration:
+  disabled: ${REGISTRATION_DISABLED:-false}
+  email_domain_restriction_enabled: ${REGISTRATION_EMAIL_DOMAIN_RESTRICTION_ENABLED:-false}
+  email_domain_whitelist: ${REGISTRATION_EMAIL_DOMAIN_WHITELIST:-[]}
+  turnstile_check_enabled: ${TURNSTILE_CHECK_ENABLED:-false}
+  turnstile_secret: ${TURNSTILE_SECRET:-}

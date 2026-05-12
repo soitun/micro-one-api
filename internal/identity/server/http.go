@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,8 +21,32 @@ import (
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
+type TurnstileVerifier interface {
+	VerifyTurnstile(ctx context.Context, secret, token, remoteIP string) error
+}
+
+type RegistrationPolicy struct {
+	Enabled                       bool
+	EmailDomainRestrictionEnabled bool
+	EmailDomainWhitelist          []string
+	TurnstileCheckEnabled         bool
+	TurnstileSecret               string
+	TurnstileVerifyHandler        TurnstileVerifier
+}
+
+type defaultTurnstileVerifier struct {
+	client *http.Client
+}
+
 // NewHTTPServer wires HTTP transport for identity-service.
 func NewHTTPServer(addr string, uc *biz.IdentityUsecase, oauthRegistry *oauth.ProviderRegistry, billingClients ...billingv1.BillingServiceClient) *khttp.Server {
+	return NewHTTPServerWithRegistrationPolicy(addr, uc, oauthRegistry, RegistrationPolicy{Enabled: true}, billingClients...)
+}
+
+func NewHTTPServerWithRegistrationPolicy(addr string, uc *biz.IdentityUsecase, oauthRegistry *oauth.ProviderRegistry, registrationPolicy RegistrationPolicy, billingClients ...billingv1.BillingServiceClient) *khttp.Server {
+	if registrationPolicy.TurnstileCheckEnabled && registrationPolicy.TurnstileVerifyHandler == nil {
+		registrationPolicy.TurnstileVerifyHandler = &defaultTurnstileVerifier{client: &http.Client{Timeout: 10 * time.Second}}
+	}
 	srv := khttp.NewServer(
 		khttp.Address(addr),
 	)
@@ -66,7 +93,7 @@ func NewHTTPServer(addr string, uc *biz.IdentityUsecase, oauthRegistry *oauth.Pr
 	})
 
 	srv.HandleFunc("/api/user/register", func(w http.ResponseWriter, r *http.Request) {
-		handleRegister(w, r, uc)
+		handleRegister(w, r, uc, registrationPolicy)
 	})
 	srv.HandleFunc("/api/user/login", func(w http.ResponseWriter, r *http.Request) {
 		handleLogin(w, r, uc)
@@ -143,20 +170,44 @@ var verificationStore = struct {
 	items: make(map[string]verificationRecord),
 }
 
-func handleRegister(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
+func handleRegister(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, policy RegistrationPolicy) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
 		return
 	}
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Email    string `json:"email"`
-		Group    string `json:"group"`
-		AffCode  string `json:"aff_code"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		Email          string `json:"email"`
+		Group          string `json:"group"`
+		AffCode        string `json:"aff_code"`
+		TurnstileToken string `json:"turnstile_token"`
+		CFToken        string `json:"cf_turnstile_response"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
+	}
+	if !policy.Enabled {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "registration disabled"})
+		return
+	}
+	if policy.EmailDomainRestrictionEnabled && !emailDomainAllowed(req.Email, policy.EmailDomainWhitelist) {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "email domain is not allowed"})
+		return
+	}
+	if policy.TurnstileCheckEnabled {
+		token := req.TurnstileToken
+		if token == "" {
+			token = req.CFToken
+		}
+		if policy.TurnstileSecret == "" || policy.TurnstileVerifyHandler == nil {
+			writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "turnstile verification is not configured"})
+			return
+		}
+		if err := policy.TurnstileVerifyHandler.VerifyTurnstile(r.Context(), policy.TurnstileSecret, token, requestRemoteIP(r)); err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "turnstile verification failed"})
+			return
+		}
 	}
 	if req.Group == "" {
 		req.Group = "default"
@@ -167,6 +218,69 @@ func handleRegister(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsec
 		return
 	}
 	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{"user_id": user.ID}})
+}
+
+func emailDomainAllowed(email string, whitelist []string) bool {
+	_, domain, ok := strings.Cut(strings.TrimSpace(email), "@")
+	if !ok || domain == "" {
+		return false
+	}
+	domain = strings.ToLower(domain)
+	for _, allowed := range whitelist {
+		allowed = strings.ToLower(strings.TrimSpace(allowed))
+		if allowed != "" && domain == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func requestRemoteIP(r *http.Request) string {
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+		first, _, _ := strings.Cut(forwarded, ",")
+		return strings.TrimSpace(first)
+	}
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		return realIP
+	}
+	host, _, ok := strings.Cut(r.RemoteAddr, ":")
+	if ok {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func (v *defaultTurnstileVerifier) VerifyTurnstile(ctx context.Context, secret, token, remoteIP string) error {
+	form := url.Values{}
+	form.Set("secret", secret)
+	form.Set("response", token)
+	if remoteIP != "" {
+		form.Set("remoteip", remoteIP)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://challenges.cloudflare.com/turnstile/v0/siteverify", strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	client := v.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Success bool `json:"success"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return err
+	}
+	if !payload.Success {
+		return fmt.Errorf("turnstile verification failed")
+	}
+	return nil
 }
 
 func handleAffCode(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {

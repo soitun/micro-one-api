@@ -4,10 +4,11 @@ import appregistry "micro-one-api/internal/pkg/registry"
 
 // Config holds the identity-service configuration.
 type Config struct {
-	Server   ServerConfig       `json:"server"`
-	Data     DataConfig         `json:"data"`
-	OAuth    OAuthConfig        `json:"oauth"`
-	Registry appregistry.Config `json:"registry"`
+	Server       ServerConfig       `json:"server"`
+	Data         DataConfig         `json:"data"`
+	OAuth        OAuthConfig        `json:"oauth"`
+	Registration RegistrationConfig `json:"registration"`
+	Registry     appregistry.Config `json:"registry"`
 }
 
 type ServerConfig struct {
@@ -38,13 +39,22 @@ type RedisConfig struct {
 }
 
 type OAuthConfig struct {
-	GitHub OAuthProviderConfig `json:"github"`
-	Google OAuthProviderConfig `json:"google"`
-	BaseURL string             `json:"base_url"`
+	GitHub  OAuthProviderConfig `json:"github"`
+	Google  OAuthProviderConfig `json:"google"`
+	BaseURL string              `json:"base_url"`
 }
 
 type OAuthProviderConfig struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 	Enabled      bool   `json:"enabled"`
+}
+
+type RegistrationConfig struct {
+	Enabled                       bool     `json:"enabled"`
+	Disabled                      bool     `json:"disabled"`
+	EmailDomainRestrictionEnabled bool     `json:"email_domain_restriction_enabled"`
+	EmailDomainWhitelist          []string `json:"email_domain_whitelist"`
+	TurnstileCheckEnabled         bool     `json:"turnstile_check_enabled"`
+	TurnstileSecret               string   `json:"turnstile_secret"`
 }
