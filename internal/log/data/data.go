@@ -22,13 +22,22 @@ type Repository struct {
 }
 
 type logModel struct {
-	ID        int64  `gorm:"column:id;primaryKey;autoIncrement"`
-	Level     string `gorm:"column:level;index"`
-	Message   string `gorm:"column:message"`
-	Source    string `gorm:"column:source;index"`
-	RequestID string `gorm:"column:request_id"`
-	UserID    int64  `gorm:"column:user_id"`
-	CreatedAt int64  `gorm:"column:created_at;index"`
+	ID               int64  `gorm:"column:id;primaryKey;autoIncrement"`
+	Level            string `gorm:"column:level;index"`
+	Message          string `gorm:"column:message"`
+	Source           string `gorm:"column:source;index"`
+	RequestID        string `gorm:"column:request_id"`
+	UserID           int64  `gorm:"column:user_id"`
+	CreatedAt        int64  `gorm:"column:created_at;index"`
+	Username         string `gorm:"column:username"`
+	TokenName        string `gorm:"column:token_name"`
+	ModelName        string `gorm:"column:model_name;index"`
+	Quota            int64  `gorm:"column:quota"`
+	PromptTokens     int64  `gorm:"column:prompt_tokens"`
+	CompletionTokens int64  `gorm:"column:completion_tokens"`
+	ChannelID        int64  `gorm:"column:channel_id"`
+	ElapsedTime      int64  `gorm:"column:elapsed_time"`
+	IsStream         bool   `gorm:"column:is_stream"`
 }
 
 func (logModel) TableName() string { return "logs" }
@@ -101,6 +110,13 @@ func (r *Repository) Create(ctx context.Context, entry *biz.LogEntry) error {
 	return r.createMemory(entry)
 }
 
+func (r *Repository) UsageByUser(ctx context.Context, userID int64, startTime, endTime time.Time) ([]*biz.UsageStat, error) {
+	if r.db != nil {
+		return r.usageByUserDB(ctx, userID, startTime, endTime)
+	}
+	return r.usageByUserMemory(userID, startTime, endTime), nil
+}
+
 // DB implementations
 
 func (r *Repository) getDB(ctx context.Context, id int64) (*biz.LogEntry, error) {
@@ -112,13 +128,22 @@ func (r *Repository) getDB(ctx context.Context, id int64) (*biz.LogEntry, error)
 		return nil, err
 	}
 	return &biz.LogEntry{
-		ID:        m.ID,
-		Level:     m.Level,
-		Message:   m.Message,
-		Source:    m.Source,
-		RequestID: m.RequestID,
-		UserID:    m.UserID,
-		CreatedAt: time.Unix(m.CreatedAt, 0),
+		ID:               m.ID,
+		Level:            m.Level,
+		Message:          m.Message,
+		Source:           m.Source,
+		RequestID:        m.RequestID,
+		UserID:           m.UserID,
+		CreatedAt:        time.Unix(m.CreatedAt, 0),
+		Username:         m.Username,
+		TokenName:        m.TokenName,
+		ModelName:        m.ModelName,
+		Quota:            m.Quota,
+		PromptTokens:     m.PromptTokens,
+		CompletionTokens: m.CompletionTokens,
+		ChannelID:        m.ChannelID,
+		ElapsedTime:      m.ElapsedTime,
+		IsStream:         m.IsStream,
 	}, nil
 }
 
@@ -144,15 +169,7 @@ func (r *Repository) listDB(ctx context.Context, page, pageSize int32, level, so
 	}
 	entries := make([]*biz.LogEntry, len(models))
 	for i, m := range models {
-		entries[i] = &biz.LogEntry{
-			ID:        m.ID,
-			Level:     m.Level,
-			Message:   m.Message,
-			Source:    m.Source,
-			RequestID: m.RequestID,
-			UserID:    m.UserID,
-			CreatedAt: time.Unix(m.CreatedAt, 0),
-		}
+		entries[i] = logModelToEntry(m)
 	}
 	return entries, total, nil
 }
@@ -176,33 +193,72 @@ func (r *Repository) listByUserDB(ctx context.Context, userID int64, page, pageS
 	}
 	entries := make([]*biz.LogEntry, len(models))
 	for i, m := range models {
-		entries[i] = &biz.LogEntry{
-			ID:        m.ID,
-			Level:     m.Level,
-			Message:   m.Message,
-			Source:    m.Source,
-			RequestID: m.RequestID,
-			UserID:    m.UserID,
-			CreatedAt: time.Unix(m.CreatedAt, 0),
-		}
+		entries[i] = logModelToEntry(m)
 	}
 	return entries, total, nil
 }
 
 func (r *Repository) createDB(ctx context.Context, entry *biz.LogEntry) error {
 	m := logModel{
-		Level:     entry.Level,
-		Message:   entry.Message,
-		Source:    entry.Source,
-		RequestID: entry.RequestID,
-		UserID:    entry.UserID,
-		CreatedAt: entry.CreatedAt.Unix(),
+		Level:            entry.Level,
+		Message:          entry.Message,
+		Source:           entry.Source,
+		RequestID:        entry.RequestID,
+		UserID:           entry.UserID,
+		CreatedAt:        entry.CreatedAt.Unix(),
+		Username:         entry.Username,
+		TokenName:        entry.TokenName,
+		ModelName:        entry.ModelName,
+		Quota:            entry.Quota,
+		PromptTokens:     entry.PromptTokens,
+		CompletionTokens: entry.CompletionTokens,
+		ChannelID:        entry.ChannelID,
+		ElapsedTime:      entry.ElapsedTime,
+		IsStream:         entry.IsStream,
 	}
 	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
 		return err
 	}
 	entry.ID = m.ID
 	return nil
+}
+
+func (r *Repository) usageByUserDB(ctx context.Context, userID int64, startTime, endTime time.Time) ([]*biz.UsageStat, error) {
+	query := r.db.WithContext(ctx).Table("logs").
+		Select("FROM_UNIXTIME(created_at, '%Y-%m-%d') AS day, model_name, COUNT(1) AS request_count, COALESCE(SUM(quota), 0) AS quota, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, COALESCE(SUM(completion_tokens), 0) AS completion_tokens").
+		Where("user_id = ? AND model_name <> ''", userID)
+	if !startTime.IsZero() {
+		query = query.Where("created_at >= ?", startTime.Unix())
+	}
+	if !endTime.IsZero() {
+		query = query.Where("created_at <= ?", endTime.Unix())
+	}
+	var stats []*biz.UsageStat
+	if err := query.Group("day, model_name").Order("day ASC, model_name ASC").Scan(&stats).Error; err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func logModelToEntry(m logModel) *biz.LogEntry {
+	return &biz.LogEntry{
+		ID:               m.ID,
+		Level:            m.Level,
+		Message:          m.Message,
+		Source:           m.Source,
+		RequestID:        m.RequestID,
+		UserID:           m.UserID,
+		CreatedAt:        time.Unix(m.CreatedAt, 0),
+		Username:         m.Username,
+		TokenName:        m.TokenName,
+		ModelName:        m.ModelName,
+		Quota:            m.Quota,
+		PromptTokens:     m.PromptTokens,
+		CompletionTokens: m.CompletionTokens,
+		ChannelID:        m.ChannelID,
+		ElapsedTime:      m.ElapsedTime,
+		IsStream:         m.IsStream,
+	}
 }
 
 // Memory implementations
@@ -283,6 +339,39 @@ func (r *Repository) createMemory(entry *biz.LogEntry) error {
 	entry.ID = r.seq
 	r.mem[entry.ID] = entry
 	return nil
+}
+
+func (r *Repository) usageByUserMemory(userID int64, startTime, endTime time.Time) []*biz.UsageStat {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	statsByKey := map[string]*biz.UsageStat{}
+	for _, entry := range r.mem {
+		if entry.UserID != userID || entry.ModelName == "" {
+			continue
+		}
+		if !startTime.IsZero() && entry.CreatedAt.Before(startTime) {
+			continue
+		}
+		if !endTime.IsZero() && entry.CreatedAt.After(endTime) {
+			continue
+		}
+		day := entry.CreatedAt.UTC().Format("2006-01-02")
+		key := day + "\x00" + entry.ModelName
+		stat := statsByKey[key]
+		if stat == nil {
+			stat = &biz.UsageStat{Day: day, ModelName: entry.ModelName}
+			statsByKey[key] = stat
+		}
+		stat.RequestCount++
+		stat.Quota += entry.Quota
+		stat.PromptTokens += entry.PromptTokens
+		stat.CompletionTokens += entry.CompletionTokens
+	}
+	stats := make([]*biz.UsageStat, 0, len(statsByKey))
+	for _, stat := range statsByKey {
+		stats = append(stats, stat)
+	}
+	return stats
 }
 
 func contains(s, substr string) bool {

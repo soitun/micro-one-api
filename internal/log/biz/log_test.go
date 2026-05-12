@@ -81,6 +81,37 @@ func (m *mockLogRepo) ListByUser(ctx context.Context, userID int64, page, pageSi
 	return result[start:end], total, nil
 }
 
+func (m *mockLogRepo) UsageByUser(ctx context.Context, userID int64, startTime, endTime time.Time) ([]*UsageStat, error) {
+	statsByKey := map[string]*UsageStat{}
+	for _, e := range m.entries {
+		if e.UserID != userID || e.ModelName == "" {
+			continue
+		}
+		if !startTime.IsZero() && e.CreatedAt.Before(startTime) {
+			continue
+		}
+		if !endTime.IsZero() && e.CreatedAt.After(endTime) {
+			continue
+		}
+		day := e.CreatedAt.UTC().Format("2006-01-02")
+		key := day + "\x00" + e.ModelName
+		stat := statsByKey[key]
+		if stat == nil {
+			stat = &UsageStat{Day: day, ModelName: e.ModelName}
+			statsByKey[key] = stat
+		}
+		stat.RequestCount++
+		stat.Quota += e.Quota
+		stat.PromptTokens += e.PromptTokens
+		stat.CompletionTokens += e.CompletionTokens
+	}
+	stats := make([]*UsageStat, 0, len(statsByKey))
+	for _, stat := range statsByKey {
+		stats = append(stats, stat)
+	}
+	return stats, nil
+}
+
 func (m *mockLogRepo) Create(ctx context.Context, entry *LogEntry) error {
 	if m.createErr != nil {
 		return m.createErr

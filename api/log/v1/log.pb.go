@@ -67,16 +67,25 @@ func (x *GetLogRequest) GetId() int64 {
 }
 
 type GetLogResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Level         string                 `protobuf:"bytes,2,opt,name=level,proto3" json:"level,omitempty"`
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	Source        string                 `protobuf:"bytes,4,opt,name=source,proto3" json:"source,omitempty"`
-	RequestId     string                 `protobuf:"bytes,5,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	UserId        int64                  `protobuf:"varint,6,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	CreatedAt     int64                  `protobuf:"varint,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Level            string                 `protobuf:"bytes,2,opt,name=level,proto3" json:"level,omitempty"`
+	Message          string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	Source           string                 `protobuf:"bytes,4,opt,name=source,proto3" json:"source,omitempty"`
+	RequestId        string                 `protobuf:"bytes,5,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	UserId           int64                  `protobuf:"varint,6,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	CreatedAt        int64                  `protobuf:"varint,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Username         string                 `protobuf:"bytes,8,opt,name=username,proto3" json:"username,omitempty"`
+	TokenName        string                 `protobuf:"bytes,9,opt,name=token_name,json=tokenName,proto3" json:"token_name,omitempty"`
+	ModelName        string                 `protobuf:"bytes,10,opt,name=model_name,json=modelName,proto3" json:"model_name,omitempty"`
+	Quota            int64                  `protobuf:"varint,11,opt,name=quota,proto3" json:"quota,omitempty"`
+	PromptTokens     int64                  `protobuf:"varint,12,opt,name=prompt_tokens,json=promptTokens,proto3" json:"prompt_tokens,omitempty"`
+	CompletionTokens int64                  `protobuf:"varint,13,opt,name=completion_tokens,json=completionTokens,proto3" json:"completion_tokens,omitempty"`
+	ChannelId        int64                  `protobuf:"varint,14,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	ElapsedTime      int64                  `protobuf:"varint,15,opt,name=elapsed_time,json=elapsedTime,proto3" json:"elapsed_time,omitempty"`
+	IsStream         bool                   `protobuf:"varint,16,opt,name=is_stream,json=isStream,proto3" json:"is_stream,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GetLogResponse) Reset() {
@@ -156,6 +165,69 @@ func (x *GetLogResponse) GetCreatedAt() int64 {
 		return x.CreatedAt
 	}
 	return 0
+}
+
+func (x *GetLogResponse) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *GetLogResponse) GetTokenName() string {
+	if x != nil {
+		return x.TokenName
+	}
+	return ""
+}
+
+func (x *GetLogResponse) GetModelName() string {
+	if x != nil {
+		return x.ModelName
+	}
+	return ""
+}
+
+func (x *GetLogResponse) GetQuota() int64 {
+	if x != nil {
+		return x.Quota
+	}
+	return 0
+}
+
+func (x *GetLogResponse) GetPromptTokens() int64 {
+	if x != nil {
+		return x.PromptTokens
+	}
+	return 0
+}
+
+func (x *GetLogResponse) GetCompletionTokens() int64 {
+	if x != nil {
+		return x.CompletionTokens
+	}
+	return 0
+}
+
+func (x *GetLogResponse) GetChannelId() int64 {
+	if x != nil {
+		return x.ChannelId
+	}
+	return 0
+}
+
+func (x *GetLogResponse) GetElapsedTime() int64 {
+	if x != nil {
+		return x.ElapsedTime
+	}
+	return 0
+}
+
+func (x *GetLogResponse) GetIsStream() bool {
+	if x != nil {
+		return x.IsStream
+	}
+	return false
 }
 
 type ListLogsRequest struct {
@@ -271,14 +343,23 @@ func (x *ListLogsResponse) GetTotal() int64 {
 }
 
 type IngestLogRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Level         string                 `protobuf:"bytes,1,opt,name=level,proto3" json:"level,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
-	RequestId     string                 `protobuf:"bytes,4,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	UserId        int64                  `protobuf:"varint,5,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Level            string                 `protobuf:"bytes,1,opt,name=level,proto3" json:"level,omitempty"`
+	Message          string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Source           string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
+	RequestId        string                 `protobuf:"bytes,4,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	UserId           int64                  `protobuf:"varint,5,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Username         string                 `protobuf:"bytes,6,opt,name=username,proto3" json:"username,omitempty"`
+	TokenName        string                 `protobuf:"bytes,7,opt,name=token_name,json=tokenName,proto3" json:"token_name,omitempty"`
+	ModelName        string                 `protobuf:"bytes,8,opt,name=model_name,json=modelName,proto3" json:"model_name,omitempty"`
+	Quota            int64                  `protobuf:"varint,9,opt,name=quota,proto3" json:"quota,omitempty"`
+	PromptTokens     int64                  `protobuf:"varint,10,opt,name=prompt_tokens,json=promptTokens,proto3" json:"prompt_tokens,omitempty"`
+	CompletionTokens int64                  `protobuf:"varint,11,opt,name=completion_tokens,json=completionTokens,proto3" json:"completion_tokens,omitempty"`
+	ChannelId        int64                  `protobuf:"varint,12,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	ElapsedTime      int64                  `protobuf:"varint,13,opt,name=elapsed_time,json=elapsedTime,proto3" json:"elapsed_time,omitempty"`
+	IsStream         bool                   `protobuf:"varint,14,opt,name=is_stream,json=isStream,proto3" json:"is_stream,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *IngestLogRequest) Reset() {
@@ -346,6 +427,69 @@ func (x *IngestLogRequest) GetUserId() int64 {
 	return 0
 }
 
+func (x *IngestLogRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *IngestLogRequest) GetTokenName() string {
+	if x != nil {
+		return x.TokenName
+	}
+	return ""
+}
+
+func (x *IngestLogRequest) GetModelName() string {
+	if x != nil {
+		return x.ModelName
+	}
+	return ""
+}
+
+func (x *IngestLogRequest) GetQuota() int64 {
+	if x != nil {
+		return x.Quota
+	}
+	return 0
+}
+
+func (x *IngestLogRequest) GetPromptTokens() int64 {
+	if x != nil {
+		return x.PromptTokens
+	}
+	return 0
+}
+
+func (x *IngestLogRequest) GetCompletionTokens() int64 {
+	if x != nil {
+		return x.CompletionTokens
+	}
+	return 0
+}
+
+func (x *IngestLogRequest) GetChannelId() int64 {
+	if x != nil {
+		return x.ChannelId
+	}
+	return 0
+}
+
+func (x *IngestLogRequest) GetElapsedTime() int64 {
+	if x != nil {
+		return x.ElapsedTime
+	}
+	return 0
+}
+
+func (x *IngestLogRequest) GetIsStream() bool {
+	if x != nil {
+		return x.IsStream
+	}
+	return false
+}
+
 type IngestLogResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -397,7 +541,7 @@ const file_api_log_v1_log_proto_rawDesc = "" +
 	"\x14api/log/v1/log.proto\x12\n" +
 	"api.log.v1\x1a\x1cgoogle/api/annotations.proto\"\x1f\n" +
 	"\rGetLogRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\x03R\x02id\"\xbf\x01\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\"\xe0\x03\n" +
 	"\x0eGetLogResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\tR\x05level\x12\x18\n" +
@@ -407,21 +551,47 @@ const file_api_log_v1_log_proto_rawDesc = "" +
 	"request_id\x18\x05 \x01(\tR\trequestId\x12\x17\n" +
 	"\auser_id\x18\x06 \x01(\x03R\x06userId\x12\x1d\n" +
 	"\n" +
-	"created_at\x18\a \x01(\x03R\tcreatedAt\"V\n" +
+	"created_at\x18\a \x01(\x03R\tcreatedAt\x12\x1a\n" +
+	"\busername\x18\b \x01(\tR\busername\x12\x1d\n" +
+	"\n" +
+	"token_name\x18\t \x01(\tR\ttokenName\x12\x1d\n" +
+	"\n" +
+	"model_name\x18\n" +
+	" \x01(\tR\tmodelName\x12\x14\n" +
+	"\x05quota\x18\v \x01(\x03R\x05quota\x12#\n" +
+	"\rprompt_tokens\x18\f \x01(\x03R\fpromptTokens\x12+\n" +
+	"\x11completion_tokens\x18\r \x01(\x03R\x10completionTokens\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x0e \x01(\x03R\tchannelId\x12!\n" +
+	"\felapsed_time\x18\x0f \x01(\x03R\velapsedTime\x12\x1b\n" +
+	"\tis_stream\x18\x10 \x01(\bR\bisStream\"V\n" +
 	"\x0fListLogsRequest\x12\x12\n" +
 	"\x04page\x18\x01 \x01(\x05R\x04page\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x12\n" +
 	"\x04type\x18\x03 \x01(\tR\x04type\"Z\n" +
 	"\x10ListLogsResponse\x120\n" +
 	"\x05items\x18\x01 \x03(\v2\x1a.api.log.v1.GetLogResponseR\x05items\x12\x14\n" +
-	"\x05total\x18\x02 \x01(\x03R\x05total\"\x92\x01\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total\"\xb3\x03\n" +
 	"\x10IngestLogRequest\x12\x14\n" +
 	"\x05level\x18\x01 \x01(\tR\x05level\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
 	"\x06source\x18\x03 \x01(\tR\x06source\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x04 \x01(\tR\trequestId\x12\x17\n" +
-	"\auser_id\x18\x05 \x01(\x03R\x06userId\"#\n" +
+	"\auser_id\x18\x05 \x01(\x03R\x06userId\x12\x1a\n" +
+	"\busername\x18\x06 \x01(\tR\busername\x12\x1d\n" +
+	"\n" +
+	"token_name\x18\a \x01(\tR\ttokenName\x12\x1d\n" +
+	"\n" +
+	"model_name\x18\b \x01(\tR\tmodelName\x12\x14\n" +
+	"\x05quota\x18\t \x01(\x03R\x05quota\x12#\n" +
+	"\rprompt_tokens\x18\n" +
+	" \x01(\x03R\fpromptTokens\x12+\n" +
+	"\x11completion_tokens\x18\v \x01(\x03R\x10completionTokens\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\f \x01(\x03R\tchannelId\x12!\n" +
+	"\felapsed_time\x18\r \x01(\x03R\velapsedTime\x12\x1b\n" +
+	"\tis_stream\x18\x0e \x01(\bR\bisStream\"#\n" +
 	"\x11IngestLogResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id2\x9c\x02\n" +
 	"\n" +

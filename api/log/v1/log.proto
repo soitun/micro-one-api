@@ -37,6 +37,15 @@ message GetLogResponse {
   string request_id = 5;
   int64 user_id = 6;
   int64 created_at = 7;
+  string username = 8;
+  string token_name = 9;
+  string model_name = 10;
+  int64 quota = 11;
+  int64 prompt_tokens = 12;
+  int64 completion_tokens = 13;
+  int64 channel_id = 14;
+  int64 elapsed_time = 15;
+  bool is_stream = 16;
 }
 
 message ListLogsRequest {
@@ -56,6 +65,15 @@ message IngestLogRequest {
   string source = 3;
   string request_id = 4;
   int64 user_id = 5;
+  string username = 6;
+  string token_name = 7;
+  string model_name = 8;
+  int64 quota = 9;
+  int64 prompt_tokens = 10;
+  int64 completion_tokens = 11;
+  int64 channel_id = 12;
+  int64 elapsed_time = 13;
+  bool is_stream = 14;
 }
 
 message IngestLogResponse {

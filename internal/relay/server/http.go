@@ -18,6 +18,7 @@ import (
 	billingv1 "micro-one-api/api/billing/v1"
 	channelv1 "micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
+	logv1 "micro-one-api/api/log/v1"
 	"micro-one-api/internal/pkg/errors"
 	applogger "micro-one-api/internal/pkg/logger"
 	"micro-one-api/internal/pkg/metrics"
@@ -32,6 +33,7 @@ type HTTPServer struct {
 	identityClient  identityv1.IdentityServiceClient
 	channelClient   channelv1.ChannelServiceClient
 	billingClient   billingv1.BillingServiceClient
+	logClient       logv1.LogServiceClient
 	providerFactory *relayprovider.ProviderFactory
 	relayUsecase    *relaybiz.RelayUsecase
 }
@@ -43,11 +45,17 @@ func NewHTTPServer(
 	billingClient billingv1.BillingServiceClient,
 	providerFactory *relayprovider.ProviderFactory,
 	relayUsecase *relaybiz.RelayUsecase,
+	logClients ...logv1.LogServiceClient,
 ) *HTTPServer {
+	var logClient logv1.LogServiceClient
+	if len(logClients) > 0 {
+		logClient = logClients[0]
+	}
 	return &HTTPServer{
 		identityClient:  identityClient,
 		channelClient:   channelClient,
 		billingClient:   billingClient,
+		logClient:       logClient,
 		providerFactory: providerFactory,
 		relayUsecase:    relayUsecase,
 	}
@@ -124,6 +132,7 @@ func (s *HTTPServer) handleRawRelay(upstreamPath string, requireModel bool) http
 		var upstreamResp *relayprovider.RawResponse
 		retryExecutor := s.relayUsecase.NewRetryExecutor()
 		result := retryExecutor.Execute(r.Context(), plan.Auth.Group, clientModel, func(ctx context.Context, ch *relaybiz.Channel) error {
+			startedAt := time.Now()
 			requestID := generateRequestID()
 			reservation, reserveErr := s.reserveQuota(
 				ctx,
@@ -155,7 +164,18 @@ func (s *HTTPServer) handleRawRelay(upstreamPath string, requireModel bool) http
 				return forwardErr
 			}
 
-			_ = s.commitQuota(ctx, reservation.ReservationId, extractTotalTokens(resp.Body, estimateRawTokens(body)), true)
+			actualTokens := extractTotalTokens(resp.Body, estimateRawTokens(body))
+			_ = s.commitQuota(ctx, reservation.ReservationId, actualTokens, true)
+			s.ingestUsageLog(ctx, usageLogInput{
+				UserID:      plan.Auth.UserID,
+				TokenID:     plan.Auth.TokenID,
+				RequestID:   requestID,
+				ModelName:   clientModel,
+				Quota:       actualTokens,
+				ChannelID:   ch.ID,
+				ElapsedTime: time.Since(startedAt).Milliseconds(),
+				IsStream:    false,
+			})
 			upstreamResp = resp
 			return nil
 		})
@@ -318,6 +338,7 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 	// Use RetryExecutor for upstream calls with channel fallback
 	retryExecutor := s.relayUsecase.NewRetryExecutor()
 	result := retryExecutor.Execute(r.Context(), plan.Auth.Group, clientModel, func(ctx context.Context, ch *relaybiz.Channel) error {
+		startedAt := time.Now()
 		// Reserve quota
 		requestID := generateRequestID()
 		estimatedTokens := s.estimateTokens(&req)
@@ -333,7 +354,14 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 		}
 
 		if req.Stream {
-			s.handleStreamingResponse(w, r, provider, &req, reservation)
+			s.handleStreamingResponse(w, r, provider, &req, reservation, usageLogInput{
+				UserID:    plan.Auth.UserID,
+				TokenID:   plan.Auth.TokenID,
+				RequestID: requestID,
+				ModelName: clientModel,
+				ChannelID: ch.ID,
+				IsStream:  true,
+			})
 			return nil
 		}
 
@@ -347,6 +375,18 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 		// Success — commit quota and return
 		actualTokens := s.calculateActualTokens(resp)
 		_ = s.commitQuota(ctx, reservation.ReservationId, actualTokens, true)
+		s.ingestUsageLog(ctx, usageLogInput{
+			UserID:           plan.Auth.UserID,
+			TokenID:          plan.Auth.TokenID,
+			RequestID:        requestID,
+			ModelName:        clientModel,
+			Quota:            actualTokens,
+			PromptTokens:     int64(resp.Usage.PromptTokens),
+			CompletionTokens: int64(resp.Usage.CompletionTokens),
+			ChannelID:        ch.ID,
+			ElapsedTime:      time.Since(startedAt).Milliseconds(),
+			IsStream:         false,
+		})
 		s.writeJSON(w, http.StatusOK, resp)
 		return nil
 	})
@@ -356,7 +396,8 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Request, provider relayprovider.Provider, req *relayprovider.ChatCompletionsRequest, reservation *billingv1.ReserveQuotaResponse) {
+func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Request, provider relayprovider.Provider, req *relayprovider.ChatCompletionsRequest, reservation *billingv1.ReserveQuotaResponse, logInput usageLogInput) {
+	startedAt := time.Now()
 	chunkChan, err := provider.ChatCompletionsStream(r.Context(), req)
 	if err != nil {
 		// 流式请求失败，释放预扣配额
@@ -379,13 +420,19 @@ func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Transfer-Encoding", "chunked")
 
 	totalTokens := int64(0)
+	promptTokens := int64(0)
+	completionTokens := int64(0)
+	estimatedTokens := int64(0)
 	streamError := false
 
 	for chunk := range chunkChan {
-		// StreamChunk 没有 Usage 字段，我们需要估算 tokens
-		// 这里简单使用字符数除以 4 来估算
+		if chunk.Usage.TotalTokens > 0 {
+			totalTokens = int64(chunk.Usage.TotalTokens)
+			promptTokens = int64(chunk.Usage.PromptTokens)
+			completionTokens = int64(chunk.Usage.CompletionTokens)
+		}
 		for _, choice := range chunk.Choices {
-			totalTokens += int64(len(choice.Delta.Content) / 4)
+			estimatedTokens += int64(len(choice.Delta.Content) / 4)
 		}
 
 		jsonData, err := sonic.Marshal(chunk)
@@ -403,9 +450,56 @@ func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Requ
 
 	// 流式请求完成，提交配额
 	if !streamError {
+		if totalTokens == 0 {
+			totalTokens = estimatedTokens
+			completionTokens = estimatedTokens
+		}
 		_ = s.commitQuota(r.Context(), reservation.ReservationId, totalTokens, true)
+		logInput.Quota = totalTokens
+		logInput.PromptTokens = promptTokens
+		logInput.CompletionTokens = completionTokens
+		logInput.ElapsedTime = time.Since(startedAt).Milliseconds()
+		s.ingestUsageLog(r.Context(), logInput)
 	} else {
 		_ = s.releaseQuota(r.Context(), reservation.ReservationId, "stream error")
+	}
+}
+
+type usageLogInput struct {
+	UserID           int64
+	TokenID          int64
+	RequestID        string
+	ModelName        string
+	Quota            int64
+	PromptTokens     int64
+	CompletionTokens int64
+	ChannelID        int64
+	ElapsedTime      int64
+	IsStream         bool
+}
+
+func (s *HTTPServer) ingestUsageLog(ctx context.Context, in usageLogInput) {
+	if s.logClient == nil {
+		return
+	}
+	message := fmt.Sprintf("model=%s quota=%d prompt_tokens=%d completion_tokens=%d channel=%d", in.ModelName, in.Quota, in.PromptTokens, in.CompletionTokens, in.ChannelID)
+	_, err := s.logClient.IngestLog(ctx, &logv1.IngestLogRequest{
+		Level:            "consume",
+		Message:          message,
+		Source:           "relay-gateway",
+		RequestId:        in.RequestID,
+		UserId:           in.UserID,
+		TokenName:        fmt.Sprintf("token-%d", in.TokenID),
+		ModelName:        in.ModelName,
+		Quota:            in.Quota,
+		PromptTokens:     in.PromptTokens,
+		CompletionTokens: in.CompletionTokens,
+		ChannelId:        in.ChannelID,
+		ElapsedTime:      in.ElapsedTime,
+		IsStream:         in.IsStream,
+	})
+	if err != nil {
+		applogger.Log.Warn("failed to ingest usage log", zap.Error(err))
 	}
 }
 

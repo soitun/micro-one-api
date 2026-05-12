@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"google.golang.org/grpc"
@@ -32,13 +33,22 @@ func (s *LogService) GetLog(ctx context.Context, req *logv1.GetLogRequest) (*log
 		return nil, err
 	}
 	return &logv1.GetLogResponse{
-		Id:        entry.ID,
-		Level:     entry.Level,
-		Message:   entry.Message,
-		Source:    entry.Source,
-		RequestId: entry.RequestID,
-		UserId:    entry.UserID,
-		CreatedAt: entry.CreatedAt.Unix(),
+		Id:               entry.ID,
+		Level:            entry.Level,
+		Message:          entry.Message,
+		Source:           entry.Source,
+		RequestId:        entry.RequestID,
+		UserId:           entry.UserID,
+		CreatedAt:        entry.CreatedAt.Unix(),
+		Username:         entry.Username,
+		TokenName:        entry.TokenName,
+		ModelName:        entry.ModelName,
+		Quota:            entry.Quota,
+		PromptTokens:     entry.PromptTokens,
+		CompletionTokens: entry.CompletionTokens,
+		ChannelId:        entry.ChannelID,
+		ElapsedTime:      entry.ElapsedTime,
+		IsStream:         entry.IsStream,
 	}, nil
 }
 
@@ -49,31 +59,53 @@ func (s *LogService) ListLogs(ctx context.Context, req *logv1.ListLogsRequest) (
 	}
 	items := make([]*logv1.GetLogResponse, len(entries))
 	for i, e := range entries {
-		items[i] = &logv1.GetLogResponse{
-			Id:        e.ID,
-			Level:     e.Level,
-			Message:   e.Message,
-			Source:    e.Source,
-			RequestId: e.RequestID,
-			UserId:    e.UserID,
-			CreatedAt: e.CreatedAt.Unix(),
-		}
+		items[i] = logEntryToProto(e)
 	}
 	return &logv1.ListLogsResponse{Items: items, Total: total}, nil
 }
 
 func (s *LogService) IngestLog(ctx context.Context, req *logv1.IngestLogRequest) (*logv1.IngestLogResponse, error) {
 	entry := &biz.LogEntry{
-		Level:     req.Level,
-		Message:   req.Message,
-		Source:    req.Source,
-		RequestID: req.RequestId,
-		UserID:    req.UserId,
+		Level:            req.Level,
+		Message:          req.Message,
+		Source:           req.Source,
+		RequestID:        req.RequestId,
+		UserID:           req.UserId,
+		Username:         req.Username,
+		TokenName:        req.TokenName,
+		ModelName:        req.ModelName,
+		Quota:            req.Quota,
+		PromptTokens:     req.PromptTokens,
+		CompletionTokens: req.CompletionTokens,
+		ChannelID:        req.ChannelId,
+		ElapsedTime:      req.ElapsedTime,
+		IsStream:         req.IsStream,
 	}
 	if err := s.uc.IngestLog(ctx, entry); err != nil {
 		return nil, err
 	}
 	return &logv1.IngestLogResponse{Id: entry.ID}, nil
+}
+
+func logEntryToProto(e *biz.LogEntry) *logv1.GetLogResponse {
+	return &logv1.GetLogResponse{
+		Id:               e.ID,
+		Level:            e.Level,
+		Message:          e.Message,
+		Source:           e.Source,
+		RequestId:        e.RequestID,
+		UserId:           e.UserID,
+		CreatedAt:        e.CreatedAt.Unix(),
+		Username:         e.Username,
+		TokenName:        e.TokenName,
+		ModelName:        e.ModelName,
+		Quota:            e.Quota,
+		PromptTokens:     e.PromptTokens,
+		CompletionTokens: e.CompletionTokens,
+		ChannelId:        e.ChannelID,
+		ElapsedTime:      e.ElapsedTime,
+		IsStream:         e.IsStream,
+	}
 }
 
 // HTTP handler implementations
@@ -207,23 +239,38 @@ func (s *LogService) HandleOneAPIUserLogStats(w http.ResponseWriter, r *http.Req
 	for _, entry := range entries {
 		countByType[entry.Level]++
 	}
+	usage, err := s.uc.UserUsageStats(r.Context(), userID, time.Time{}, time.Time{})
+	if err != nil {
+		writeOneAPI(w, http.StatusOK, false, err.Error(), nil)
+		return
+	}
 	writeOneAPI(w, http.StatusOK, true, "", map[string]interface{}{
 		"total":         total,
 		"sampled_count": len(entries),
 		"count_by_type": countByType,
+		"usage":         usage,
 	})
 }
 
 func logEntryToMap(e *biz.LogEntry) map[string]interface{} {
 	return map[string]interface{}{
-		"id":         e.ID,
-		"level":      e.Level,
-		"type":       e.Level,
-		"message":    e.Message,
-		"source":     e.Source,
-		"request_id": e.RequestID,
-		"user_id":    e.UserID,
-		"created_at": e.CreatedAt.Unix(),
+		"id":                e.ID,
+		"level":             e.Level,
+		"type":              e.Level,
+		"message":           e.Message,
+		"source":            e.Source,
+		"request_id":        e.RequestID,
+		"user_id":           e.UserID,
+		"created_at":        e.CreatedAt.Unix(),
+		"username":          e.Username,
+		"token_name":        e.TokenName,
+		"model_name":        e.ModelName,
+		"quota":             e.Quota,
+		"prompt_tokens":     e.PromptTokens,
+		"completion_tokens": e.CompletionTokens,
+		"channel":           e.ChannelID,
+		"elapsed_time":      e.ElapsedTime,
+		"is_stream":         e.IsStream,
 	}
 }
 

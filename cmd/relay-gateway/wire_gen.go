@@ -14,19 +14,20 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"micro-one-api/internal/pkg/xconfig"
-	"micro-one-api/api/channel/v1"
 	billingv1 "micro-one-api/api/billing/v1"
+	"micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
+	logv1 "micro-one-api/api/log/v1"
 	appauth "micro-one-api/internal/pkg/auth"
 	appregistry "micro-one-api/internal/pkg/registry"
 	apptls "micro-one-api/internal/pkg/tls"
+	"micro-one-api/internal/pkg/xconfig"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaycfg "micro-one-api/internal/relay/config"
 	relaydata "micro-one-api/internal/relay/data"
 	relayprovider "micro-one-api/internal/relay/provider"
-	relayservice "micro-one-api/internal/relay/service"
 	"micro-one-api/internal/relay/server"
+	relayservice "micro-one-api/internal/relay/service"
 )
 
 func loadConfig(confPath string) (*relaycfg.Config, error) {
@@ -115,15 +116,18 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	resolver.SetStatic("identity-service", cfg.Clients.Identity.Endpoint)
 	resolver.SetStatic("channel-service", cfg.Clients.Channel.Endpoint)
 	resolver.SetStatic("billing-service", cfg.Clients.Billing.Endpoint)
+	resolver.SetStatic("log-service", cfg.Clients.Log.Endpoint)
 
-	var identityConn, channelConn, billingConn *grpc.ClientConn
+	var identityConn, channelConn, billingConn, logConn *grpc.ClientConn
 	var identityClient identityv1.IdentityServiceClient
 	var channelClient channelv1.ChannelServiceClient
 	var billingClient billingv1.BillingServiceClient
+	var logClient logv1.LogServiceClient
 
 	identityEndpoint, _ := resolver.ResolveGRPC(context.Background(), "identity-service")
 	channelEndpoint, _ := resolver.ResolveGRPC(context.Background(), "channel-service")
 	billingEndpoint, _ := resolver.ResolveGRPC(context.Background(), "billing-service")
+	logEndpoint, _ := resolver.ResolveGRPC(context.Background(), "log-service")
 
 	if enableAuth && tlsConfig.Enabled {
 		identityConn, err = createAuthenticatedClient(identityEndpoint, tlsConfig, serviceAuth)
@@ -140,6 +144,13 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 			identityConn.Close()
 			channelConn.Close()
 			return nil, nil, fmt.Errorf("failed to create billing client: %w", err)
+		}
+		logConn, err = createAuthenticatedClient(logEndpoint, tlsConfig, serviceAuth)
+		if err != nil {
+			identityConn.Close()
+			channelConn.Close()
+			billingConn.Close()
+			return nil, nil, fmt.Errorf("failed to create log client: %w", err)
 		}
 	} else {
 		identityConn, err = grpc.NewClient(identityEndpoint,
@@ -160,11 +171,20 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 			channelConn.Close()
 			return nil, nil, fmt.Errorf("failed to connect to billing: %w", err)
 		}
+		logConn, err = grpc.NewClient(logEndpoint,
+			grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			identityConn.Close()
+			channelConn.Close()
+			billingConn.Close()
+			return nil, nil, fmt.Errorf("failed to connect to log: %w", err)
+		}
 	}
 
 	identityClient = identityv1.NewIdentityServiceClient(identityConn)
 	channelClient = channelv1.NewChannelServiceClient(channelConn)
 	billingClient = billingv1.NewBillingServiceClient(billingConn)
+	logClient = logv1.NewLogServiceClient(logConn)
 
 	providerFactory := relayprovider.NewProviderFactory(providerTimeout)
 	modelMapper := newModelMapper(cfg)
@@ -175,7 +195,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	channelAdapter := relaydata.NewChannelAdapter(channelClient)
 	relayUsecase := relaybiz.NewRelayUsecase(identityAdapter, channelAdapter, modelMapper, retryPolicy)
 
-	httpServer := server.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
+	httpServer := server.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase, logClient)
 
 	srv := khttp.NewServer(khttp.Address(cfg.Server.HTTP.Addr), khttp.Timeout(providerTimeout))
 	httpServer.RegisterRoutes(srv)
@@ -198,6 +218,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 		identityConn.Close()
 		channelConn.Close()
 		billingConn.Close()
+		logConn.Close()
 	}
 
 	return app, cleanup, nil

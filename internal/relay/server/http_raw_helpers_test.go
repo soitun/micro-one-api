@@ -7,6 +7,7 @@ import (
 	channelv1 "micro-one-api/api/channel/v1"
 	commonv1 "micro-one-api/api/common/v1"
 	identityv1 "micro-one-api/api/identity/v1"
+	logv1 "micro-one-api/api/log/v1"
 
 	"google.golang.org/grpc"
 )
@@ -60,6 +61,16 @@ func (c rawChannelClient) GetChannel(ctx context.Context, req *channelv1.GetChan
 			Models:  "gpt-3.5-turbo",
 		},
 	}, nil
+}
+
+type rawLogClient struct {
+	logv1.LogServiceClient
+	entries []*logv1.IngestLogRequest
+}
+
+func (c *rawLogClient) IngestLog(ctx context.Context, req *logv1.IngestLogRequest, opts ...grpc.CallOption) (*logv1.IngestLogResponse, error) {
+	c.entries = append(c.entries, req)
+	return &logv1.IngestLogResponse{Id: int64(len(c.entries))}, nil
 }
 
 type rawBillingClient struct {

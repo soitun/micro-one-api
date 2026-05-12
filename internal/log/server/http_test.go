@@ -99,6 +99,19 @@ func TestLogHTTPUserLogStatsReturnsCurrentUserStats(t *testing.T) {
 	if !strings.Contains(body, `"info":1`) || !strings.Contains(body, `"error":1`) {
 		t.Fatalf("stats response missing type counts: %s", body)
 	}
+	for _, want := range []string{
+		`"usage"`,
+		`"day":"2026-05-12"`,
+		`"model_name":"gpt-4o-mini"`,
+		`"request_count":2`,
+		`"quota":30`,
+		`"prompt_tokens":13`,
+		`"completion_tokens":17`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stats response missing usage field %s: %s", want, body)
+		}
+	}
 }
 
 type logHTTPIdentityClient struct {
@@ -122,11 +135,11 @@ func newLogHTTPServerForTest(t *testing.T, identityClient identityv1.IdentitySer
 	t.Helper()
 	repo := logdata.NewMemoryRepositoryForTest()
 	uc := logbiz.NewLogUsecase(repo)
-	now := time.Now()
+	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
 	for _, entry := range []*logbiz.LogEntry{
 		{Level: "info", Message: "target from user one", Source: "relay", UserID: 1, CreatedAt: now},
-		{Level: "info", Message: "target from user two", Source: "relay", UserID: 2, CreatedAt: now},
-		{Level: "error", Message: "failure from user two", Source: "relay", UserID: 2, CreatedAt: now},
+		{Level: "info", Message: "target from user two", Source: "relay", UserID: 2, CreatedAt: now, ModelName: "gpt-4o-mini", Quota: 10, PromptTokens: 4, CompletionTokens: 6},
+		{Level: "error", Message: "failure from user two", Source: "relay", UserID: 2, CreatedAt: now, ModelName: "gpt-4o-mini", Quota: 20, PromptTokens: 9, CompletionTokens: 11},
 	} {
 		if err := uc.IngestLog(context.Background(), entry); err != nil {
 			t.Fatal(err)

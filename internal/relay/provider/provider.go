@@ -95,6 +95,7 @@ type StreamChunk struct {
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
+	Usage Usage `json:"usage,omitempty"`
 }
 
 // OpenAIProvider implements the Provider interface for OpenAI-compatible APIs

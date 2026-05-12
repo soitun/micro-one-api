@@ -94,6 +94,47 @@ func TestOpenAIProvider_ChatCompletionsStream(t *testing.T) {
 	}
 }
 
+func TestOpenAIProvider_ChatCompletionsStreamParsesUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunks := []string{
+			`data: {"id":"chunk1","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}`,
+			`data: {"id":"chunk2","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":3,"total_tokens":14}}`,
+			`data: [DONE]`,
+		}
+		for _, chunk := range chunks {
+			w.Write([]byte(chunk + "\n\n"))
+			w.(http.Flusher).Flush()
+		}
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenAIProvider(server.URL, "test-api-key", 30*time.Second)
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider() error = %v", err)
+	}
+
+	chunkChan, err := provider.ChatCompletionsStream(context.Background(), &ChatCompletionsRequest{
+		Model:    "gpt-4o-mini",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+		Stream:   true,
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletionsStream() error = %v", err)
+	}
+
+	var usage Usage
+	for chunk := range chunkChan {
+		if chunk.Usage.TotalTokens > 0 {
+			usage = chunk.Usage
+		}
+	}
+
+	if usage.PromptTokens != 11 || usage.CompletionTokens != 3 || usage.TotalTokens != 14 {
+		t.Fatalf("usage = %+v, want prompt=11 completion=3 total=14", usage)
+	}
+}
+
 func TestOpenAIProvider_ChatCompletionsStream_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

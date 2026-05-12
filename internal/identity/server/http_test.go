@@ -375,6 +375,38 @@ func TestIdentityHTTPDashboardReturnsAccountSnapshot(t *testing.T) {
 	}
 }
 
+func TestIdentityHTTPDashboardBillingUsageReturnsOpenAIShape(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
+		snapshot: &commonv1.AccountSnapshot{
+			Quota:     1000,
+			UsedQuota: 123,
+		},
+	})
+
+	for _, path := range []string{"/dashboard/billing/usage", "/v1/dashboard/billing/usage"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+authToken)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200, body=%s", path, rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		for _, want := range []string{
+			`"object":"list"`,
+			`"total_usage":12300`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s response missing %s: %s", path, want, body)
+			}
+		}
+	}
+}
+
 func TestIdentityHTTPTopUpRequiresAuth(t *testing.T) {
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -207,6 +208,10 @@ func (r *testLogRepo) ListByUser(ctx context.Context, userID int64, page, pageSi
 		}
 	}
 	return result, int64(len(result)), nil
+}
+
+func (r *testLogRepo) UsageByUser(ctx context.Context, userID int64, startTime, endTime time.Time) ([]*logbiz.UsageStat, error) {
+	return nil, nil
 }
 
 func setupLogService(t *testing.T, addr string) (func(), logv1.LogServiceClient) {

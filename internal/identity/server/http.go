@@ -79,6 +79,12 @@ func NewHTTPServer(addr string, uc *biz.IdentityUsecase, oauthRegistry *oauth.Pr
 	srv.HandleFunc("/api/user/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		handleUserDashboard(w, r, uc, billingClient)
 	})
+	srv.HandleFunc("/dashboard/billing/usage", func(w http.ResponseWriter, r *http.Request) {
+		handleDashboardBillingUsage(w, r, uc, billingClient)
+	})
+	srv.HandleFunc("/v1/dashboard/billing/usage", func(w http.ResponseWriter, r *http.Request) {
+		handleDashboardBillingUsage(w, r, uc, billingClient)
+	})
 	srv.HandleFunc("/api/user/topup", func(w http.ResponseWriter, r *http.Request) {
 		handleUserTopUp(w, r, uc, billingClient)
 	})
@@ -225,6 +231,37 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 		"group_ratio":   account.GetGroupRatio(),
 		"frozen_quota":  account.GetFrozenQuota(),
 	}})
+}
+
+func handleDashboardBillingUsage(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, billingClient billingv1.BillingServiceClient) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": map[string]interface{}{"message": "unauthorized", "type": "one_api_error"}})
+		return
+	}
+	if billingClient == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"error": map[string]interface{}{"message": "billing service unavailable", "type": "one_api_error"}})
+		return
+	}
+	resp, err := billingClient.GetAccountSnapshot(r.Context(), &billingv1.GetAccountSnapshotRequest{
+		UserId: strconv.FormatInt(snapshot.UserID, 10),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"error": map[string]interface{}{"message": err.Error(), "type": "one_api_error"}})
+		return
+	}
+	usedQuota := int64(0)
+	if resp.GetSnapshot() != nil {
+		usedQuota = resp.GetSnapshot().GetUsedQuota()
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"object":      "list",
+		"total_usage": usedQuota * 100,
+	})
 }
 
 func handleUserTopUp(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, billingClient billingv1.BillingServiceClient) {

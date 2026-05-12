@@ -109,6 +109,7 @@ func TestHTTPServerRawRelayForwardsResponseAndCommitsBilling(t *testing.T) {
 	identityClient := rawIdentityClient{}
 	channelClient := rawChannelClient{baseURL: upstream.URL + "/v1", key: "sk-upstream"}
 	billingClient := &rawBillingClient{}
+	logClient := &rawLogClient{}
 	relayUsecase := relaybiz.NewRelayUsecase(
 		relaydata.NewIdentityAdapter(identityClient),
 		relaydata.NewChannelAdapter(channelClient),
@@ -121,6 +122,7 @@ func TestHTTPServerRawRelayForwardsResponseAndCommitsBilling(t *testing.T) {
 		billingClient,
 		relayprovider.NewProviderFactory(time.Second),
 		relayUsecase,
+		logClient,
 	)
 	srv := khttp.NewServer()
 	httpServer.RegisterRoutes(srv)
@@ -147,6 +149,146 @@ func TestHTTPServerRawRelayForwardsResponseAndCommitsBilling(t *testing.T) {
 	}
 	if billingClient.releases != 0 {
 		t.Fatalf("releases = %d, want 0", billingClient.releases)
+	}
+	if len(logClient.entries) != 1 {
+		t.Fatalf("usage logs = %d, want 1", len(logClient.entries))
+	}
+	if got := logClient.entries[0]; got.ModelName != "text-embedding-ada-002" || got.Quota != 17 || got.ChannelId != 11 {
+		t.Fatalf("usage log mismatch: model=%q quota=%d channel=%d", got.ModelName, got.Quota, got.ChannelId)
+	}
+}
+
+func TestHTTPServerChatCompletionWritesUsageLogOnSuccess(t *testing.T) {
+	t.Setenv("PROVIDER_DISABLE_SSRF_CHECK", "true")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-test",
+			"object":"chat.completion",
+			"created":1710000000,
+			"model":"gpt-4o-mini",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":7,"completion_tokens":5,"total_tokens":12}
+		}`))
+	}))
+	defer upstream.Close()
+
+	identityClient := rawIdentityClient{}
+	channelClient := rawChannelClient{baseURL: upstream.URL + "/v1", key: "sk-upstream"}
+	billingClient := &rawBillingClient{}
+	logClient := &rawLogClient{}
+	relayUsecase := relaybiz.NewRelayUsecase(
+		relaydata.NewIdentityAdapter(identityClient),
+		relaydata.NewChannelAdapter(channelClient),
+		nil,
+		&relaybiz.RetryPolicy{MaxAttempts: 1},
+	)
+	httpServer := NewHTTPServer(
+		identityClient,
+		channelClient,
+		billingClient,
+		relayprovider.NewProviderFactory(time.Second),
+		relayUsecase,
+		logClient,
+	)
+	srv := khttp.NewServer()
+	httpServer.RegisterRoutes(srv)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"ping"}]}`))
+	req.Header.Set("Authorization", "Bearer user-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(logClient.entries) != 1 {
+		t.Fatalf("usage logs = %d, want 1", len(logClient.entries))
+	}
+	got := logClient.entries[0]
+	if got.UserId != 42 {
+		t.Fatalf("log user_id = %d, want 42", got.UserId)
+	}
+	if got.Source != "relay-gateway" || got.Level != "consume" {
+		t.Fatalf("log level/source = %q/%q", got.Level, got.Source)
+	}
+	if got.ModelName != "gpt-4o-mini" {
+		t.Fatalf("log model_name = %q, want gpt-4o-mini", got.ModelName)
+	}
+	if got.Quota != 12 || got.PromptTokens != 7 || got.CompletionTokens != 5 {
+		t.Fatalf("log usage = quota:%d prompt:%d completion:%d", got.Quota, got.PromptTokens, got.CompletionTokens)
+	}
+	if got.ChannelId != 11 || got.TokenName != "token-7" || got.IsStream {
+		t.Fatalf("log metadata mismatch: channel=%d token=%q stream=%v", got.ChannelId, got.TokenName, got.IsStream)
+	}
+}
+
+func TestHTTPServerStreamingChatCompletionWritesPreciseUsageLogOnSuccess(t *testing.T) {
+	t.Setenv("PROVIDER_DISABLE_SSRF_CHECK", "true")
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunks := []string{
+			`data: {"id":"chunk1","object":"chat.completion.chunk","created":1710000000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"pong"},"finish_reason":null}]}`,
+			`data: {"id":"chunk2","object":"chat.completion.chunk","created":1710000000,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}}`,
+			`data: [DONE]`,
+		}
+		for _, chunk := range chunks {
+			_, _ = w.Write([]byte(chunk + "\n\n"))
+			w.(http.Flusher).Flush()
+		}
+	}))
+	defer upstream.Close()
+
+	identityClient := rawIdentityClient{}
+	channelClient := rawChannelClient{baseURL: upstream.URL + "/v1", key: "sk-upstream"}
+	billingClient := &rawBillingClient{}
+	logClient := &rawLogClient{}
+	relayUsecase := relaybiz.NewRelayUsecase(
+		relaydata.NewIdentityAdapter(identityClient),
+		relaydata.NewChannelAdapter(channelClient),
+		nil,
+		&relaybiz.RetryPolicy{MaxAttempts: 1},
+	)
+	httpServer := NewHTTPServer(
+		identityClient,
+		channelClient,
+		billingClient,
+		relayprovider.NewProviderFactory(time.Second),
+		relayUsecase,
+		logClient,
+	)
+	srv := khttp.NewServer()
+	httpServer.RegisterRoutes(srv)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"ping"}]}`))
+	req.Header.Set("Authorization", "Bearer user-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if billingClient.commits != 1 || billingClient.releases != 0 {
+		t.Fatalf("billing commits=%d releases=%d", billingClient.commits, billingClient.releases)
+	}
+	if len(logClient.entries) != 1 {
+		t.Fatalf("usage logs = %d, want 1", len(logClient.entries))
+	}
+	got := logClient.entries[0]
+	if !got.IsStream {
+		t.Fatalf("log is_stream = false, want true")
+	}
+	if got.Quota != 13 || got.PromptTokens != 9 || got.CompletionTokens != 4 {
+		t.Fatalf("log usage = quota:%d prompt:%d completion:%d", got.Quota, got.PromptTokens, got.CompletionTokens)
+	}
+	if got.ModelName != "gpt-4o-mini" || got.ChannelId != 11 || got.UserId != 42 {
+		t.Fatalf("log metadata mismatch: model=%q channel=%d user=%d", got.ModelName, got.ChannelId, got.UserId)
 	}
 }
 
