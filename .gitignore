@@ -46,4 +46,7 @@ keys/
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Local git worktrees
+.worktrees/
 test/e2e/e2e-test
