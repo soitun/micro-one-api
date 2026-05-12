@@ -130,3 +130,31 @@ func TestMemoryRepository_ListByUserFiltersKeyword(t *testing.T) {
 		t.Fatalf("unexpected entries: %+v", entries)
 	}
 }
+
+func TestMemoryRepository_Delete(t *testing.T) {
+	repo := NewMemoryRepositoryForTest()
+	base := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+	_ = repo.Create(context.Background(), &biz.LogEntry{Level: "info", Message: "old target", Source: "relay", UserID: 1, CreatedAt: base.Add(-2 * time.Hour)})
+	_ = repo.Create(context.Background(), &biz.LogEntry{Level: "error", Message: "old other level", Source: "relay", UserID: 1, CreatedAt: base.Add(-2 * time.Hour)})
+	_ = repo.Create(context.Background(), &biz.LogEntry{Level: "info", Message: "new target", Source: "relay", UserID: 1, CreatedAt: base.Add(time.Hour)})
+
+	deleted, err := repo.Delete(context.Background(), biz.DeleteLogsFilter{
+		Level:   "info",
+		Source:  "relay",
+		UserID:  1,
+		EndTime: base,
+	})
+	if err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	entries, total, err := repo.List(context.Background(), 1, 20, "", "", "")
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if total != 2 || len(entries) != 2 {
+		t.Fatalf("remaining total=%d len=%d, want 2", total, len(entries))
+	}
+}

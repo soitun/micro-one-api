@@ -110,6 +110,13 @@ func (r *Repository) Create(ctx context.Context, entry *biz.LogEntry) error {
 	return r.createMemory(entry)
 }
 
+func (r *Repository) Delete(ctx context.Context, filter biz.DeleteLogsFilter) (int64, error) {
+	if r.db != nil {
+		return r.deleteDB(ctx, filter)
+	}
+	return r.deleteMemory(filter), nil
+}
+
 func (r *Repository) UsageByUser(ctx context.Context, userID int64, startTime, endTime time.Time) ([]*biz.UsageStat, error) {
 	if r.db != nil {
 		return r.usageByUserDB(ctx, userID, startTime, endTime)
@@ -221,6 +228,24 @@ func (r *Repository) createDB(ctx context.Context, entry *biz.LogEntry) error {
 	}
 	entry.ID = m.ID
 	return nil
+}
+
+func (r *Repository) deleteDB(ctx context.Context, filter biz.DeleteLogsFilter) (int64, error) {
+	query := r.db.WithContext(ctx).Where("created_at <= ?", filter.EndTime.Unix())
+	if !filter.StartTime.IsZero() {
+		query = query.Where("created_at >= ?", filter.StartTime.Unix())
+	}
+	if filter.Level != "" {
+		query = query.Where("level = ?", filter.Level)
+	}
+	if filter.Source != "" {
+		query = query.Where("source = ?", filter.Source)
+	}
+	if filter.UserID != 0 {
+		query = query.Where("user_id = ?", filter.UserID)
+	}
+	result := query.Delete(&logModel{})
+	return result.RowsAffected, result.Error
 }
 
 func (r *Repository) usageByUserDB(ctx context.Context, userID int64, startTime, endTime time.Time) ([]*biz.UsageStat, error) {
@@ -339,6 +364,32 @@ func (r *Repository) createMemory(entry *biz.LogEntry) error {
 	entry.ID = r.seq
 	r.mem[entry.ID] = entry
 	return nil
+}
+
+func (r *Repository) deleteMemory(filter biz.DeleteLogsFilter) int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var deleted int64
+	for id, entry := range r.mem {
+		if filter.Level != "" && entry.Level != filter.Level {
+			continue
+		}
+		if filter.Source != "" && entry.Source != filter.Source {
+			continue
+		}
+		if filter.UserID != 0 && entry.UserID != filter.UserID {
+			continue
+		}
+		if !filter.StartTime.IsZero() && entry.CreatedAt.Before(filter.StartTime) {
+			continue
+		}
+		if entry.CreatedAt.After(filter.EndTime) {
+			continue
+		}
+		delete(r.mem, id)
+		deleted++
+	}
+	return deleted
 }
 
 func (r *Repository) usageByUserMemory(userID int64, startTime, endTime time.Time) []*biz.UsageStat {

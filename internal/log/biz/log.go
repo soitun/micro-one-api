@@ -41,6 +41,14 @@ type UsageStat struct {
 	CompletionTokens int64  `json:"completion_tokens"`
 }
 
+type DeleteLogsFilter struct {
+	Level     string
+	Source    string
+	UserID    int64
+	StartTime time.Time
+	EndTime   time.Time
+}
+
 // LogRepo is the repository interface for log persistence.
 type LogRepo interface {
 	Get(ctx context.Context, id int64) (*LogEntry, error)
@@ -48,6 +56,7 @@ type LogRepo interface {
 	ListByUser(ctx context.Context, userID int64, page, pageSize int32, level, keyword string) ([]*LogEntry, int64, error)
 	UsageByUser(ctx context.Context, userID int64, startTime, endTime time.Time) ([]*UsageStat, error)
 	Create(ctx context.Context, entry *LogEntry) error
+	Delete(ctx context.Context, filter DeleteLogsFilter) (int64, error)
 }
 
 // LogUsecase implements business logic for log-service.
@@ -92,4 +101,14 @@ func (uc *LogUsecase) IngestLog(ctx context.Context, entry *LogEntry) error {
 		entry.CreatedAt = time.Now()
 	}
 	return uc.repo.Create(ctx, entry)
+}
+
+func (uc *LogUsecase) DeleteLogs(ctx context.Context, filter DeleteLogsFilter) (int64, error) {
+	if filter.EndTime.IsZero() {
+		return 0, errors.New("end_time is required")
+	}
+	if !filter.StartTime.IsZero() && filter.StartTime.After(filter.EndTime) {
+		return 0, errors.New("start_time must be before end_time")
+	}
+	return uc.repo.Delete(ctx, filter)
 }

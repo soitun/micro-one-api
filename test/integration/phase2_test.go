@@ -214,6 +214,10 @@ func (r *testLogRepo) UsageByUser(ctx context.Context, userID int64, startTime, 
 	return nil, nil
 }
 
+func (r *testLogRepo) Delete(ctx context.Context, filter logbiz.DeleteLogsFilter) (int64, error) {
+	return 0, nil
+}
+
 func setupLogService(t *testing.T, addr string) (func(), logv1.LogServiceClient) {
 	repo := &testLogRepo{}
 	uc := logbiz.NewLogUsecase(repo)

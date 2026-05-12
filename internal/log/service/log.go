@@ -185,6 +185,55 @@ func (s *LogService) HandleIngestLog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, logEntryToMap(entry))
 }
 
+func (s *LogService) HandleDeleteLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	q := r.URL.Query()
+	endTime, err := parseUnixQuery(q.Get("end_time"))
+	if err != nil || endTime.IsZero() {
+		writeError(w, http.StatusBadRequest, "end_time is required")
+		return
+	}
+	startTime, err := parseUnixQuery(q.Get("start_time"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid start_time")
+		return
+	}
+	var userID int64
+	if raw := q.Get("user_id"); raw != "" {
+		userID, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || userID < 0 {
+			writeError(w, http.StatusBadRequest, "invalid user_id")
+			return
+		}
+	}
+	deleted, err := s.uc.DeleteLogs(r.Context(), biz.DeleteLogsFilter{
+		Level:     q.Get("type"),
+		Source:    q.Get("source"),
+		UserID:    userID,
+		StartTime: startTime,
+		EndTime:   endTime,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"deleted": deleted})
+}
+
+func parseUnixQuery(raw string) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return time.Time{}, err
+	}
+	return time.Unix(value, 0), nil
+}
+
 func (s *LogService) HandleOneAPIUserLogs(w http.ResponseWriter, r *http.Request, identityClient identityv1.IdentityServiceClient) {
 	if r.Method != http.MethodGet {
 		writeOneAPI(w, http.StatusMethodNotAllowed, false, "method not allowed", nil)

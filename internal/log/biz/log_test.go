@@ -122,6 +122,30 @@ func (m *mockLogRepo) Create(ctx context.Context, entry *LogEntry) error {
 	return nil
 }
 
+func (m *mockLogRepo) Delete(ctx context.Context, filter DeleteLogsFilter) (int64, error) {
+	var deleted int64
+	for id, entry := range m.entries {
+		if filter.Level != "" && entry.Level != filter.Level {
+			continue
+		}
+		if filter.Source != "" && entry.Source != filter.Source {
+			continue
+		}
+		if filter.UserID != 0 && entry.UserID != filter.UserID {
+			continue
+		}
+		if !filter.StartTime.IsZero() && entry.CreatedAt.Before(filter.StartTime) {
+			continue
+		}
+		if !filter.EndTime.IsZero() && entry.CreatedAt.After(filter.EndTime) {
+			continue
+		}
+		delete(m.entries, id)
+		deleted++
+	}
+	return deleted, nil
+}
+
 func newMockLogRepo(entries ...*LogEntry) *mockLogRepo {
 	m := &mockLogRepo{entries: make(map[int64]*LogEntry)}
 	for _, e := range entries {
@@ -152,6 +176,41 @@ func TestLogUsecase_GetLog(t *testing.T) {
 			t.Fatalf("expected ErrLogNotFound, got %v", err)
 		}
 	})
+}
+
+func TestLogUsecase_DeleteLogsRequiresEndTimeAndDeletesMatchingScope(t *testing.T) {
+	base := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+	repo := newMockLogRepo(
+		&LogEntry{ID: 1, Level: "info", Source: "relay", UserID: 1, CreatedAt: base.Add(-2 * time.Hour)},
+		&LogEntry{ID: 2, Level: "error", Source: "relay", UserID: 1, CreatedAt: base.Add(-1 * time.Hour)},
+		&LogEntry{ID: 3, Level: "info", Source: "relay", UserID: 2, CreatedAt: base.Add(-1 * time.Hour)},
+		&LogEntry{ID: 4, Level: "info", Source: "relay", UserID: 1, CreatedAt: base.Add(time.Hour)},
+	)
+	uc := NewLogUsecase(repo)
+
+	if _, err := uc.DeleteLogs(context.Background(), DeleteLogsFilter{Level: "info"}); err == nil {
+		t.Fatal("expected missing end time error")
+	}
+
+	deleted, err := uc.DeleteLogs(context.Background(), DeleteLogsFilter{
+		Level:   "info",
+		UserID:  1,
+		EndTime: base,
+	})
+	if err != nil {
+		t.Fatalf("DeleteLogs() error = %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	if _, err := repo.Get(context.Background(), 1); err != ErrLogNotFound {
+		t.Fatalf("entry 1 should be deleted, err=%v", err)
+	}
+	for _, id := range []int64{2, 3, 4} {
+		if _, err := repo.Get(context.Background(), id); err != nil {
+			t.Fatalf("entry %d should remain, err=%v", id, err)
+		}
+	}
 }
 
 func TestLogUsecase_IngestLog(t *testing.T) {

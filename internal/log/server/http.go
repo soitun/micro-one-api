@@ -70,6 +70,8 @@ func NewHTTPServer(addr string, svc *service.LogService, identityClients ...iden
 			svc.HandleListLogs(w, r)
 		case http.MethodPost:
 			svc.HandleIngestLog(w, r)
+		case http.MethodDelete:
+			svc.HandleDeleteLogs(w, r)
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}

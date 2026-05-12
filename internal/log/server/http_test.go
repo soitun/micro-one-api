@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +112,43 @@ func TestLogHTTPUserLogStatsReturnsCurrentUserStats(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("stats response missing usage field %s: %s", want, body)
 		}
+	}
+}
+
+func TestLogHTTPDeleteLogsRequiresServiceAuthAndEndTime(t *testing.T) {
+	t.Setenv("SERVICE_TOKEN", "service-token")
+	srv := newLogHTTPServerForTest(t, &logHTTPIdentityClient{})
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/logs?type=info", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/v1/logs?type=info", nil)
+	req.Header.Set("Authorization", "Bearer service-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLogHTTPDeleteLogsDeletesMatchingServiceLogs(t *testing.T) {
+	t.Setenv("SERVICE_TOKEN", "service-token")
+	srv := newLogHTTPServerForTest(t, &logHTTPIdentityClient{})
+
+	end := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC).Unix()
+	req := httptest.NewRequest(http.MethodDelete, "/v1/logs?type=info&user_id=2&end_time="+strconv.FormatInt(end, 10), nil)
+	req.Header.Set("Authorization", "Bearer service-token")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"deleted":1`) {
+		t.Fatalf("delete response mismatch: %s", rec.Body.String())
 	}
 }
 
