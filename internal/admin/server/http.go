@@ -75,6 +75,10 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 			},
 		})
 	})
+	srv.HandleFunc("/api/notice", handleContentRoute(svc, "Notice"))
+	srv.HandleFunc("/api/about", handleContentRoute(svc, "About"))
+	srv.HandleFunc("/api/home_page_content", handleContentRoute(svc, "HomePageContent"))
+	srv.HandleFunc("/api/group", AdminAuth(handleGroupManagementUnsupported))
 
 	// Protected admin endpoints
 	srv.HandleFunc("/api/user/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -267,6 +271,57 @@ func writeOneAPIServiceResponse(w http.ResponseWriter, resp interface{}, err err
 		success, message = v.GetSuccess(), v.GetMessage()
 	}
 	writeJSON(w, http.StatusOK, apiResponse(success, message, resp))
+}
+
+func handleContentRoute(svc *service.AdminService, key string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			value, err := svc.GetOneAPIOption(r.Context(), key)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, apiResponse(false, err.Error(), nil))
+				return
+			}
+			writeJSON(w, http.StatusOK, apiResponse(true, "", value))
+			return
+		}
+		AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+			handleContentWrite(w, r, svc, key)
+		})(w, r)
+	}
+}
+
+func handleContentWrite(w http.ResponseWriter, r *http.Request, svc *service.AdminService, key string) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req struct {
+		Content string `json:"content"`
+		Value   string `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	value := req.Content
+	if value == "" {
+		value = req.Value
+	}
+	resp, err := svc.UpdateOneAPIOption(r.Context(), key, value)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse(resp.GetSuccess(), resp.GetMessage(), nil))
+}
+
+func handleGroupManagementUnsupported(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost, http.MethodPut, http.MethodDelete:
+		writeJSON(w, http.StatusNotImplemented, apiResponse(false, "group management storage is not implemented", nil))
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, dst interface{}) bool {

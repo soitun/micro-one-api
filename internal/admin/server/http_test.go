@@ -375,6 +375,70 @@ func TestAdminHTTPOptionOneAPIListAndUpdate(t *testing.T) {
 	}
 }
 
+func TestAdminHTTPContentRoutesExposeAndManageContent(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	store := &adminHTTPSystemOptionsStore{values: map[string]string{
+		"Notice":          "hello users",
+		"About":           "about text",
+		"HomePageContent": "home content",
+	}}
+	srv := newAdminHTTPOptionTestServer(store)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/notice", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"data":"hello users"`) {
+		t.Fatalf("notice get mismatch: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/notice", strings.NewReader(`{"content":"updated notice"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated notice update status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/notice", strings.NewReader(`{"content":"updated notice"}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("notice update mismatch: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if store.values["Notice"] != "updated notice" {
+		t.Fatalf("Notice was not updated: %+v", store.values)
+	}
+
+	for path, want := range map[string]string{
+		"/api/about":             `"data":"about text"`,
+		"/api/home_page_content": `"data":"home content"`,
+	} {
+		req = httptest.NewRequest(http.MethodGet, path, nil)
+		rec = httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("%s get mismatch: status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestAdminHTTPGroupManagementReturnsStableUnsupportedResponse(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPOptionTestServer(&adminHTTPSystemOptionsStore{values: map[string]string{}})
+	req := httptest.NewRequest(http.MethodPost, "/api/group", strings.NewReader(`{"group":"vip","ratio":2}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":false`) || !strings.Contains(rec.Body.String(), "group management storage is not implemented") {
+		t.Fatalf("group unsupported response mismatch: %s", rec.Body.String())
+	}
+}
+
 func TestAdminHTTPCreateChannel(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	channelClient := &adminHTTPChannelClient{}

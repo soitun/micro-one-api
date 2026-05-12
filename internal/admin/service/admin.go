@@ -906,6 +906,15 @@ func (s *AdminService) ListOneAPIOptions(context.Context) ([]OneAPIOption, error
 	return options, nil
 }
 
+func (s *AdminService) GetOneAPIOption(_ context.Context, key string) (string, error) {
+	if s.systemOptsRepo != nil {
+		if v, err := s.systemOptsRepo.Get(key); err == nil && v != "" {
+			return v, nil
+		}
+	}
+	return oneAPIOptionDefaults[key], nil
+}
+
 func (s *AdminService) UpdateOneAPIOption(_ context.Context, key, value string) (*adminv1.UpdateSystemOptionsResponse, error) {
 	if s.systemOptsRepo == nil {
 		return &adminv1.UpdateSystemOptionsResponse{
