@@ -85,9 +85,6 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	}))
 
 	// Protected admin endpoints
-	srv.HandleFunc("/api/user/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
-		handleOneAPIUsers(w, r, svc)
-	}))
 	srv.HandlePrefix("/api/user/disable/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIUserStatusAlias(w, r, svc, 2, "/api/user/disable/")
 	}))
@@ -97,6 +94,9 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandlePrefix("/api/user/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIUserByID(w, r, svc)
 	}))
+	srv.HandlePrefix("/api/user", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIUsers(w, r, svc)
+	}))
 	srv.HandleFunc("/v1/users", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleUsers(w, r, svc)
 	}))
@@ -104,9 +104,6 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 		handleUserByID(w, r, svc)
 	}))
 
-	srv.HandleFunc("/api/channel/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
-		handleOneAPIChannels(w, r, svc)
-	}))
 	srv.HandleFunc("/api/channel/models", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIChannelModels(w, r, svc)
 	}))
@@ -120,7 +117,7 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandleFunc("/v1/system/options", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleGetSystemOptions(w, r, svc)
 	}))
-	srv.HandleFunc("/api/option/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+	srv.HandlePrefix("/api/option", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIOptions(w, r, svc)
 	}))
 
@@ -133,11 +130,11 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandleFunc("/api/log/self/stat", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleLogStats(w, r, svc, true)
 	}))
-	srv.HandleFunc("/api/log/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
-		handleOneAPILogs(w, r, svc)
-	}))
 	srv.HandlePrefix("/api/log/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPILogByID(w, r, svc)
+	}))
+	srv.HandlePrefix("/api/log", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPILogs(w, r, svc)
 	}))
 
 	srv.HandleFunc("/v1/account", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -153,11 +150,11 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandlePrefix("/v1/redeem-codes/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleRedeemCodeByCode(w, r, svc)
 	}))
-	srv.HandleFunc("/api/redemption/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
-		handleRedeemCodes(w, r, svc)
-	}))
 	srv.HandlePrefix("/api/redemption/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIRedemptionByCode(w, r, svc)
+	}))
+	srv.HandlePrefix("/api/redemption", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIRedemptions(w, r, svc)
 	}))
 	srv.HandleFunc("/v1/topup", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleTopUp(w, r, svc)
@@ -188,6 +185,9 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	}))
 	srv.HandlePrefix("/api/channel/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIChannelByID(w, r, svc)
+	}))
+	srv.HandlePrefix("/api/channel", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIChannels(w, r, svc)
 	}))
 
 	return srv
@@ -423,9 +423,14 @@ func handleUsers(w http.ResponseWriter, r *http.Request, svc *service.AdminServi
 }
 
 func handleOneAPIUsers(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	trimmed := strings.Trim(r.URL.Path, "/")
+	if trimmed != "api/user" && trimmed != "api/user/search" {
+		handleOneAPIUserByID(w, r, svc)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
-		if strings.Trim(r.URL.Path, "/") == "api/user/search" {
+		if trimmed == "api/user/search" {
 			handleOneAPISearchUsers(w, r, svc)
 			return
 		}
@@ -457,7 +462,8 @@ func handleOneAPIUsers(w http.ResponseWriter, r *http.Request, svc *service.Admi
 }
 
 func handleOneAPIUserByID(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
-	if strings.Trim(r.URL.Path, "/") == "api/user/search" {
+	trimmed := strings.Trim(r.URL.Path, "/")
+	if trimmed == "api/user" || trimmed == "api/user/search" {
 		handleOneAPIUsers(w, r, svc)
 		return
 	}
@@ -600,9 +606,14 @@ func handleChannels(w http.ResponseWriter, r *http.Request, svc *service.AdminSe
 }
 
 func handleOneAPIChannels(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	trimmed := strings.Trim(r.URL.Path, "/")
+	if trimmed != "api/channel" && trimmed != "api/channel/search" {
+		handleOneAPIChannelByID(w, r, svc)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
-		if strings.Trim(r.URL.Path, "/") == "api/channel/search" {
+		if trimmed == "api/channel/search" {
 			handleOneAPISearchChannels(w, r, svc)
 			return
 		}
@@ -635,7 +646,7 @@ func handleOneAPIChannels(w http.ResponseWriter, r *http.Request, svc *service.A
 
 func handleOneAPIChannelByID(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	trimmed := strings.Trim(r.URL.Path, "/")
-	if trimmed == "api/channel/search" || trimmed == "api/channel/models" {
+	if trimmed == "api/channel" || trimmed == "api/channel/search" || trimmed == "api/channel/models" {
 		handleOneAPIChannels(w, r, svc)
 		return
 	}
@@ -907,6 +918,10 @@ func handleGetSystemOptions(w http.ResponseWriter, r *http.Request, svc *service
 }
 
 func handleOneAPIOptions(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if strings.Trim(r.URL.Path, "/") != "api/option" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		options, err := svc.ListOneAPIOptions(r.Context())
@@ -1047,7 +1062,12 @@ func handleLogStats(w http.ResponseWriter, r *http.Request, svc *service.AdminSe
 }
 
 func handleOneAPILogs(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
-	if strings.Trim(r.URL.Path, "/") == "api/log/search" {
+	trimmed := strings.Trim(r.URL.Path, "/")
+	if trimmed != "api/log" && trimmed != "api/log/search" {
+		handleOneAPILogByID(w, r, svc)
+		return
+	}
+	if trimmed == "api/log/search" {
 		if r.Method != http.MethodGet {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
@@ -1067,8 +1087,9 @@ func handleOneAPILogs(w http.ResponseWriter, r *http.Request, svc *service.Admin
 }
 
 func handleOneAPILogByID(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
-	if strings.Trim(r.URL.Path, "/") == "api/log/search" {
-		handleOneAPISearchLogs(w, r, svc)
+	trimmed := strings.Trim(r.URL.Path, "/")
+	if trimmed == "api/log" || trimmed == "api/log/search" {
+		handleOneAPILogs(w, r, svc)
 		return
 	}
 	writeJSON(w, http.StatusNotImplemented, apiResponse(false, "log delete is not implemented", nil))
@@ -1230,8 +1251,9 @@ func handleRedeemCodeByCode(w http.ResponseWriter, r *http.Request, svc *service
 }
 
 func handleOneAPIRedemptionByCode(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
-	if strings.Trim(r.URL.Path, "/") == "api/redemption/search" {
-		handleRedeemCodes(w, r, svc)
+	trimmed := strings.Trim(r.URL.Path, "/")
+	if trimmed == "api/redemption" || trimmed == "api/redemption/search" {
+		handleOneAPIRedemptions(w, r, svc)
 		return
 	}
 	code, ok := parsePathValue(r.URL.Path, "/api/redemption/")
@@ -1254,6 +1276,46 @@ func handleOneAPIRedemptionByCode(w http.ResponseWriter, r *http.Request, svc *s
 		req.Code = code
 		resp, err := svc.UpdateRedeemCode(r.Context(), &req)
 		writeServiceResponse(w, resp, err)
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func handleOneAPIRedemptions(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	switch r.Method {
+	case http.MethodGet:
+		if keyword := r.URL.Query().Get("keyword"); keyword != "" {
+			resp, err := svc.SearchRedeemCodes(r.Context(), &adminv1.SearchRedeemCodesRequest{Keyword: keyword})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+				return
+			}
+			writeJSON(w, http.StatusOK, apiResponse(true, "", resp.GetCodes()))
+			return
+		}
+		resp, err := svc.ListRedeemCodes(r.Context(), &adminv1.ListRedeemCodesRequest{
+			Page:     oneAPIPage(r),
+			PageSize: oneAPIPageSize(r),
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		writeJSON(w, http.StatusOK, apiResponse(true, "", resp.GetCodes()))
+	case http.MethodPost:
+		var req adminv1.CreateRedeemCodeRequest
+		if !decodeBody(w, r, &req) {
+			return
+		}
+		resp, err := svc.CreateRedeemCode(r.Context(), &req)
+		writeOneAPIServiceResponse(w, resp, err)
+	case http.MethodPut:
+		var req adminv1.UpdateRedeemCodeRequest
+		if !decodeBody(w, r, &req) {
+			return
+		}
+		resp, err := svc.UpdateRedeemCode(r.Context(), &req)
+		writeOneAPIServiceResponse(w, resp, err)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}

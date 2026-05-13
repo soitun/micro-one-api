@@ -742,6 +742,34 @@ func TestAdminHTTPOneAPIUserRoutes(t *testing.T) {
 	}
 }
 
+func TestAdminHTTPOneAPIRootAliasesAcceptNoTrailingSlash(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+
+	for _, path := range []string{
+		"/api/user",
+		"/api/channel",
+		"/api/option",
+		"/api/log",
+		"/api/redemption",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer admin-token")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code == http.StatusNotFound {
+			t.Fatalf("%s returned 404, body=%s", path, rec.Body.String())
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200, body=%s", path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"success":true`) {
+			t.Fatalf("%s response is not one-api shaped: %s", path, rec.Body.String())
+		}
+	}
+}
+
 func TestAdminHTTPTopUpCompatRoute(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	billingClient := &adminHTTPBillingClient{}
