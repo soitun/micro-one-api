@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	adminv1 "micro-one-api/api/admin/v1"
+	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/internal/admin/service"
 	"micro-one-api/internal/pkg/metrics"
 
@@ -432,6 +433,10 @@ func handleUsers(w http.ResponseWriter, r *http.Request, svc *service.AdminServi
 
 func handleOneAPIUsers(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	trimmed := strings.Trim(r.URL.Path, "/")
+	if trimmed == "api/user/manage" {
+		handleOneAPIUserManage(w, r, svc)
+		return
+	}
 	if trimmed != "api/user" && trimmed != "api/user/search" {
 		handleOneAPIUserByID(w, r, svc)
 		return
@@ -469,9 +474,89 @@ func handleOneAPIUsers(w http.ResponseWriter, r *http.Request, svc *service.Admi
 	}
 }
 
+func handleOneAPIUserManage(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Action   string `json:"action"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.Action = strings.TrimSpace(req.Action)
+	if req.Username == "" || req.Action == "" {
+		writeJSON(w, http.StatusOK, apiResponse(false, "username and action are required", nil))
+		return
+	}
+	users, err := svc.ListUsers(r.Context(), &adminv1.AdminListUsersRequest{
+		Page:     1,
+		PageSize: 100,
+		Keyword:  req.Username,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse(false, err.Error(), nil))
+		return
+	}
+	var user *commonv1.UserInfo
+	for _, item := range users.GetUsers() {
+		if item.GetUsername() == req.Username {
+			user = item
+			break
+		}
+	}
+	if user == nil {
+		writeJSON(w, http.StatusOK, apiResponse(false, "user not found", nil))
+		return
+	}
+	userID := user.GetId()
+
+	switch req.Action {
+	case "disable", "enable":
+		status := int32(2)
+		if req.Action == "enable" {
+			status = 1
+		}
+		resp, err := svc.UpdateUser(r.Context(), &adminv1.AdminUpdateUserRequest{UserId: userID, Status: status})
+		if err != nil || !resp.GetSuccess() {
+			message := ""
+			if resp != nil {
+				message = resp.GetMessage()
+			}
+			if err != nil {
+				message = err.Error()
+			}
+			writeJSON(w, http.StatusOK, apiResponse(false, message, nil))
+			return
+		}
+		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"status": status, "role": 0}))
+	case "delete":
+		resp, err := svc.DeleteUser(r.Context(), &adminv1.AdminDeleteUserRequest{UserId: userID})
+		if err != nil || !resp.GetSuccess() {
+			message := ""
+			if resp != nil {
+				message = resp.GetMessage()
+			}
+			if err != nil {
+				message = err.Error()
+			}
+			writeJSON(w, http.StatusOK, apiResponse(false, message, nil))
+			return
+		}
+		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"status": user.GetStatus(), "role": 0}))
+	case "promote", "demote":
+		writeJSON(w, http.StatusOK, apiResponse(false, "role management is not supported", nil))
+	default:
+		writeJSON(w, http.StatusOK, apiResponse(false, "unsupported action", nil))
+	}
+}
+
 func handleOneAPIUserByID(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	trimmed := strings.Trim(r.URL.Path, "/")
-	if trimmed == "api/user" || trimmed == "api/user/search" {
+	if trimmed == "api/user" || trimmed == "api/user/search" || trimmed == "api/user/manage" {
 		handleOneAPIUsers(w, r, svc)
 		return
 	}

@@ -809,6 +809,55 @@ func TestAdminHTTPOneAPIUserRoutes(t *testing.T) {
 	}
 }
 
+func TestAdminHTTPOneAPIUserManageRoute(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	identityClient := &adminHTTPIdentityClient{}
+	srv := newAdminHTTPTestServer(identityClient, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+
+	for _, tc := range []struct {
+		action     string
+		wantStatus int32
+	}{
+		{"disable", 2},
+		{"enable", 1},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/user/manage", strings.NewReader(`{"username":"alice","action":"`+tc.action+`"}`))
+		req.Header.Set("Authorization", "Bearer admin-token")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+			t.Fatalf("%s response mismatch: status=%d body=%s", tc.action, rec.Code, rec.Body.String())
+		}
+		if got := identityClient.userStatuses[len(identityClient.userStatuses)-1]; got != tc.wantStatus {
+			t.Fatalf("%s status = %d, want %d", tc.action, got, tc.wantStatus)
+		}
+		for _, want := range []string{`"status":`, `"role":`} {
+			if !strings.Contains(rec.Body.String(), want) {
+				t.Fatalf("%s response missing %s: %s", tc.action, want, rec.Body.String())
+			}
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/user/manage", strings.NewReader(`{"username":"alice","action":"delete"}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || identityClient.deletedUserID != 42 || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("delete response mismatch: status=%d deleted=%d body=%s", rec.Code, identityClient.deletedUserID, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/user/manage", strings.NewReader(`{"username":"alice","action":"promote"}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":false`) {
+		t.Fatalf("unsupported action response mismatch: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminHTTPOneAPIRootAliasesAcceptNoTrailingSlash(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
