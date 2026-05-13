@@ -88,6 +88,12 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandleFunc("/api/user/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIUsers(w, r, svc)
 	}))
+	srv.HandlePrefix("/api/user/disable/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIUserStatusAlias(w, r, svc, 2, "/api/user/disable/")
+	}))
+	srv.HandlePrefix("/api/user/enable/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIUserStatusAlias(w, r, svc, 1, "/api/user/enable/")
+	}))
 	srv.HandlePrefix("/api/user/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIUserByID(w, r, svc)
 	}))
@@ -474,6 +480,23 @@ func handleOneAPIUserByID(w http.ResponseWriter, r *http.Request, svc *service.A
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
+}
+
+func handleOneAPIUserStatusAlias(w http.ResponseWriter, r *http.Request, svc *service.AdminService, status int32, prefix string) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	userID, ok := parsePathID(r.URL.Path, prefix)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "invalid user id", nil))
+		return
+	}
+	resp, err := svc.UpdateUser(r.Context(), &adminv1.AdminUpdateUserRequest{
+		UserId: userID,
+		Status: status,
+	})
+	writeOneAPIServiceResponse(w, resp, err)
 }
 
 func handleOneAPIListUsers(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {

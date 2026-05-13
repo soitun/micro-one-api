@@ -23,6 +23,7 @@ type adminHTTPIdentityClient struct {
 	deletedUserID int64
 	createdUser   *identityv1.CreateUserRequest
 	updatedUser   *identityv1.UpdateUserRequest
+	userStatuses  []int32
 }
 
 func (c *adminHTTPIdentityClient) GetUser(ctx context.Context, req *identityv1.GetUserRequest, opts ...grpc.CallOption) (*identityv1.GetUserReply, error) {
@@ -59,6 +60,9 @@ func (c *adminHTTPIdentityClient) CreateUser(ctx context.Context, req *identityv
 
 func (c *adminHTTPIdentityClient) UpdateUser(ctx context.Context, req *identityv1.UpdateUserRequest, opts ...grpc.CallOption) (*identityv1.UpdateUserResponse, error) {
 	c.updatedUser = req
+	if req.Status != 0 {
+		c.userStatuses = append(c.userStatuses, req.Status)
+	}
 	return &identityv1.UpdateUserResponse{Success: true, Message: "updated"}, nil
 }
 
@@ -716,6 +720,25 @@ func TestAdminHTTPOneAPIUserRoutes(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || identityClient.deletedUserID != 42 {
 		t.Fatalf("delete response mismatch: status=%d deleted=%d body=%s", rec.Code, identityClient.deletedUserID, rec.Body.String())
+	}
+
+	for _, tc := range []struct {
+		path       string
+		wantStatus int32
+	}{
+		{"/api/user/disable/42", 2},
+		{"/api/user/enable/42", 1},
+	} {
+		req = httptest.NewRequest(http.MethodPost, tc.path, nil)
+		req.Header.Set("Authorization", "Bearer admin-token")
+		rec = httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+			t.Fatalf("%s response mismatch: status=%d body=%s", tc.path, rec.Code, rec.Body.String())
+		}
+		if got := identityClient.userStatuses[len(identityClient.userStatuses)-1]; got != tc.wantStatus {
+			t.Fatalf("%s status = %d, want %d", tc.path, got, tc.wantStatus)
+		}
 	}
 }
 
