@@ -42,6 +42,8 @@ func (f *ProviderFactory) CreateProviderWithConfig(channelType int32, baseURL, a
 		return NewAzureProvider(baseURL, apiKey, config.APIVersion, f.defaultTimeout)
 	case ChannelTypeVoyageAI:
 		return NewVoyageAIProvider(resolveOpenAICompatibleBaseURL(channelType, baseURL), apiKey, f.defaultTimeout)
+	case ChannelTypeHunyuan, ChannelTypeXingchen, ChannelTypeBedrock:
+		return nil, fmt.Errorf("channel type %d requires a native provider adapter", channelType)
 	case ChannelTypeOpenAI,
 		ChannelTypeDeepSeek,
 		ChannelTypeMistral,

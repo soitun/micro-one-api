@@ -69,3 +69,13 @@ func TestProviderFactoryCreatesOpenAICompatibleProvidersForExpandedDefaults(t *t
 		}
 	}
 }
+
+func TestProviderFactoryRejectsKnownNativeProvidersWithoutAdapters(t *testing.T) {
+	factory := NewProviderFactory(time.Second)
+
+	for _, channelType := range []int32{ChannelTypeHunyuan, ChannelTypeXingchen, ChannelTypeBedrock} {
+		if _, err := factory.CreateProvider(channelType, "", "key"); err == nil {
+			t.Fatalf("CreateProvider(%d) error = nil, want unsupported provider error", channelType)
+		}
+	}
+}
