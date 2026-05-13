@@ -439,7 +439,7 @@ func TestAdminHTTPGroupManagementUsesGroupRatioOption(t *testing.T) {
 	}}
 	srv := newAdminHTTPOptionTestServer(store)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/group", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/group/", nil)
 	req.Header.Set("Authorization", "Bearer admin-token")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -447,9 +447,28 @@ func TestAdminHTTPGroupManagementUsesGroupRatioOption(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
+	var groupList struct {
+		Success bool     `json:"success"`
+		Data    []string `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &groupList); err != nil {
+		t.Fatalf("decode group list: %v, body=%s", err, rec.Body.String())
+	}
+	if !groupList.Success || !stringSliceContains(groupList.Data, "default") || !stringSliceContains(groupList.Data, "vip") {
+		t.Fatalf("group list response mismatch: %+v body=%s", groupList, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/group/?with_ratio=true", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ratio status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
 	for _, want := range []string{`"success":true`, `"group":"default"`, `"ratio":1`, `"group":"vip"`, `"ratio":2`} {
 		if !strings.Contains(rec.Body.String(), want) {
-			t.Fatalf("group list response missing %s: %s", want, rec.Body.String())
+			t.Fatalf("ratio group list response missing %s: %s", want, rec.Body.String())
 		}
 	}
 
@@ -488,6 +507,15 @@ func TestAdminHTTPGroupManagementUsesGroupRatioOption(t *testing.T) {
 	if store.values["GroupRatio"] != `{"default":1}` {
 		t.Fatalf("GroupRatio after delete = %s", store.values["GroupRatio"])
 	}
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestAdminHTTPCreateChannel(t *testing.T) {

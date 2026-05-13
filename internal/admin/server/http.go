@@ -80,7 +80,7 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandleFunc("/api/notice", handleContentRoute(svc, "Notice"))
 	srv.HandleFunc("/api/about", handleContentRoute(svc, "About"))
 	srv.HandleFunc("/api/home_page_content", handleContentRoute(svc, "HomePageContent"))
-	srv.HandleFunc("/api/group", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+	srv.HandlePrefix("/api/group", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleGroupManagement(w, r, svc)
 	}))
 
@@ -339,7 +339,15 @@ func handleGroupManagement(w http.ResponseWriter, r *http.Request, svc *service.
 			writeJSON(w, http.StatusOK, apiResponse(false, err.Error(), nil))
 			return
 		}
-		writeJSON(w, http.StatusOK, apiResponse(true, "", groups))
+		if r.URL.Query().Get("with_ratio") == "true" {
+			writeJSON(w, http.StatusOK, apiResponse(true, "", groups))
+			return
+		}
+		names := make([]string, 0, len(groups))
+		for _, group := range groups {
+			names = append(names, group.Group)
+		}
+		writeJSON(w, http.StatusOK, apiResponse(true, "", names))
 	case http.MethodPost, http.MethodPut:
 		var req struct {
 			Group string  `json:"group"`
