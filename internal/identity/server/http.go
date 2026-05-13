@@ -82,6 +82,9 @@ func NewHTTPServerWithRegistrationPolicy(addr string, uc *biz.IdentityUsecase, o
 	srv.HandleFunc("/api/oauth/wechat/bind", func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIOAuthAlias(w, r, oauthRegistry, "wechat")
 	})
+	srv.HandleFunc("/api/oauth/lark/bind", func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIOAuthAlias(w, r, oauthRegistry, "lark")
+	})
 
 	srv.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		metrics.Handler().ServeHTTP(w, r)
