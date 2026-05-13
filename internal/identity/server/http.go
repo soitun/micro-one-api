@@ -107,13 +107,22 @@ func NewHTTPServerWithRegistrationPolicy(addr string, uc *biz.IdentityUsecase, o
 	srv.HandleFunc("/api/user/available_models", func(w http.ResponseWriter, r *http.Request) {
 		handleAvailableModels(w, r, uc)
 	})
+	srv.HandleFunc("/api/user/models", func(w http.ResponseWriter, r *http.Request) {
+		handleAvailableModels(w, r, uc)
+	})
 	srv.HandleFunc("/api/user/aff", func(w http.ResponseWriter, r *http.Request) {
+		handleAffCode(w, r, uc)
+	})
+	srv.HandleFunc("/api/user/invitation", func(w http.ResponseWriter, r *http.Request) {
 		handleAffCode(w, r, uc)
 	})
 	srv.HandleFunc("/api/oauth/email/bind", func(w http.ResponseWriter, r *http.Request) {
 		handleEmailBind(w, r, uc)
 	})
 	srv.HandleFunc("/api/user/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		handleUserDashboard(w, r, uc, billingClient)
+	})
+	srv.HandleFunc("/api/user/quota", func(w http.ResponseWriter, r *http.Request) {
 		handleUserDashboard(w, r, uc, billingClient)
 	})
 	srv.HandleFunc("/dashboard/billing/usage", func(w http.ResponseWriter, r *http.Request) {

@@ -462,6 +462,44 @@ func TestIdentityHTTPDashboardReturnsAccountSnapshot(t *testing.T) {
 	}
 }
 
+func TestIdentityHTTPUserReadOnlyCompatibilityAliases(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
+		snapshot: &commonv1.AccountSnapshot{
+			Quota:        1000,
+			UsedQuota:    100,
+			RequestCount: 10,
+			Group:        "default",
+			GroupRatio:   1,
+			FrozenQuota:  0,
+		},
+	})
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/api/user/quota", `"quota":1000`},
+		{"/api/user/models", `"data"`},
+		{"/api/user/invitation", `"success":true`},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req.Header.Set("Authorization", "Bearer "+authToken)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200, body=%s", tc.path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("%s response missing %s: %s", tc.path, tc.want, rec.Body.String())
+		}
+	}
+}
+
 func TestIdentityHTTPDashboardBillingUsageReturnsOpenAIShape(t *testing.T) {
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)
