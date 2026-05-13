@@ -651,6 +651,45 @@ func TestAdminHTTPOneAPIChannelRoutes(t *testing.T) {
 	}
 }
 
+func TestAdminHTTPOneAPIChannelModelsReturnsModelCatalog(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/channel/models", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Object string `json:"object"`
+		Data   []struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			OwnedBy string `json:"owned_by"`
+			Root    string `json:"root"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v, body=%s", err, rec.Body.String())
+	}
+	if body.Object != "list" {
+		t.Fatalf("object = %q, want list; body=%s", body.Object, rec.Body.String())
+	}
+	found := false
+	for _, model := range body.Data {
+		if model.ID == "gpt-4o-mini" && model.Object == "model" && model.OwnedBy != "" && model.Root == model.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("model catalog missing gpt-4o-mini model object: %s", rec.Body.String())
+	}
+}
+
 func TestAdminHTTPDeleteUserByPathID(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	identityClient := &adminHTTPIdentityClient{}

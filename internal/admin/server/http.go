@@ -707,23 +707,69 @@ func handleOneAPIChannelModels(w http.ResponseWriter, r *http.Request, svc *serv
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
-	resp, err := svc.ListChannels(r.Context(), &adminv1.AdminListChannelsRequest{Page: 1, PageSize: 1000})
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		return
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"object": "list",
+		"data":   oneAPIChannelModelCatalog(),
+	})
+}
+
+func oneAPIChannelModelCatalog() []map[string]interface{} {
+	models := []struct {
+		id      string
+		ownedBy string
+	}{
+		{id: "gpt-4o-mini", ownedBy: "openai"},
+		{id: "gpt-4o", ownedBy: "openai"},
+		{id: "gpt-4-turbo", ownedBy: "openai"},
+		{id: "gpt-3.5-turbo", ownedBy: "openai"},
+		{id: "text-embedding-3-small", ownedBy: "openai"},
+		{id: "text-embedding-3-large", ownedBy: "openai"},
+		{id: "claude-3-5-sonnet-20241022", ownedBy: "anthropic"},
+		{id: "claude-3-5-haiku-20241022", ownedBy: "anthropic"},
+		{id: "gemini-pro", ownedBy: "gemini"},
+		{id: "gemini-pro-vision", ownedBy: "gemini"},
+		{id: "deepseek-chat", ownedBy: "deepseek"},
+		{id: "deepseek-reasoner", ownedBy: "deepseek"},
+		{id: "qwen-turbo", ownedBy: "tongyi"},
+		{id: "qwen-plus", ownedBy: "tongyi"},
+		{id: "qwen-max", ownedBy: "tongyi"},
+		{id: "glm-4", ownedBy: "zhipu"},
+		{id: "moonshot-v1-8k", ownedBy: "moonshot"},
+		{id: "moonshot-v1-32k", ownedBy: "moonshot"},
+		{id: "mistral-large-latest", ownedBy: "mistral"},
+		{id: "command-r-plus", ownedBy: "cohere"},
+		{id: "llama-3.1-sonar-small-128k-online", ownedBy: "perplexity"},
+		{id: "voyage-3", ownedBy: "voyageai"},
 	}
-	models := map[int64][]string{}
-	for _, channel := range resp.GetChannels() {
-		var names []string
-		for _, model := range strings.Split(channel.GetModels(), ",") {
-			model = strings.TrimSpace(model)
-			if model != "" {
-				names = append(names, model)
-			}
-		}
-		models[channel.GetId()] = names
+	permission := []map[string]interface{}{
+		{
+			"id":                   "modelperm-micro-one-api",
+			"object":               "model_permission",
+			"created":              1626777600,
+			"allow_create_engine":  true,
+			"allow_sampling":       true,
+			"allow_logprobs":       true,
+			"allow_search_indices": false,
+			"allow_view":           true,
+			"allow_fine_tuning":    false,
+			"organization":         "*",
+			"group":                nil,
+			"is_blocking":          false,
+		},
 	}
-	writeJSON(w, http.StatusOK, apiResponse(true, "", models))
+	result := make([]map[string]interface{}, 0, len(models))
+	for _, model := range models {
+		result = append(result, map[string]interface{}{
+			"id":         model.id,
+			"object":     "model",
+			"created":    1626777600,
+			"owned_by":   model.ownedBy,
+			"permission": permission,
+			"root":       model.id,
+			"parent":     nil,
+		})
+	}
+	return result
 }
 
 func handleChannelByID(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
