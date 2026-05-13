@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -498,6 +499,41 @@ func TestIdentityHTTPUserReadOnlyCompatibilityAliases(t *testing.T) {
 			t.Fatalf("%s response missing %s: %s", tc.path, tc.want, rec.Body.String())
 		}
 	}
+}
+
+func TestIdentityHTTPAvailableModelsReturnsDefaultsWhenTokenIsUnrestricted(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/available_models", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Success bool     `json:"success"`
+		Data    []string `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v, body=%s", err, rec.Body.String())
+	}
+	if !body.Success || !containsString(body.Data, "gpt-4o-mini") || !containsString(body.Data, "deepseek-chat") {
+		t.Fatalf("available models response mismatch: %+v body=%s", body, rec.Body.String())
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestIdentityHTTPDashboardBillingUsageReturnsOpenAIShape(t *testing.T) {

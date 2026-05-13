@@ -575,7 +575,37 @@ func handleAvailableModels(w http.ResponseWriter, r *http.Request, uc *biz.Ident
 		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
 		return
 	}
-	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: snapshot.AllowedModels})
+	models := snapshot.AllowedModels
+	if len(models) == 0 {
+		models = defaultAvailableModels()
+	}
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: models})
+}
+
+func defaultAvailableModels() []string {
+	return []string{
+		"gpt-4o-mini",
+		"gpt-4o",
+		"gpt-4-turbo",
+		"gpt-3.5-turbo",
+		"text-embedding-3-small",
+		"text-embedding-3-large",
+		"claude-3-5-sonnet-20241022",
+		"claude-3-5-haiku-20241022",
+		"gemini-pro",
+		"gemini-pro-vision",
+		"deepseek-chat",
+		"deepseek-reasoner",
+		"qwen-turbo",
+		"qwen-plus",
+		"qwen-max",
+		"glm-4",
+		"moonshot-v1-8k",
+		"moonshot-v1-32k",
+		"mistral-large-latest",
+		"command-r-plus",
+		"voyage-3",
+	}
 }
 
 func handleEmailVerification(w http.ResponseWriter, r *http.Request) {
