@@ -699,6 +699,33 @@ func TestIdentityHTTPTopUpReturnsBillingFailure(t *testing.T) {
 	}
 }
 
+func TestIdentityHTTPOnlinePaymentCompatibilityRoutesAreDisabled(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{})
+
+	for _, tc := range []struct {
+		path string
+		body string
+	}{
+		{"/api/user/amount", `{"amount":10,"top_up_code":""}`},
+		{"/api/user/pay", `{"amount":10,"payment_method":"wechat"}`},
+	} {
+		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Authorization", "Bearer "+authToken)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200, body=%s", tc.path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"message":"disabled"`) || !strings.Contains(rec.Body.String(), "online payment is not configured") {
+			t.Fatalf("%s disabled response mismatch: %s", tc.path, rec.Body.String())
+		}
+	}
+}
+
 func TestIdentityHTTPTokenCRUD(t *testing.T) {
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)

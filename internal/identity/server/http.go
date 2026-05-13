@@ -143,6 +143,12 @@ func NewHTTPServerWithRegistrationPolicy(addr string, uc *biz.IdentityUsecase, o
 	srv.HandleFunc("/api/user/topup", func(w http.ResponseWriter, r *http.Request) {
 		handleUserTopUp(w, r, uc, billingClient)
 	})
+	srv.HandleFunc("/api/user/amount", func(w http.ResponseWriter, r *http.Request) {
+		handleOnlinePaymentDisabled(w, r, uc)
+	})
+	srv.HandleFunc("/api/user/pay", func(w http.ResponseWriter, r *http.Request) {
+		handleOnlinePaymentDisabled(w, r, uc)
+	})
 	srv.HandleFunc("/api/verification", func(w http.ResponseWriter, r *http.Request) {
 		handleEmailVerification(w, r)
 	})
@@ -488,6 +494,22 @@ func handleUserTopUp(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUse
 		return
 	}
 	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: resp.GetAmount()})
+}
+
+func handleOnlinePaymentDisabled(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	if _, err := authSnapshotFromRequest(r, uc); err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": false,
+		"message": "disabled",
+		"data":    "online payment is not configured",
+	})
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
