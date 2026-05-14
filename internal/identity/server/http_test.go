@@ -1060,6 +1060,74 @@ func TestIdentityHTTPOneAPIOIDCAliasRedirectsWhenProviderEnabled(t *testing.T) {
 	}
 }
 
+func TestIdentityHTTPOAuthBindRequiresAuthenticatedUser(t *testing.T) {
+	registry := oauth.NewProviderRegistry()
+	registry.Register(&fakeOAuthProvider{name: "wechat", providerID: "openid-1"})
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	srv := NewHTTPServer(":0", uc, registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/oauth/wechat/bind?code=oauth-code", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestIdentityHTTPOAuthBindUpdatesCurrentUser(t *testing.T) {
+	registry := oauth.NewProviderRegistry()
+	registry.Register(&fakeOAuthProvider{name: "wechat", providerID: "openid-1"})
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	user, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/oauth/wechat/bind?code=oauth-code", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("bind response mismatch: %s", rec.Body.String())
+	}
+	bound, err := uc.GetUser(context.Background(), user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound.OAuthProvider != "wechat" || bound.OAuthID != "openid-1" {
+		t.Fatalf("bound user mismatch: %+v", bound)
+	}
+}
+
+func TestIdentityHTTPOAuthBindRejectsDuplicateProviderIdentity(t *testing.T) {
+	registry := oauth.NewProviderRegistry()
+	registry.Register(&fakeOAuthProvider{name: "lark", providerID: "union-1"})
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	if _, _, err := uc.OAuthLogin(context.Background(), "lark", "union-1", "bob", "bob@example.com", "Bob"); err != nil {
+		t.Fatal(err)
+	}
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/oauth/lark/bind?code=oauth-code", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":false`) || !strings.Contains(rec.Body.String(), "already bound") {
+		t.Fatalf("duplicate bind response mismatch: %s", rec.Body.String())
+	}
+}
+
 type identityHTTPBillingClient struct {
 	billingv1.BillingServiceClient
 	snapshot       *commonv1.AccountSnapshot
@@ -1070,6 +1138,27 @@ type identityHTTPBillingClient struct {
 type fakeTurnstileVerifier struct {
 	acceptedToken string
 	remoteIP      string
+}
+
+type fakeOAuthProvider struct {
+	name       string
+	providerID string
+}
+
+func (p *fakeOAuthProvider) Name() string { return p.name }
+
+func (p *fakeOAuthProvider) AuthURL(state string) string {
+	return "https://oauth.example.com/authorize?state=" + state
+}
+
+func (p *fakeOAuthProvider) Exchange(ctx context.Context, code string) (*oauth.UserInfo, error) {
+	return &oauth.UserInfo{
+		Provider:    p.name,
+		ProviderID:  p.providerID,
+		Username:    p.name + "-user",
+		Email:       p.name + "@example.com",
+		DisplayName: p.name + " user",
+	}, nil
 }
 
 func (v *fakeTurnstileVerifier) VerifyTurnstile(ctx context.Context, secret, token, remoteIP string) error {

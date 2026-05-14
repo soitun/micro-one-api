@@ -61,3 +61,36 @@ func TestSetupOAuthRegistersOIDCWhenConfigured(t *testing.T) {
 		t.Fatalf("oidc auth url mismatch: %s", got)
 	}
 }
+
+func TestSetupOAuthRegistersLarkAndWeChatWhenConfigured(t *testing.T) {
+	registry := setupOAuth(&identitycfg.Config{
+		OAuth: identitycfg.OAuthConfig{
+			BaseURL: "https://one-api.example.com",
+			Lark: identitycfg.OAuthProviderConfig{
+				Enabled:      true,
+				ClientID:     "lark-client",
+				ClientSecret: "lark-secret",
+			},
+			WeChat: identitycfg.OAuthProviderConfig{
+				Enabled:      true,
+				ClientID:     "wechat-client",
+				ClientSecret: "wechat-secret",
+			},
+		},
+	})
+
+	lark, ok := registry.Get("lark")
+	if !ok {
+		t.Fatal("lark provider was not registered")
+	}
+	if got := lark.AuthURL("state-123"); !strings.Contains(got, "passport.feishu.cn/suite/passport/oauth/authorize") || !strings.Contains(got, "redirect_uri=https%3A%2F%2Fone-api.example.com%2Fv1%2Foauth%2Flark%2Fcallback") {
+		t.Fatalf("lark auth url mismatch: %s", got)
+	}
+	wechat, ok := registry.Get("wechat")
+	if !ok {
+		t.Fatal("wechat provider was not registered")
+	}
+	if got := wechat.AuthURL("state-123"); !strings.Contains(got, "open.weixin.qq.com/connect/qrconnect") || !strings.Contains(got, "redirect_uri=https%3A%2F%2Fone-api.example.com%2Fv1%2Foauth%2Fwechat%2Fcallback") {
+		t.Fatalf("wechat auth url mismatch: %s", got)
+	}
+}

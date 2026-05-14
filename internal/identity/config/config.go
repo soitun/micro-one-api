@@ -42,6 +42,8 @@ type OAuthConfig struct {
 	GitHub  OAuthProviderConfig `json:"github"`
 	Google  OAuthProviderConfig `json:"google"`
 	OIDC    OIDCProviderConfig  `json:"oidc"`
+	Lark    OAuthProviderConfig `json:"lark"`
+	WeChat  OAuthProviderConfig `json:"wechat"`
 	BaseURL string              `json:"base_url"`
 }
 

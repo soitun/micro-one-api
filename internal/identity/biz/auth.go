@@ -36,6 +36,7 @@ var (
 	ErrUserExists        = errors.New("user already exists")
 	ErrInvalidPassword   = errors.New("invalid password")
 	ErrOAuthUserNotFound = errors.New("oauth user not found")
+	ErrOAuthAlreadyBound = errors.New("oauth identity already bound")
 )
 
 type User struct {
@@ -658,6 +659,37 @@ func (uc *IdentityUsecase) OAuthLogin(ctx context.Context, provider, oauthID, us
 	}
 
 	return user, token, nil
+}
+
+func (uc *IdentityUsecase) BindOAuthIdentity(ctx context.Context, userID int64, provider, oauthID string) (*User, error) {
+	provider = strings.TrimSpace(provider)
+	oauthID = strings.TrimSpace(oauthID)
+	if provider == "" || oauthID == "" {
+		return nil, ErrOAuthUserNotFound
+	}
+	user, err := uc.repo.FindUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user.Status != UserStatusEnabled {
+		return nil, ErrUserDisabled
+	}
+	boundUser, err := uc.repo.FindUserByOAuth(ctx, provider, oauthID)
+	if err != nil && !errors.Is(err, ErrOAuthUserNotFound) {
+		return nil, err
+	}
+	if boundUser != nil && boundUser.ID != userID {
+		return nil, ErrOAuthAlreadyBound
+	}
+	if user.OAuthProvider != "" && (user.OAuthProvider != provider || user.OAuthID != oauthID) {
+		return nil, ErrOAuthAlreadyBound
+	}
+	user.OAuthProvider = provider
+	user.OAuthID = oauthID
+	if err := uc.repo.UpdateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 func SplitCSVPtr(input *string) []string {

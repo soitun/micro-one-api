@@ -32,6 +32,14 @@ oauth:
     token_url: ${OAUTH_OIDC_TOKEN_URL:-}
     user_info_url: ${OAUTH_OIDC_USER_INFO_URL:-}
     scopes: ${OAUTH_OIDC_SCOPES:-[openid,email,profile]}
+  lark:
+    enabled: ${OAUTH_LARK_ENABLED:-false}
+    client_id: ${OAUTH_LARK_CLIENT_ID:-}
+    client_secret: ${OAUTH_LARK_CLIENT_SECRET:-}
+  wechat:
+    enabled: ${OAUTH_WECHAT_ENABLED:-false}
+    client_id: ${OAUTH_WECHAT_CLIENT_ID:-}
+    client_secret: ${OAUTH_WECHAT_CLIENT_SECRET:-}
 registration:
   disabled: ${REGISTRATION_DISABLED:-false}
   email_domain_restriction_enabled: ${REGISTRATION_EMAIL_DOMAIN_RESTRICTION_ENABLED:-false}

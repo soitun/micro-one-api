@@ -89,6 +89,37 @@ func (m *mockIdentityRepo) IncreaseUserQuota(ctx context.Context, userID int64, 
 	return nil
 }
 
+func TestIdentityUsecase_BindOAuthIdentityUpdatesCurrentUser(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled},
+		},
+	}
+	uc := NewIdentityUsecase(repo)
+
+	user, err := uc.BindOAuthIdentity(context.Background(), 1, "wechat", "openid-1")
+	if err != nil {
+		t.Fatalf("BindOAuthIdentity() error = %v", err)
+	}
+	if user.OAuthProvider != "wechat" || user.OAuthID != "openid-1" {
+		t.Fatalf("bound oauth mismatch: %+v", user)
+	}
+}
+
+func TestIdentityUsecase_BindOAuthIdentityRejectsDuplicateProviderIdentity(t *testing.T) {
+	repo := &mockIdentityRepo{
+		users: map[int64]*User{
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled},
+			2: {ID: 2, Username: "bob", Status: UserStatusEnabled, OAuthProvider: "lark", OAuthID: "union-1"},
+		},
+	}
+	uc := NewIdentityUsecase(repo)
+
+	if _, err := uc.BindOAuthIdentity(context.Background(), 1, "lark", "union-1"); err == nil {
+		t.Fatal("BindOAuthIdentity() expected duplicate identity error")
+	}
+}
+
 func (m *mockIdentityRepo) CreateToken(ctx context.Context, token *Token) error {
 	token.ID = int64(len(m.tokens) + 1)
 	m.tokens[token.Key] = token

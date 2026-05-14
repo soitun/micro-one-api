@@ -90,5 +90,23 @@ func setupOAuth(cfg *identitycfg.Config) *oauth.ProviderRegistry {
 			Scopes:       cfg.OAuth.OIDC.Scopes,
 		}))
 	}
+	if cfg.OAuth.Lark.Enabled && cfg.OAuth.Lark.ClientID != "" {
+		registry.Register(oauth.NewLarkProvider(oauth.EndpointConfig{
+			Config: oauth.Config{
+				ClientID:     cfg.OAuth.Lark.ClientID,
+				ClientSecret: cfg.OAuth.Lark.ClientSecret,
+				RedirectURL:  baseURL + "/v1/oauth/lark/callback",
+			},
+		}))
+	}
+	if cfg.OAuth.WeChat.Enabled && cfg.OAuth.WeChat.ClientID != "" {
+		registry.Register(oauth.NewWeChatProvider(oauth.EndpointConfig{
+			Config: oauth.Config{
+				ClientID:     cfg.OAuth.WeChat.ClientID,
+				ClientSecret: cfg.OAuth.WeChat.ClientSecret,
+				RedirectURL:  baseURL + "/v1/oauth/wechat/callback",
+			},
+		}))
+	}
 	return registry
 }

@@ -80,10 +80,10 @@ func NewHTTPServerWithRegistrationPolicy(addr string, uc *biz.IdentityUsecase, o
 		})
 	}
 	srv.HandleFunc("/api/oauth/wechat/bind", func(w http.ResponseWriter, r *http.Request) {
-		handleOneAPIOAuthAlias(w, r, oauthRegistry, "wechat")
+		handleOneAPIOAuthBind(w, r, oauthRegistry, uc, "wechat")
 	})
 	srv.HandleFunc("/api/oauth/lark/bind", func(w http.ResponseWriter, r *http.Request) {
-		handleOneAPIOAuthAlias(w, r, oauthRegistry, "lark")
+		handleOneAPIOAuthBind(w, r, oauthRegistry, uc, "lark")
 	})
 	srv.HandleFunc("/api/oauth/telegram/login", func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIOAuthAlias(w, r, oauthRegistry, "telegram")
@@ -750,6 +750,42 @@ func handleOneAPIOAuthAlias(w http.ResponseWriter, r *http.Request, registry *oa
 		return
 	}
 	handleOAuthAuthorize(w, r, provider)
+}
+
+func handleOneAPIOAuthBind(w http.ResponseWriter, r *http.Request, registry *oauth.ProviderRegistry, uc *biz.IdentityUsecase, providerName string) {
+	if registry == nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: providerName + " oauth disabled"})
+		return
+	}
+	provider, ok := registry.Get(providerName)
+	if !ok {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: providerName + " oauth disabled"})
+		return
+	}
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "invalid token"})
+		return
+	}
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		handleOAuthAuthorize(w, r, provider)
+		return
+	}
+	userInfo, err := provider.Exchange(r.Context(), code)
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "oauth provider error"})
+		return
+	}
+	user, err := uc.BindOAuthIdentity(r.Context(), snapshot.UserID, userInfo.Provider, userInfo.ProviderID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{
+		"user_id":        user.ID,
+		"oauth_provider": user.OAuthProvider,
+	}})
 }
 
 func handleCreateUserToken(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {

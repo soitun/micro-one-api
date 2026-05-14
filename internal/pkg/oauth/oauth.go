@@ -46,6 +46,13 @@ type OIDCConfig struct {
 	Scopes       []string
 }
 
+type EndpointConfig struct {
+	Config
+	AuthorizeURL string
+	TokenURL     string
+	UserInfoURL  string
+}
+
 // ProviderRegistry holds registered OAuth providers.
 type ProviderRegistry struct {
 	providers map[string]Provider
@@ -312,6 +319,229 @@ func NewOIDCProvider(cfg OIDCConfig) Provider {
 		cfg:        cfg,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+type larkProvider struct {
+	cfg        EndpointConfig
+	httpClient *http.Client
+}
+
+func NewLarkProvider(cfg EndpointConfig) Provider {
+	if cfg.AuthorizeURL == "" {
+		cfg.AuthorizeURL = "https://passport.feishu.cn/suite/passport/oauth/authorize"
+	}
+	if cfg.TokenURL == "" {
+		cfg.TokenURL = "https://open.feishu.cn/open-apis/authen/v2/oauth/token"
+	}
+	if cfg.UserInfoURL == "" {
+		cfg.UserInfoURL = "https://passport.feishu.cn/suite/passport/oauth/userinfo"
+	}
+	return &larkProvider{cfg: cfg, httpClient: &http.Client{Timeout: 10 * time.Second}}
+}
+
+func (p *larkProvider) Name() string { return "lark" }
+
+func (p *larkProvider) AuthURL(state string) string {
+	params := url.Values{
+		"client_id":     {p.cfg.ClientID},
+		"redirect_uri":  {p.cfg.RedirectURL},
+		"response_type": {"code"},
+		"state":         {state},
+	}
+	return p.cfg.AuthorizeURL + "?" + params.Encode()
+}
+
+func (p *larkProvider) Exchange(ctx context.Context, code string) (*UserInfo, error) {
+	body := map[string]string{
+		"client_id":     p.cfg.ClientID,
+		"client_secret": p.cfg.ClientSecret,
+		"code":          code,
+		"grant_type":    "authorization_code",
+		"redirect_uri":  p.cfg.RedirectURL,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.TokenURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("lark token exchange: %w", err)
+	}
+	defer resp.Body.Close()
+	var tokenResp struct {
+		AccessToken      string `json:"access_token"`
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("lark token decode: %w", err)
+	}
+	if tokenResp.Error != "" {
+		return nil, fmt.Errorf("lark oauth error: %s", tokenResp.ErrorDescription)
+	}
+	userReq, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.UserInfoURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	userReq.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+	userResp, err := p.httpClient.Do(userReq)
+	if err != nil {
+		return nil, fmt.Errorf("lark user fetch: %w", err)
+	}
+	defer userResp.Body.Close()
+	var user struct {
+		UnionID string `json:"union_id"`
+		OpenID  string `json:"open_id"`
+		Name    string `json:"name"`
+		Email   string `json:"email"`
+		Avatar  string `json:"avatar_url"`
+		Error   string `json:"error"`
+	}
+	if err := json.NewDecoder(userResp.Body).Decode(&user); err != nil {
+		return nil, fmt.Errorf("lark user decode: %w", err)
+	}
+	if user.Error != "" {
+		return nil, fmt.Errorf("lark user error: %s", user.Error)
+	}
+	providerID := user.UnionID
+	if providerID == "" {
+		providerID = user.OpenID
+	}
+	username := usernameFromEmail(user.Email, "lark-"+providerID)
+	displayName := user.Name
+	if displayName == "" {
+		displayName = username
+	}
+	return &UserInfo{Provider: "lark", ProviderID: providerID, Username: username, Email: user.Email, DisplayName: displayName, AvatarURL: user.Avatar}, nil
+}
+
+type wechatProvider struct {
+	cfg        EndpointConfig
+	httpClient *http.Client
+}
+
+func NewWeChatProvider(cfg EndpointConfig) Provider {
+	if cfg.AuthorizeURL == "" {
+		cfg.AuthorizeURL = "https://open.weixin.qq.com/connect/qrconnect"
+	}
+	if cfg.TokenURL == "" {
+		cfg.TokenURL = "https://api.weixin.qq.com/sns/oauth2/access_token"
+	}
+	if cfg.UserInfoURL == "" {
+		cfg.UserInfoURL = "https://api.weixin.qq.com/sns/userinfo"
+	}
+	return &wechatProvider{cfg: cfg, httpClient: &http.Client{Timeout: 10 * time.Second}}
+}
+
+func (p *wechatProvider) Name() string { return "wechat" }
+
+func (p *wechatProvider) AuthURL(state string) string {
+	params := url.Values{
+		"appid":         {p.cfg.ClientID},
+		"redirect_uri":  {p.cfg.RedirectURL},
+		"response_type": {"code"},
+		"scope":         {"snsapi_login"},
+		"state":         {state},
+	}
+	return p.cfg.AuthorizeURL + "?" + params.Encode()
+}
+
+func (p *wechatProvider) Exchange(ctx context.Context, code string) (*UserInfo, error) {
+	tokenURL, err := url.Parse(p.cfg.TokenURL)
+	if err != nil {
+		return nil, err
+	}
+	q := tokenURL.Query()
+	q.Set("appid", p.cfg.ClientID)
+	q.Set("secret", p.cfg.ClientSecret)
+	q.Set("code", code)
+	q.Set("grant_type", "authorization_code")
+	tokenURL.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("wechat token exchange: %w", err)
+	}
+	defer resp.Body.Close()
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+		OpenID      string `json:"openid"`
+		UnionID     string `json:"unionid"`
+		ErrorCode   int    `json:"errcode"`
+		ErrorMsg    string `json:"errmsg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("wechat token decode: %w", err)
+	}
+	if tokenResp.ErrorCode != 0 {
+		return nil, fmt.Errorf("wechat oauth error: %s", tokenResp.ErrorMsg)
+	}
+	userURL, err := url.Parse(p.cfg.UserInfoURL)
+	if err != nil {
+		return nil, err
+	}
+	uq := userURL.Query()
+	uq.Set("access_token", tokenResp.AccessToken)
+	uq.Set("openid", tokenResp.OpenID)
+	userURL.RawQuery = uq.Encode()
+	userReq, err := http.NewRequestWithContext(ctx, http.MethodGet, userURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	userResp, err := p.httpClient.Do(userReq)
+	if err != nil {
+		return nil, fmt.Errorf("wechat user fetch: %w", err)
+	}
+	defer userResp.Body.Close()
+	var user struct {
+		OpenID     string `json:"openid"`
+		UnionID    string `json:"unionid"`
+		Nickname   string `json:"nickname"`
+		HeadImgURL string `json:"headimgurl"`
+		ErrorCode  int    `json:"errcode"`
+		ErrorMsg   string `json:"errmsg"`
+	}
+	if err := json.NewDecoder(userResp.Body).Decode(&user); err != nil {
+		return nil, fmt.Errorf("wechat user decode: %w", err)
+	}
+	if user.ErrorCode != 0 {
+		return nil, fmt.Errorf("wechat user error: %s", user.ErrorMsg)
+	}
+	providerID := user.UnionID
+	if providerID == "" {
+		providerID = tokenResp.UnionID
+	}
+	if providerID == "" {
+		providerID = user.OpenID
+	}
+	if providerID == "" {
+		providerID = tokenResp.OpenID
+	}
+	username := "wechat-" + providerID
+	displayName := user.Nickname
+	if displayName == "" {
+		displayName = username
+	}
+	return &UserInfo{Provider: "wechat", ProviderID: providerID, Username: username, DisplayName: displayName, AvatarURL: user.HeadImgURL}, nil
+}
+
+func usernameFromEmail(email, fallback string) string {
+	username := email
+	if idx := strings.Index(username, "@"); idx > 0 {
+		username = username[:idx]
+	}
+	if username == "" {
+		username = fallback
+	}
+	return username
 }
 
 func (p *oidcProvider) Name() string { return "oidc" }

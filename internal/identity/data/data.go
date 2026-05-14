@@ -442,14 +442,16 @@ func (r *Repository) createUserDB(ctx context.Context, user *biz.User) error {
 
 func (r *Repository) updateUserDB(ctx context.Context, user *biz.User) error {
 	return r.db.WithContext(ctx).Model(&userModel{}).Where("id = ?", user.ID).Updates(map[string]interface{}{
-		"username":      user.Username,
-		"display_name":  user.DisplayName,
-		"email":         user.Email,
-		"group":         user.Group,
-		"status":        user.Status,
-		"password_hash": user.PasswordHash,
-		"aff_code":      user.AffCode,
-		"inviter_id":    user.InviterID,
+		"username":       user.Username,
+		"display_name":   user.DisplayName,
+		"email":          user.Email,
+		"group":          user.Group,
+		"status":         user.Status,
+		"password_hash":  user.PasswordHash,
+		"oauth_provider": user.OAuthProvider,
+		"oauth_id":       user.OAuthID,
+		"aff_code":       user.AffCode,
+		"inviter_id":     user.InviterID,
 	}).Error
 }
 

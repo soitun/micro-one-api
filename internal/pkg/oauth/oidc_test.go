@@ -40,3 +40,70 @@ func TestOIDCProviderAuthURL(t *testing.T) {
 		}
 	}
 }
+
+func TestLarkProviderAuthURL(t *testing.T) {
+	provider := NewLarkProvider(EndpointConfig{
+		Config: Config{
+			ClientID:    "lark-client",
+			RedirectURL: "https://one-api.example.com/v1/oauth/lark/callback",
+		},
+		AuthorizeURL: "https://passport.feishu.cn/suite/passport/oauth/authorize",
+	})
+
+	if provider.Name() != "lark" {
+		t.Fatalf("provider name = %q, want lark", provider.Name())
+	}
+	authURL := provider.AuthURL("state-123")
+	parsed, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatalf("parse auth url: %v", err)
+	}
+	if parsed.Scheme+"://"+parsed.Host+parsed.Path != "https://passport.feishu.cn/suite/passport/oauth/authorize" {
+		t.Fatalf("auth url endpoint mismatch: %s", authURL)
+	}
+	query := parsed.Query()
+	for key, want := range map[string]string{
+		"client_id":     "lark-client",
+		"redirect_uri":  "https://one-api.example.com/v1/oauth/lark/callback",
+		"response_type": "code",
+		"state":         "state-123",
+	} {
+		if got := query.Get(key); got != want {
+			t.Fatalf("query %s = %q, want %q; url=%s", key, got, want, authURL)
+		}
+	}
+}
+
+func TestWeChatProviderAuthURL(t *testing.T) {
+	provider := NewWeChatProvider(EndpointConfig{
+		Config: Config{
+			ClientID:    "wechat-client",
+			RedirectURL: "https://one-api.example.com/v1/oauth/wechat/callback",
+		},
+		AuthorizeURL: "https://open.weixin.qq.com/connect/qrconnect",
+	})
+
+	if provider.Name() != "wechat" {
+		t.Fatalf("provider name = %q, want wechat", provider.Name())
+	}
+	authURL := provider.AuthURL("state-123")
+	parsed, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatalf("parse auth url: %v", err)
+	}
+	if parsed.Scheme+"://"+parsed.Host+parsed.Path != "https://open.weixin.qq.com/connect/qrconnect" {
+		t.Fatalf("auth url endpoint mismatch: %s", authURL)
+	}
+	query := parsed.Query()
+	for key, want := range map[string]string{
+		"appid":         "wechat-client",
+		"redirect_uri":  "https://one-api.example.com/v1/oauth/wechat/callback",
+		"response_type": "code",
+		"scope":         "snsapi_login",
+		"state":         "state-123",
+	} {
+		if got := query.Get(key); got != want {
+			t.Fatalf("query %s = %q, want %q; url=%s", key, got, want, authURL)
+		}
+	}
+}
