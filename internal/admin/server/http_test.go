@@ -284,6 +284,39 @@ func TestAdminHTTPPageIsServed(t *testing.T) {
 	}
 }
 
+func TestAdminHTTPPageExposesOneAPIUserAndAdminWorkflows(t *testing.T) {
+	srv := NewHTTPServer(":0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`data-workspace="user"`,
+		`data-workspace="admin"`,
+		`data-tab="user-dashboard"`,
+		`data-tab="user-tokens"`,
+		`data-tab="user-billing"`,
+		`data-tab="user-oauth"`,
+		`data-tab="admin-content"`,
+		`data-tab="admin-groups"`,
+		`/api/user/login`,
+		`/api/user/self`,
+		`/api/token/`,
+		`/dashboard/billing/usage`,
+		`/api/notice`,
+		`/api/group/`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("admin page missing %s", want)
+		}
+	}
+}
+
 func TestAdminHTTPOptionRequiresAuth(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	srv := newAdminHTTPOptionTestServer(&adminHTTPSystemOptionsStore{values: map[string]string{}})
