@@ -29,25 +29,28 @@ type ChannelConfig struct {
 
 // Channel describes the channel snapshot selected for relay.
 type Channel struct {
-	ID                 int64
-	Type               int32
-	Name               string
-	Status             int32
-	BaseURL            string
-	Group              string
-	Models             []string
-	Priority           int64
-	Key                string
-	Weight             uint32
-	CreatedTime        int64
-	TestTime           int64
-	ResponseTime       int64
-	Balance            float64
-	BalanceUpdatedTime int64
-	UsedQuota          int64
-	ModelMapping       string
-	SystemPrompt       string
-	Config             ChannelConfig
+	ID                                int64
+	Type                              int32
+	Name                              string
+	Status                            int32
+	BaseURL                           string
+	Group                             string
+	Models                            []string
+	Priority                          int64
+	Key                               string
+	Weight                            uint32
+	CreatedTime                       int64
+	TestTime                          int64
+	ResponseTime                      int64
+	Balance                           float64
+	BalanceUpdatedTime                int64
+	BalanceRefreshLastError           string
+	BalanceRefreshLastSuccessTime     int64
+	ConsecutiveBalanceRefreshFailures int32
+	UsedQuota                         int64
+	ModelMapping                      string
+	SystemPrompt                      string
+	Config                            ChannelConfig
 }
 
 type Ability struct {

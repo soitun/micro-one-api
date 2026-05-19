@@ -69,23 +69,26 @@ func toChannelInfo(channel *biz.Channel) *commonv1.ChannelInfo {
 		return nil
 	}
 	return &commonv1.ChannelInfo{
-		Id:                 channel.ID,
-		Type:               channel.Type,
-		Name:               channel.Name,
-		Status:             channel.Status,
-		BaseUrl:            channel.BaseURL,
-		Group:              channel.Group,
-		Models:             channel.ModelsCSV(),
-		Priority:           channel.Priority,
-		Key:                channel.Key,
-		Weight:             channel.Weight,
-		TestTime:           channel.TestTime,
-		ResponseTime:       channel.ResponseTime,
-		Balance:            channel.Balance,
-		BalanceUpdatedTime: channel.BalanceUpdatedTime,
-		UsedQuota:          channel.UsedQuota,
-		ModelMapping:       channel.ModelMapping,
-		SystemPrompt:       channel.SystemPrompt,
+		Id:                                channel.ID,
+		Type:                              channel.Type,
+		Name:                              channel.Name,
+		Status:                            channel.Status,
+		BaseUrl:                           channel.BaseURL,
+		Group:                             channel.Group,
+		Models:                            channel.ModelsCSV(),
+		Priority:                          channel.Priority,
+		Key:                               channel.Key,
+		Weight:                            channel.Weight,
+		TestTime:                          channel.TestTime,
+		ResponseTime:                      channel.ResponseTime,
+		Balance:                           channel.Balance,
+		BalanceUpdatedTime:                channel.BalanceUpdatedTime,
+		BalanceRefreshLastError:           channel.BalanceRefreshLastError,
+		BalanceRefreshLastSuccessTime:     channel.BalanceRefreshLastSuccessTime,
+		ConsecutiveBalanceRefreshFailures: channel.ConsecutiveBalanceRefreshFailures,
+		UsedQuota:                         channel.UsedQuota,
+		ModelMapping:                      channel.ModelMapping,
+		SystemPrompt:                      channel.SystemPrompt,
 		Config: &commonv1.ChannelConfig{
 			ApiVersion:        channel.Config.APIVersion,
 			Region:            channel.Config.Region,
@@ -210,6 +213,11 @@ func (s *ChannelService) UpdateChannel(ctx context.Context, req *channelv1.Updat
 	if req.Balance != 0 || req.BalanceUpdatedTime != 0 {
 		channel.Balance = req.Balance
 		channel.BalanceUpdatedTime = req.BalanceUpdatedTime
+	}
+	if req.SetBalanceRefreshFields {
+		channel.BalanceRefreshLastError = req.BalanceRefreshLastError
+		channel.BalanceRefreshLastSuccessTime = req.BalanceRefreshLastSuccessTime
+		channel.ConsecutiveBalanceRefreshFailures = req.ConsecutiveBalanceRefreshFailures
 	}
 	if req.Config != nil {
 		channel.Config = biz.ChannelConfig{

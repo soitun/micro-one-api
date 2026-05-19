@@ -371,27 +371,30 @@ func (x *ChannelConfig) GetVertexAiProjectId() string {
 }
 
 type ChannelInfo struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	Id                 int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Type               int32                  `protobuf:"varint,2,opt,name=type,proto3" json:"type,omitempty"`
-	Name               string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Status             int32                  `protobuf:"varint,4,opt,name=status,proto3" json:"status,omitempty"`
-	BaseUrl            string                 `protobuf:"bytes,5,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
-	Group              string                 `protobuf:"bytes,6,opt,name=group,proto3" json:"group,omitempty"`
-	Models             string                 `protobuf:"bytes,7,opt,name=models,proto3" json:"models,omitempty"`
-	Priority           int64                  `protobuf:"varint,8,opt,name=priority,proto3" json:"priority,omitempty"`
-	Key                string                 `protobuf:"bytes,9,opt,name=key,proto3" json:"key,omitempty"`
-	Config             *ChannelConfig         `protobuf:"bytes,10,opt,name=config,proto3" json:"config,omitempty"`
-	Weight             uint32                 `protobuf:"varint,11,opt,name=weight,proto3" json:"weight,omitempty"`
-	TestTime           int64                  `protobuf:"varint,12,opt,name=test_time,json=testTime,proto3" json:"test_time,omitempty"`
-	ResponseTime       int64                  `protobuf:"varint,13,opt,name=response_time,json=responseTime,proto3" json:"response_time,omitempty"`
-	Balance            float64                `protobuf:"fixed64,14,opt,name=balance,proto3" json:"balance,omitempty"`
-	BalanceUpdatedTime int64                  `protobuf:"varint,15,opt,name=balance_updated_time,json=balanceUpdatedTime,proto3" json:"balance_updated_time,omitempty"`
-	UsedQuota          int64                  `protobuf:"varint,16,opt,name=used_quota,json=usedQuota,proto3" json:"used_quota,omitempty"`
-	ModelMapping       string                 `protobuf:"bytes,17,opt,name=model_mapping,json=modelMapping,proto3" json:"model_mapping,omitempty"`
-	SystemPrompt       string                 `protobuf:"bytes,18,opt,name=system_prompt,json=systemPrompt,proto3" json:"system_prompt,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state                             protoimpl.MessageState `protogen:"open.v1"`
+	Id                                int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Type                              int32                  `protobuf:"varint,2,opt,name=type,proto3" json:"type,omitempty"`
+	Name                              string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Status                            int32                  `protobuf:"varint,4,opt,name=status,proto3" json:"status,omitempty"`
+	BaseUrl                           string                 `protobuf:"bytes,5,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	Group                             string                 `protobuf:"bytes,6,opt,name=group,proto3" json:"group,omitempty"`
+	Models                            string                 `protobuf:"bytes,7,opt,name=models,proto3" json:"models,omitempty"`
+	Priority                          int64                  `protobuf:"varint,8,opt,name=priority,proto3" json:"priority,omitempty"`
+	Key                               string                 `protobuf:"bytes,9,opt,name=key,proto3" json:"key,omitempty"`
+	Config                            *ChannelConfig         `protobuf:"bytes,10,opt,name=config,proto3" json:"config,omitempty"`
+	Weight                            uint32                 `protobuf:"varint,11,opt,name=weight,proto3" json:"weight,omitempty"`
+	TestTime                          int64                  `protobuf:"varint,12,opt,name=test_time,json=testTime,proto3" json:"test_time,omitempty"`
+	ResponseTime                      int64                  `protobuf:"varint,13,opt,name=response_time,json=responseTime,proto3" json:"response_time,omitempty"`
+	Balance                           float64                `protobuf:"fixed64,14,opt,name=balance,proto3" json:"balance,omitempty"`
+	BalanceUpdatedTime                int64                  `protobuf:"varint,15,opt,name=balance_updated_time,json=balanceUpdatedTime,proto3" json:"balance_updated_time,omitempty"`
+	UsedQuota                         int64                  `protobuf:"varint,16,opt,name=used_quota,json=usedQuota,proto3" json:"used_quota,omitempty"`
+	ModelMapping                      string                 `protobuf:"bytes,17,opt,name=model_mapping,json=modelMapping,proto3" json:"model_mapping,omitempty"`
+	SystemPrompt                      string                 `protobuf:"bytes,18,opt,name=system_prompt,json=systemPrompt,proto3" json:"system_prompt,omitempty"`
+	BalanceRefreshLastError           string                 `protobuf:"bytes,19,opt,name=balance_refresh_last_error,json=balanceRefreshLastError,proto3" json:"balance_refresh_last_error,omitempty"`
+	BalanceRefreshLastSuccessTime     int64                  `protobuf:"varint,20,opt,name=balance_refresh_last_success_time,json=balanceRefreshLastSuccessTime,proto3" json:"balance_refresh_last_success_time,omitempty"`
+	ConsecutiveBalanceRefreshFailures int32                  `protobuf:"varint,21,opt,name=consecutive_balance_refresh_failures,json=consecutiveBalanceRefreshFailures,proto3" json:"consecutive_balance_refresh_failures,omitempty"`
+	unknownFields                     protoimpl.UnknownFields
+	sizeCache                         protoimpl.SizeCache
 }
 
 func (x *ChannelInfo) Reset() {
@@ -548,6 +551,27 @@ func (x *ChannelInfo) GetSystemPrompt() string {
 		return x.SystemPrompt
 	}
 	return ""
+}
+
+func (x *ChannelInfo) GetBalanceRefreshLastError() string {
+	if x != nil {
+		return x.BalanceRefreshLastError
+	}
+	return ""
+}
+
+func (x *ChannelInfo) GetBalanceRefreshLastSuccessTime() int64 {
+	if x != nil {
+		return x.BalanceRefreshLastSuccessTime
+	}
+	return 0
+}
+
+func (x *ChannelInfo) GetConsecutiveBalanceRefreshFailures() int32 {
+	if x != nil {
+		return x.ConsecutiveBalanceRefreshFailures
+	}
+	return 0
 }
 
 type AccountSnapshot struct {
@@ -1471,7 +1495,7 @@ const file_api_common_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"library_id\x18\x03 \x01(\tR\tlibraryId\x12\x16\n" +
 	"\x06plugin\x18\x04 \x01(\tR\x06plugin\x12/\n" +
-	"\x14vertex_ai_project_id\x18\x05 \x01(\tR\x11vertexAiProjectId\"\x99\x04\n" +
+	"\x14vertex_ai_project_id\x18\x05 \x01(\tR\x11vertexAiProjectId\"\xf1\x05\n" +
 	"\vChannelInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\x05R\x04type\x12\x12\n" +
@@ -1492,7 +1516,10 @@ const file_api_common_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"used_quota\x18\x10 \x01(\x03R\tusedQuota\x12#\n" +
 	"\rmodel_mapping\x18\x11 \x01(\tR\fmodelMapping\x12#\n" +
-	"\rsystem_prompt\x18\x12 \x01(\tR\fsystemPrompt\"\xde\x01\n" +
+	"\rsystem_prompt\x18\x12 \x01(\tR\fsystemPrompt\x12;\n" +
+	"\x1abalance_refresh_last_error\x18\x13 \x01(\tR\x17balanceRefreshLastError\x12H\n" +
+	"!balance_refresh_last_success_time\x18\x14 \x01(\x03R\x1dbalanceRefreshLastSuccessTime\x12O\n" +
+	"$consecutive_balance_refresh_failures\x18\x15 \x01(\x05R!consecutiveBalanceRefreshFailures\"\xde\x01\n" +
 	"\x0fAccountSnapshot\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05quota\x18\x02 \x01(\x03R\x05quota\x12\x1d\n" +

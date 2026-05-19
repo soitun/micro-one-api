@@ -623,22 +623,28 @@ func (x *CreateChannelResponse) GetChannelId() int64 {
 }
 
 type UpdateChannelRequest struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	ChannelId          int64                  `protobuf:"varint,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	Name               string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	BaseUrl            string                 `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
-	Key                string                 `protobuf:"bytes,4,opt,name=key,proto3" json:"key,omitempty"`
-	Models             string                 `protobuf:"bytes,5,opt,name=models,proto3" json:"models,omitempty"`
-	Group              string                 `protobuf:"bytes,6,opt,name=group,proto3" json:"group,omitempty"`
-	Priority           int64                  `protobuf:"varint,7,opt,name=priority,proto3" json:"priority,omitempty"`
-	Config             *v1.ChannelConfig      `protobuf:"bytes,8,opt,name=config,proto3" json:"config,omitempty"`
-	Weight             uint32                 `protobuf:"varint,9,opt,name=weight,proto3" json:"weight,omitempty"`
-	ModelMapping       string                 `protobuf:"bytes,10,opt,name=model_mapping,json=modelMapping,proto3" json:"model_mapping,omitempty"`
-	SystemPrompt       string                 `protobuf:"bytes,11,opt,name=system_prompt,json=systemPrompt,proto3" json:"system_prompt,omitempty"`
-	Balance            float64                `protobuf:"fixed64,12,opt,name=balance,proto3" json:"balance,omitempty"`
-	BalanceUpdatedTime int64                  `protobuf:"varint,13,opt,name=balance_updated_time,json=balanceUpdatedTime,proto3" json:"balance_updated_time,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state                             protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId                         int64                  `protobuf:"varint,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Name                              string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	BaseUrl                           string                 `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	Key                               string                 `protobuf:"bytes,4,opt,name=key,proto3" json:"key,omitempty"`
+	Models                            string                 `protobuf:"bytes,5,opt,name=models,proto3" json:"models,omitempty"`
+	Group                             string                 `protobuf:"bytes,6,opt,name=group,proto3" json:"group,omitempty"`
+	Priority                          int64                  `protobuf:"varint,7,opt,name=priority,proto3" json:"priority,omitempty"`
+	Config                            *v1.ChannelConfig      `protobuf:"bytes,8,opt,name=config,proto3" json:"config,omitempty"`
+	Weight                            uint32                 `protobuf:"varint,9,opt,name=weight,proto3" json:"weight,omitempty"`
+	ModelMapping                      string                 `protobuf:"bytes,10,opt,name=model_mapping,json=modelMapping,proto3" json:"model_mapping,omitempty"`
+	SystemPrompt                      string                 `protobuf:"bytes,11,opt,name=system_prompt,json=systemPrompt,proto3" json:"system_prompt,omitempty"`
+	Balance                           float64                `protobuf:"fixed64,12,opt,name=balance,proto3" json:"balance,omitempty"`
+	BalanceUpdatedTime                int64                  `protobuf:"varint,13,opt,name=balance_updated_time,json=balanceUpdatedTime,proto3" json:"balance_updated_time,omitempty"`
+	BalanceRefreshLastError           string                 `protobuf:"bytes,14,opt,name=balance_refresh_last_error,json=balanceRefreshLastError,proto3" json:"balance_refresh_last_error,omitempty"`
+	BalanceRefreshLastSuccessTime     int64                  `protobuf:"varint,15,opt,name=balance_refresh_last_success_time,json=balanceRefreshLastSuccessTime,proto3" json:"balance_refresh_last_success_time,omitempty"`
+	ConsecutiveBalanceRefreshFailures int32                  `protobuf:"varint,16,opt,name=consecutive_balance_refresh_failures,json=consecutiveBalanceRefreshFailures,proto3" json:"consecutive_balance_refresh_failures,omitempty"`
+	// when true, the three balance_refresh_* fields above are written to the channel as-is
+	// (so callers can clear last_error by passing "" and reset the counter by passing 0).
+	SetBalanceRefreshFields bool `protobuf:"varint,17,opt,name=set_balance_refresh_fields,json=setBalanceRefreshFields,proto3" json:"set_balance_refresh_fields,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *UpdateChannelRequest) Reset() {
@@ -760,6 +766,34 @@ func (x *UpdateChannelRequest) GetBalanceUpdatedTime() int64 {
 		return x.BalanceUpdatedTime
 	}
 	return 0
+}
+
+func (x *UpdateChannelRequest) GetBalanceRefreshLastError() string {
+	if x != nil {
+		return x.BalanceRefreshLastError
+	}
+	return ""
+}
+
+func (x *UpdateChannelRequest) GetBalanceRefreshLastSuccessTime() int64 {
+	if x != nil {
+		return x.BalanceRefreshLastSuccessTime
+	}
+	return 0
+}
+
+func (x *UpdateChannelRequest) GetConsecutiveBalanceRefreshFailures() int32 {
+	if x != nil {
+		return x.ConsecutiveBalanceRefreshFailures
+	}
+	return 0
+}
+
+func (x *UpdateChannelRequest) GetSetBalanceRefreshFields() bool {
+	if x != nil {
+		return x.SetBalanceRefreshFields
+	}
+	return false
 }
 
 type UpdateChannelResponse struct {
@@ -1061,7 +1095,7 @@ const file_api_channel_v1_channel_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
 	"\n" +
-	"channel_id\x18\x03 \x01(\x03R\tchannelId\"\xa4\x03\n" +
+	"channel_id\x18\x03 \x01(\x03R\tchannelId\"\xb9\x05\n" +
 	"\x14UpdateChannelRequest\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x01 \x01(\x03R\tchannelId\x12\x12\n" +
@@ -1077,7 +1111,11 @@ const file_api_channel_v1_channel_proto_rawDesc = "" +
 	" \x01(\tR\fmodelMapping\x12#\n" +
 	"\rsystem_prompt\x18\v \x01(\tR\fsystemPrompt\x12\x18\n" +
 	"\abalance\x18\f \x01(\x01R\abalance\x120\n" +
-	"\x14balance_updated_time\x18\r \x01(\x03R\x12balanceUpdatedTime\"K\n" +
+	"\x14balance_updated_time\x18\r \x01(\x03R\x12balanceUpdatedTime\x12;\n" +
+	"\x1abalance_refresh_last_error\x18\x0e \x01(\tR\x17balanceRefreshLastError\x12H\n" +
+	"!balance_refresh_last_success_time\x18\x0f \x01(\x03R\x1dbalanceRefreshLastSuccessTime\x12O\n" +
+	"$consecutive_balance_refresh_failures\x18\x10 \x01(\x05R!consecutiveBalanceRefreshFailures\x12;\n" +
+	"\x1aset_balance_refresh_fields\x18\x11 \x01(\bR\x17setBalanceRefreshFields\"K\n" +
 	"\x15UpdateChannelResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"5\n" +

@@ -73,14 +73,17 @@ func (c *adminHTTPIdentityClient) DeleteUser(ctx context.Context, req *identityv
 
 type adminHTTPChannelClient struct {
 	channelv1.ChannelServiceClient
-	createdName string
-	created     *channelv1.CreateChannelRequest
-	updated     *channelv1.UpdateChannelRequest
-	deletedID   int64
-	deletedIDs  []int64
-	baseURL     string
-	chType      int32
-	statuses    []int32
+	createdName            string
+	created                *channelv1.CreateChannelRequest
+	updated                *channelv1.UpdateChannelRequest
+	deletedID              int64
+	deletedIDs             []int64
+	baseURL                string
+	chType                 int32
+	statuses               []int32
+	existingFailureCount   int32
+	existingLastError      string
+	existingLastSuccess    int64
 }
 
 func (c *adminHTTPChannelClient) CreateChannel(ctx context.Context, req *channelv1.CreateChannelRequest, opts ...grpc.CallOption) (*channelv1.CreateChannelResponse, error) {
@@ -116,22 +119,25 @@ func (c *adminHTTPChannelClient) GetChannel(ctx context.Context, req *channelv1.
 	}
 	return &channelv1.GetChannelReply{
 		Channel: &commonv1.ChannelInfo{
-			Id:                 req.ChannelId,
-			Name:               "openai",
-			Type:               chType,
-			Status:             1,
-			Group:              "default",
-			Models:             "gpt-4o",
-			BaseUrl:            baseURL,
-			Key:                "sk-test",
-			Weight:             3,
-			TestTime:           1710000000,
-			ResponseTime:       245,
-			Balance:            12.5,
-			BalanceUpdatedTime: 1710000100,
-			UsedQuota:          900,
-			ModelMapping:       `{"gpt-4o":"gpt-4o-mini"}`,
-			SystemPrompt:       "be concise",
+			Id:                                req.ChannelId,
+			Name:                              "openai",
+			Type:                              chType,
+			Status:                            1,
+			Group:                             "default",
+			Models:                            "gpt-4o",
+			BaseUrl:                           baseURL,
+			Key:                               "sk-test",
+			Weight:                            3,
+			TestTime:                          1710000000,
+			ResponseTime:                      245,
+			Balance:                           12.5,
+			BalanceUpdatedTime:                1710000100,
+			UsedQuota:                         900,
+			ModelMapping:                      `{"gpt-4o":"gpt-4o-mini"}`,
+			SystemPrompt:                      "be concise",
+			BalanceRefreshLastError:           c.existingLastError,
+			BalanceRefreshLastSuccessTime:     c.existingLastSuccess,
+			ConsecutiveBalanceRefreshFailures: c.existingFailureCount,
 		},
 	}, nil
 }
@@ -246,6 +252,11 @@ func (s *adminHTTPSystemOptionsStore) Set(key, value string) error {
 
 func newAdminHTTPTestServer(identity identityv1.IdentityServiceClient, channel channelv1.ChannelServiceClient, billing billingv1.BillingServiceClient) http.Handler {
 	adminSvc := service.NewAdminService(billing, identity, channel, nil)
+	return NewHTTPServer(":0", adminSvc)
+}
+
+func newAdminHTTPTestServerWithOptions(identity identityv1.IdentityServiceClient, channel channelv1.ChannelServiceClient, billing billingv1.BillingServiceClient, store service.SystemOptionsStore) http.Handler {
+	adminSvc := service.NewAdminService(billing, identity, channel, store)
 	return NewHTTPServer(":0", adminSvc)
 }
 
@@ -1231,6 +1242,108 @@ func TestAdminHTTPUpdateChannelBalanceRefreshesSupportedChannel(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("balance response missing %s: %s", want, rec.Body.String())
 		}
+	}
+}
+
+func TestAdminHTTPUpdateChannelBalanceUnsupportedProviderStaysEnabled(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	// type 99 has no balance adapter registered.
+	channelClient := &adminHTTPChannelClient{chType: 99}
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, channelClient, &adminHTTPBillingClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/channel/update_balance/101", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if channelClient.updated != nil {
+		t.Fatalf("UpdateChannel should not be called for unsupported provider, got %+v", channelClient.updated)
+	}
+	if len(channelClient.statuses) != 0 {
+		t.Fatalf("ChangeChannelStatus should not be called for unsupported provider, got %v", channelClient.statuses)
+	}
+	for _, want := range []string{`"success":true`, `"skipped":true`, "balance refresh not supported"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("unsupported response missing %s: %s", want, rec.Body.String())
+		}
+	}
+}
+
+func TestAdminHTTPUpdateChannelBalanceTransientErrorIncrementsCounterWithoutDisabling(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream is unavailable", http.StatusServiceUnavailable)
+	}))
+	defer upstream.Close()
+
+	channelClient := &adminHTTPChannelClient{baseURL: upstream.URL + "/v1"}
+	// Auto-disable disabled by default: no system options store wired.
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, channelClient, &adminHTTPBillingClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/channel/update_balance/101", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if channelClient.updated == nil {
+		t.Fatal("UpdateChannel should be called to record the failure")
+	}
+	if !channelClient.updated.SetBalanceRefreshFields {
+		t.Fatal("UpdateChannel must opt into balance-refresh field writes")
+	}
+	if channelClient.updated.BalanceRefreshLastError == "" {
+		t.Fatal("balance_refresh_last_error should be set on transient failure")
+	}
+	if channelClient.updated.ConsecutiveBalanceRefreshFailures != 1 {
+		t.Fatalf("consecutive failures = %d, want 1", channelClient.updated.ConsecutiveBalanceRefreshFailures)
+	}
+	if len(channelClient.statuses) != 0 {
+		t.Fatalf("ChangeChannelStatus should not be called when auto-disable is off: %v", channelClient.statuses)
+	}
+}
+
+func TestAdminHTTPUpdateChannelBalancePersistentErrorTriggersAutoDisable(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream is unavailable", http.StatusServiceUnavailable)
+	}))
+	defer upstream.Close()
+
+	channelClient := &adminHTTPChannelClient{
+		baseURL:              upstream.URL + "/v1",
+		existingFailureCount: 2,
+	}
+	store := &adminHTTPSystemOptionsStore{values: map[string]string{
+		"AutomaticDisableChannelEnabled": "true",
+		"ChannelDisableThreshold":        "3",
+	}}
+	srv := newAdminHTTPTestServerWithOptions(&adminHTTPIdentityClient{}, channelClient, &adminHTTPBillingClient{}, store)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/channel/update_balance/101", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if channelClient.updated == nil {
+		t.Fatal("UpdateChannel should be called to record the failure")
+	}
+	if channelClient.updated.ConsecutiveBalanceRefreshFailures != 3 {
+		t.Fatalf("consecutive failures = %d, want 3", channelClient.updated.ConsecutiveBalanceRefreshFailures)
+	}
+	if len(channelClient.statuses) != 1 || channelClient.statuses[0] != 2 {
+		t.Fatalf("expected one ChangeChannelStatus(status=2), got %v", channelClient.statuses)
+	}
+	if !strings.Contains(rec.Body.String(), `"disabled":true`) {
+		t.Fatalf("response should report disabled: %s", rec.Body.String())
 	}
 }
 

@@ -583,12 +583,17 @@ func (s *AdminService) UpdateChannel(ctx context.Context, req *adminv1.AdminUpda
 }
 
 type ChannelBalanceRefreshResult struct {
-	Success            bool    `json:"success"`
-	ChannelID          int64   `json:"channel_id"`
-	Provider           string  `json:"provider,omitempty"`
-	Balance            float64 `json:"balance,omitempty"`
-	BalanceUpdatedTime int64   `json:"balance_updated_time,omitempty"`
-	Message            string  `json:"message,omitempty"`
+	Success                           bool    `json:"success"`
+	ChannelID                         int64   `json:"channel_id"`
+	Provider                          string  `json:"provider,omitempty"`
+	Balance                           float64 `json:"balance,omitempty"`
+	BalanceUpdatedTime                int64   `json:"balance_updated_time,omitempty"`
+	Message                           string  `json:"message,omitempty"`
+	Skipped                           bool    `json:"skipped,omitempty"`
+	BalanceRefreshLastError           string  `json:"balance_refresh_last_error,omitempty"`
+	BalanceRefreshLastSuccessTime     int64   `json:"balance_refresh_last_success_time,omitempty"`
+	ConsecutiveBalanceRefreshFailures int32   `json:"consecutive_balance_refresh_failures,omitempty"`
+	Disabled                          bool    `json:"disabled,omitempty"`
 }
 
 func (s *AdminService) RefreshChannelBalance(ctx context.Context, channelID int64) (*ChannelBalanceRefreshResult, error) {
@@ -624,26 +629,38 @@ func (s *AdminService) RefreshAllChannelBalances(ctx context.Context) ([]*Channe
 func (s *AdminService) refreshChannelBalance(ctx context.Context, channel *commonv1.ChannelInfo) (*ChannelBalanceRefreshResult, error) {
 	adapter := balanceAdapterForChannel(channel)
 	if adapter == nil {
+		// Unsupported provider: keep the channel enabled, do not persist anything,
+		// and do not touch the failure counter. Upstream one-api has no balance fetch
+		// for these providers, so "stale balance + enabled" is the parity stance.
 		return &ChannelBalanceRefreshResult{
-			Success:   false,
-			ChannelID: channel.GetId(),
-			Message:   "unsupported channel balance provider",
+			Success:                           true,
+			Skipped:                           true,
+			ChannelID:                         channel.GetId(),
+			Balance:                           channel.GetBalance(),
+			BalanceUpdatedTime:                channel.GetBalanceUpdatedTime(),
+			BalanceRefreshLastError:           channel.GetBalanceRefreshLastError(),
+			BalanceRefreshLastSuccessTime:     channel.GetBalanceRefreshLastSuccessTime(),
+			ConsecutiveBalanceRefreshFailures: channel.GetConsecutiveBalanceRefreshFailures(),
+			Message:                           "balance refresh not supported for this provider; channel left enabled with stale balance",
 		}, nil
 	}
-	balance, err := adapter.fetch(ctx, s.httpClient, channel)
-	if err != nil {
-		return &ChannelBalanceRefreshResult{
-			Success:   false,
-			ChannelID: channel.GetId(),
-			Provider:  adapter.name,
-			Message:   err.Error(),
-		}, nil
+	balance, fetchErr := adapter.fetch(ctx, s.httpClient, channel)
+	if fetchErr != nil {
+		return s.persistBalanceRefreshFailure(ctx, channel, adapter.name, fetchErr)
 	}
+	return s.persistBalanceRefreshSuccess(ctx, channel, adapter.name, balance)
+}
+
+func (s *AdminService) persistBalanceRefreshSuccess(ctx context.Context, channel *commonv1.ChannelInfo, provider string, balance float64) (*ChannelBalanceRefreshResult, error) {
 	now := time.Now().Unix()
 	resp, err := s.channelClient.UpdateChannel(ctx, &channelv1.UpdateChannelRequest{
-		ChannelId:          channel.GetId(),
-		Balance:            balance,
-		BalanceUpdatedTime: now,
+		ChannelId:                         channel.GetId(),
+		Balance:                           balance,
+		BalanceUpdatedTime:                now,
+		BalanceRefreshLastError:           "",
+		BalanceRefreshLastSuccessTime:     now,
+		ConsecutiveBalanceRefreshFailures: 0,
+		SetBalanceRefreshFields:           true,
 	})
 	if err != nil {
 		return nil, err
@@ -653,15 +670,73 @@ func (s *AdminService) refreshChannelBalance(ctx context.Context, channel *commo
 		if message == "" {
 			message = "failed to persist channel balance"
 		}
-		return &ChannelBalanceRefreshResult{Success: false, ChannelID: channel.GetId(), Provider: adapter.name, Message: message}, nil
+		return &ChannelBalanceRefreshResult{Success: false, ChannelID: channel.GetId(), Provider: provider, Message: message}, nil
 	}
 	return &ChannelBalanceRefreshResult{
-		Success:            true,
-		ChannelID:          channel.GetId(),
-		Provider:           adapter.name,
-		Balance:            balance,
-		BalanceUpdatedTime: now,
+		Success:                       true,
+		ChannelID:                     channel.GetId(),
+		Provider:                      provider,
+		Balance:                       balance,
+		BalanceUpdatedTime:            now,
+		BalanceRefreshLastSuccessTime: now,
 	}, nil
+}
+
+func (s *AdminService) persistBalanceRefreshFailure(ctx context.Context, channel *commonv1.ChannelInfo, provider string, fetchErr error) (*ChannelBalanceRefreshResult, error) {
+	newFailureCount := channel.GetConsecutiveBalanceRefreshFailures() + 1
+	resp, err := s.channelClient.UpdateChannel(ctx, &channelv1.UpdateChannelRequest{
+		ChannelId:                         channel.GetId(),
+		BalanceRefreshLastError:           fetchErr.Error(),
+		BalanceRefreshLastSuccessTime:     channel.GetBalanceRefreshLastSuccessTime(),
+		ConsecutiveBalanceRefreshFailures: newFailureCount,
+		SetBalanceRefreshFields:           true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := &ChannelBalanceRefreshResult{
+		Success:                           false,
+		ChannelID:                         channel.GetId(),
+		Provider:                          provider,
+		Message:                           fetchErr.Error(),
+		BalanceRefreshLastError:           fetchErr.Error(),
+		BalanceRefreshLastSuccessTime:     channel.GetBalanceRefreshLastSuccessTime(),
+		ConsecutiveBalanceRefreshFailures: newFailureCount,
+	}
+	if !resp.GetSuccess() {
+		// Persist failed; still report the fetch error to the caller but flag persist failure too.
+		return result, nil
+	}
+	if channel.GetStatus() == 1 && s.shouldAutoDisableChannel(ctx, newFailureCount) {
+		disableResp, disableErr := s.channelClient.ChangeChannelStatus(ctx, &channelv1.ChangeChannelStatusRequest{
+			ChannelId: channel.GetId(),
+			Status:    2,
+		})
+		if disableErr == nil && disableResp.GetSuccess() {
+			result.Disabled = true
+		}
+	}
+	return result, nil
+}
+
+// shouldAutoDisableChannel reads the AutomaticDisableChannelEnabled flag and ChannelDisableThreshold
+// from system options at refresh time. Returns true only when both are configured AND the threshold
+// has been reached. With the default options (false / 0) this always returns false, so existing
+// deployments see no behavior change until they opt in.
+func (s *AdminService) shouldAutoDisableChannel(ctx context.Context, failureCount int32) bool {
+	enabled, err := s.GetOneAPIOption(ctx, "AutomaticDisableChannelEnabled")
+	if err != nil || !strings.EqualFold(strings.TrimSpace(enabled), "true") {
+		return false
+	}
+	thresholdStr, err := s.GetOneAPIOption(ctx, "ChannelDisableThreshold")
+	if err != nil {
+		return false
+	}
+	threshold, err := strconv.ParseInt(strings.TrimSpace(thresholdStr), 10, 32)
+	if err != nil || threshold <= 0 {
+		return false
+	}
+	return int64(failureCount) >= threshold
 }
 
 type channelBalanceAdapter struct {

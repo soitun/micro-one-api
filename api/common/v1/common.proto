@@ -72,6 +72,9 @@ message ChannelInfo {
   int64 used_quota = 16;
   string model_mapping = 17;
   string system_prompt = 18;
+  string balance_refresh_last_error = 19;
+  int64 balance_refresh_last_success_time = 20;
+  int32 consecutive_balance_refresh_failures = 21;
 }
 
 // ========== 账户快照 ==========
