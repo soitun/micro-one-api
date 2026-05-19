@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -108,7 +109,7 @@ func NewHTTPServerWithRegistrationPolicy(addr string, uc *biz.IdentityUsecase, o
 	})
 
 	srv.HandleFunc("/api/user/register", func(w http.ResponseWriter, r *http.Request) {
-		handleRegister(w, r, uc, registrationPolicy)
+		handleRegister(w, r, uc, registrationPolicy, billingClient)
 	})
 	srv.HandleFunc("/api/user/login", func(w http.ResponseWriter, r *http.Request) {
 		handleLogin(w, r, uc)
@@ -203,7 +204,7 @@ var verificationStore = struct {
 	items: make(map[string]verificationRecord),
 }
 
-func handleRegister(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, policy RegistrationPolicy) {
+func handleRegister(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, policy RegistrationPolicy, billingClient billingv1.BillingServiceClient) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
 		return
@@ -250,7 +251,40 @@ func handleRegister(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsec
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
 		return
 	}
+	creditInvitationBonus(r.Context(), user, billingClient)
 	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{"user_id": user.ID}})
+}
+
+// creditInvitationBonus best-effort credits the invitee + inviter via the billing service so a ledger row is written.
+// Failure is swallowed because the user record is already committed; admin /api/topup can grant the bonus manually if needed.
+func creditInvitationBonus(ctx context.Context, user *biz.User, billingClient billingv1.BillingServiceClient) {
+	if user == nil || user.InviterID == 0 || billingClient == nil {
+		return
+	}
+	if bonus := positiveEnvInt64("INVITEE_BONUS_QUOTA"); bonus > 0 {
+		_, _ = billingClient.TopUpQuota(ctx, &billingv1.TopUpQuotaRequest{
+			UserId:     strconv.FormatInt(user.ID, 10),
+			Amount:     bonus,
+			OperatorId: "system_invitation",
+			Remark:     "invitation invitee bonus",
+		})
+	}
+	if bonus := positiveEnvInt64("INVITER_BONUS_QUOTA"); bonus > 0 {
+		_, _ = billingClient.TopUpQuota(ctx, &billingv1.TopUpQuotaRequest{
+			UserId:     strconv.FormatInt(user.InviterID, 10),
+			Amount:     bonus,
+			OperatorId: "system_invitation",
+			Remark:     fmt.Sprintf("invitation inviter bonus, invitee=%d", user.ID),
+		})
+	}
+}
+
+func positiveEnvInt64(key string) int64 {
+	value, err := strconv.ParseInt(os.Getenv(key), 10, 64)
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
 }
 
 func emailDomainAllowed(email string, whitelist []string) bool {
@@ -532,11 +566,7 @@ func handleOnlinePaymentDisabled(w http.ResponseWriter, r *http.Request, uc *biz
 		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"success": false,
-		"message": "disabled",
-		"data":    "online payment is not configured",
-	})
+	writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "online payment is not configured"})
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {

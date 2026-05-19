@@ -1,18 +1,29 @@
 # One API Remaining Gap Priority List
 
 > Branch: `docs/one-api-gap-refresh-20260512`
-> Date: 2026-05-12 (main table refreshed 2026-05-19)
+> Date: 2026-05-12 (main table refreshed 2026-05-19; topup/affiliate scope clarified 2026-05-19)
 > Source: current `develop` code and sibling `../one-api`.
 
 ## Summary
 
-The project now covers the core microservice skeleton, OpenAI-compatible relay path, token validation, channel selection, billing reservation/commit/release flow, structured usage logs, user dashboard aggregation (usage + subscription), expanded token/channel/option fields, OAuth/SSO and bind flows for GitHub/Google/OIDC/Lark/WeChat/Telegram with Turnstile and email-domain enforcement, channel balance refresh adapters for the OpenAI-compatible providers, group and content management, and a wide NotImplemented-stable OpenAI route surface.
+The project now covers the core microservice skeleton, OpenAI-compatible relay path, token validation, channel selection, billing reservation/commit/release flow, structured usage logs, user dashboard aggregation (usage + subscription), expanded token/channel/option fields, OAuth/SSO and bind flows for GitHub/Google/OIDC/Lark/WeChat/Telegram with Turnstile and email-domain enforcement, channel balance refresh adapters for the OpenAI-compatible providers, group and content management, a wide NotImplemented-stable OpenAI route surface, redemption-code top-up (`/api/user/topup`) and admin quota grant (`/api/topup`) with ledger writes, and registration-time invitation bonus credit through the billing service.
 
-It is still not a full One API product. The largest remaining gaps are the full web frontend, native adapters for non-OpenAI-compatible providers, real top-up / affiliate / online payment implementations (currently disabled placeholders), and explicit failure/disable semantics for channel balance refresh on uncovered providers.
+It is still not a full One API product. The largest remaining gaps are the full web frontend, native adapters for non-OpenAI-compatible providers, and explicit failure/disable semantics for channel balance refresh on uncovered providers. Online payment and a standalone affiliate-transfer endpoint are intentionally out of scope: upstream one-api does not implement either in its backend (its Air theme frontend calls `/api/user/pay` / `/api/user/amount` but the routes are never registered server-side, and there is no `aff_transfer` endpoint or `aff_quota` field upstream).
 
-## Recently Completed (since 2026-05-12)
+## Recently Completed
 
-These items from the earlier priority list are now implemented:
+These items from earlier priority lists are now implemented:
+
+### Since 2026-05-19
+
+| Area | Current State |
+| --- | --- |
+| Top-up — user redemption | `/api/user/topup` accepts `{key}`, delegates to `billing.RedeemCode`, which validates the code, credits the user via `accountRepo.UpdateQuota`, writes a `Ledger` entry (`LedgerTypeRedeem`), and records a `RedeemRecord`. End-to-end wired since the billing service was added; earlier "P0 top-up workflow" entry was stale. |
+| Top-up — admin grant | `/api/topup` (admin) calls `billing.TopUpQuota(user_id, amount, operator_id, remark)`; same ledger path with `LedgerTypeRecharge`. |
+| Invitation bonus ledger | Registration-time inviter/invitee credit (gated by `INVITER_BONUS_QUOTA` / `INVITEE_BONUS_QUOTA`) now routes through `billingClient.TopUpQuota` from the identity HTTP layer, producing audit-visible ledger rows instead of bypassing the billing service. Identity biz no longer mutates `users.quota` for affiliate credits. |
+| Online payment placeholder shape | `/api/user/pay` and `/api/user/amount` now return the canonical `{success:false, message:"online payment is not configured"}` shape instead of the ad-hoc `{success:false, message:"disabled", data:"..."}` shape. Routes remain intentionally disabled. |
+
+### Since 2026-05-12
 
 | Area | Current State |
 | --- | --- |
@@ -31,7 +42,6 @@ These items from the earlier priority list are now implemented:
 | Area | Current State | Needed Work |
 | --- | --- | --- |
 | Web frontend | Single embedded `admin.html` (~747 lines) only. | Build or migrate a real user/admin frontend covering login, user self-service, tokens, channels, redemptions, logs, settings, dashboard charts, content, groups, and OAuth/bind flows. |
-| Top-up / affiliate / online payment | `/api/topup`, `/api/aff/transfer`, and `/api/pay/*` exist only as disabled placeholders returning stable error payloads. | Implement real quota top-up via redemption code + admin grant flow, affiliate reward transfer with audit, and at least one online-payment integration (or an explicit "self-hosted only" stance). |
 
 ## Priority 1: Compatibility Depth
 
@@ -50,14 +60,13 @@ These items from the earlier priority list are now implemented:
 
 ## Disabled Placeholder Routes
 
-These routes are intentionally registered as stable disabled placeholders, distinct from NotImplemented OpenAI compatibility shims. They MUST return a stable shape and SHOULD NOT be confused with "not yet implemented" — the product decision is to keep them off until the corresponding subsystem is built.
+These routes are intentionally registered as stable disabled placeholders, distinct from NotImplemented OpenAI compatibility shims. They MUST return a stable shape and SHOULD NOT be confused with "not yet implemented" — for the routes below, upstream one-api also does not implement them server-side, so holding a stable rejection here is the parity stance.
 
-| Route | Purpose | Required Before Enabling |
+| Route | Purpose | Status |
 | --- | --- | --- |
-| `/api/topup` | Manual / admin quota top-up | Top-up workflow implementation |
-| `/api/aff/transfer` | Affiliate reward transfer | Affiliate ledger + audit |
-| `/api/pay/*` | Online payment callbacks | Payment provider integration + idempotency |
-| `/api/oauth/telegram/*` | Telegram OAuth login/bind | Telegram bot config and CSRF model |
+| `/api/user/aff_transfer` | Affiliate reward transfer | Upstream one-api does not implement this; intentionally disabled. Invitation bonuses are credited at registration time (gated by `INVITER_BONUS_QUOTA` / `INVITEE_BONUS_QUOTA`), not via a user-triggered transfer. |
+| `/api/user/pay`, `/api/user/amount` | Online payment initiation/callback | Upstream one-api does not implement online payment in its backend (only its Air theme frontend calls these routes). Self-hosted deployments use redemption codes via `/api/user/topup`. |
+| `/api/oauth/telegram/*` | Telegram OAuth login/bind | Telegram bot config and CSRF model. |
 
 ## Completion Plan
 
@@ -78,20 +87,7 @@ Acceptance:
 - An admin can manage users, channels, redemptions, logs, and options from the UI.
 - Browser smoke tests cover the primary user and admin workflows.
 
-### 2. Top-up / Affiliate / Online Payment
-
-Goal: turn the disabled placeholder routes into real workflows.
-
-Scope:
-- `/api/topup`: admin-granted quota and redemption-code flow; idempotent against double-spend.
-- `/api/aff/transfer`: ledger entries with audit, capped by invitation-reward configuration.
-- `/api/pay/*`: at least one provider integration (Stripe or Alipay) with signed callback verification, or an explicit decision to keep disabled and remove the placeholders.
-
-Acceptance:
-- Each flow has positive, idempotent-replay, and unauthorized-caller tests.
-- Audit entries are visible through admin log routes.
-
-### 3. Balance Refresh Failure Semantics
+### 2. Balance Refresh Failure Semantics
 
 Goal: turn "unsupported provider" silence into a documented policy.
 
@@ -103,7 +99,7 @@ Scope:
 Acceptance:
 - Tests cover unsupported provider, transient upstream error, persistent upstream error, and stale-balance display.
 
-### 4. Provider-Native Adapters
+### 3. Provider-Native Adapters
 
 Goal: improve quality and reliability for non-OpenAI-compatible upstreams.
 
@@ -115,7 +111,7 @@ Acceptance:
 - Each adapter has non-streaming, streaming, usage, and upstream-error tests.
 - Provider defaults include base URL, supported models, and required channel config fields.
 
-### 5. Reconciliation Review Surface
+### 4. Reconciliation Review Surface
 
 Goal: make the existing reconciliation job operationally useful from admin.
 
@@ -130,10 +126,9 @@ Acceptance:
 ## Recommended Execution Order
 
 1. Build or migrate the full web frontend against the current `/api/*` compatibility layer.
-2. Implement top-up, affiliate transfer, and at least one online-payment path (or formally retire the placeholders).
-3. Define and ship balance-refresh failure semantics for uncovered providers.
-4. Add provider-native adapters in demand order, starting with the highest-traffic non-OpenAI-compatible channels.
-5. Expose the reconciliation review surface to admins.
+2. Define and ship balance-refresh failure semantics for uncovered providers.
+3. Add provider-native adapters in demand order, starting with the highest-traffic non-OpenAI-compatible channels.
+4. Expose the reconciliation review surface to admins.
 
 ## Documentation Policy
 

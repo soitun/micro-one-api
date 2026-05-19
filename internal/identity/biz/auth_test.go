@@ -902,7 +902,7 @@ func TestIdentityUsecase_GetOrCreateAffCode_GeneratesWhenMissing(t *testing.T) {
 	}
 }
 
-func TestIdentityUsecase_RegisterWithAffCode_AppliesConfiguredBonuses(t *testing.T) {
+func TestIdentityUsecase_RegisterWithAffCode_DoesNotApplyBonusesAtBizLayer(t *testing.T) {
 	t.Setenv("INVITEE_BONUS_QUOTA", "25")
 	t.Setenv("INVITER_BONUS_QUOTA", "50")
 	repo := &mockIdentityRepo{
@@ -917,11 +917,14 @@ func TestIdentityUsecase_RegisterWithAffCode_AppliesConfiguredBonuses(t *testing
 	if err != nil {
 		t.Fatalf("RegisterWithAffCode() error = %v", err)
 	}
-	if repo.users[1].Quota != 150 {
-		t.Fatalf("inviter quota = %d, want 150", repo.users[1].Quota)
+	if repo.users[1].Quota != 100 {
+		t.Fatalf("inviter quota = %d, want unchanged 100 (bonus credit happens in billing, not biz)", repo.users[1].Quota)
 	}
-	if user.Quota != 25 {
-		t.Fatalf("invitee quota = %d, want 25", user.Quota)
+	if user.Quota != 0 {
+		t.Fatalf("invitee quota at biz layer = %d, want 0 (bonus credit happens in billing, not biz)", user.Quota)
+	}
+	if user.InviterID != 1 {
+		t.Fatalf("invitee InviterID = %d, want 1", user.InviterID)
 	}
 }
 

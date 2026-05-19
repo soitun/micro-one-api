@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -139,6 +140,87 @@ func TestIdentityHTTPRegisterAcceptsAffCode(t *testing.T) {
 	}
 	if bob.InviterID != inviter.ID {
 		t.Fatalf("inviter id = %d, want %d", bob.InviterID, inviter.ID)
+	}
+}
+
+func TestIdentityHTTPRegisterWithAffCodeCreditsInvitationBonusViaBilling(t *testing.T) {
+	t.Setenv("INVITEE_BONUS_QUOTA", "25")
+	t.Setenv("INVITER_BONUS_QUOTA", "50")
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	inviter, err := uc.Register(context.Background(), "alice", "password123", "alice@example.com", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	billingClient := &identityHTTPBillingClient{}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/user/register", strings.NewReader(`{"username":"bob","password":"password123","email":"bob@example.com","aff_code":"`+inviter.AffCode+`"}`))
+	registerRec := httptest.NewRecorder()
+	srv.ServeHTTP(registerRec, registerReq)
+
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	bob, err := repo.FindUserByUsername(context.Background(), "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(billingClient.topUpCalls) != 2 {
+		t.Fatalf("topup calls = %d, want 2: %#v", len(billingClient.topUpCalls), billingClient.topUpCalls)
+	}
+	invitee := billingClient.topUpCalls[0]
+	if invitee.UserID != strconv.FormatInt(bob.ID, 10) || invitee.Amount != 25 || invitee.OperatorID != "system_invitation" || invitee.Remark != "invitation invitee bonus" {
+		t.Fatalf("invitee credit = %#v", invitee)
+	}
+	inviterCall := billingClient.topUpCalls[1]
+	wantRemark := "invitation inviter bonus, invitee=" + strconv.FormatInt(bob.ID, 10)
+	if inviterCall.UserID != strconv.FormatInt(inviter.ID, 10) || inviterCall.Amount != 50 || inviterCall.OperatorID != "system_invitation" || inviterCall.Remark != wantRemark {
+		t.Fatalf("inviter credit = %#v", inviterCall)
+	}
+}
+
+func TestIdentityHTTPRegisterWithAffCodeSkipsCreditWhenBonusesZero(t *testing.T) {
+	t.Setenv("INVITEE_BONUS_QUOTA", "")
+	t.Setenv("INVITER_BONUS_QUOTA", "0")
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	inviter, err := uc.Register(context.Background(), "alice", "password123", "alice@example.com", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	billingClient := &identityHTTPBillingClient{}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/user/register", strings.NewReader(`{"username":"bob","password":"password123","email":"bob@example.com","aff_code":"`+inviter.AffCode+`"}`))
+	registerRec := httptest.NewRecorder()
+	srv.ServeHTTP(registerRec, registerReq)
+
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	if len(billingClient.topUpCalls) != 0 {
+		t.Fatalf("expected no topup calls, got %#v", billingClient.topUpCalls)
+	}
+}
+
+func TestIdentityHTTPRegisterWithoutAffCodeSkipsBillingCredit(t *testing.T) {
+	t.Setenv("INVITEE_BONUS_QUOTA", "25")
+	t.Setenv("INVITER_BONUS_QUOTA", "50")
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	billingClient := &identityHTTPBillingClient{}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/user/register", strings.NewReader(`{"username":"carol","password":"password123","email":"carol@example.com"}`))
+	registerRec := httptest.NewRecorder()
+	srv.ServeHTTP(registerRec, registerReq)
+
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	if len(billingClient.topUpCalls) != 0 {
+		t.Fatalf("expected no topup calls without aff_code, got %#v", billingClient.topUpCalls)
 	}
 }
 
@@ -739,7 +821,7 @@ func TestIdentityHTTPOnlinePaymentCompatibilityRoutesAreDisabled(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status = %d, want 200, body=%s", tc.path, rec.Code, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), `"message":"disabled"`) || !strings.Contains(rec.Body.String(), "online payment is not configured") {
+		if !strings.Contains(rec.Body.String(), `"success":false`) || !strings.Contains(rec.Body.String(), "online payment is not configured") {
 			t.Fatalf("%s disabled response mismatch: %s", tc.path, rec.Body.String())
 		}
 	}
@@ -1142,6 +1224,14 @@ type identityHTTPBillingClient struct {
 	snapshot       *commonv1.AccountSnapshot
 	redeemResponse *billingv1.RedeemCodeResponse
 	redeemCode     string
+	topUpCalls     []capturedTopUp
+}
+
+type capturedTopUp struct {
+	UserID     string
+	Amount     int64
+	OperatorID string
+	Remark     string
 }
 
 type fakeTurnstileVerifier struct {
@@ -1188,6 +1278,16 @@ func (c *identityHTTPBillingClient) RedeemCode(ctx context.Context, req *billing
 		return &billingv1.RedeemCodeResponse{Success: true}, nil
 	}
 	return c.redeemResponse, nil
+}
+
+func (c *identityHTTPBillingClient) TopUpQuota(ctx context.Context, req *billingv1.TopUpQuotaRequest, opts ...grpc.CallOption) (*billingv1.TopUpQuotaResponse, error) {
+	c.topUpCalls = append(c.topUpCalls, capturedTopUp{
+		UserID:     req.GetUserId(),
+		Amount:     req.GetAmount(),
+		OperatorID: req.GetOperatorId(),
+		Remark:     req.GetRemark(),
+	})
+	return &billingv1.TopUpQuotaResponse{Success: true, NewQuota: req.GetAmount()}, nil
 }
 
 func registerAndLoginForHTTPTest(t *testing.T, uc *biz.IdentityUsecase) (*biz.User, string) {

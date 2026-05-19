@@ -329,17 +329,9 @@ func (uc *IdentityUsecase) RegisterWithAffCode(ctx context.Context, username, pa
 	}
 	if inviter != nil {
 		user.InviterID = inviter.ID
-		user.Quota = positiveEnvInt64("INVITEE_BONUS_QUOTA")
 	}
 	if err := uc.repo.CreateUser(ctx, user); err != nil {
 		return nil, err
-	}
-	if inviter != nil {
-		if bonus := positiveEnvInt64("INVITER_BONUS_QUOTA"); bonus > 0 {
-			if err := uc.repo.IncreaseUserQuota(ctx, inviter.ID, bonus); err != nil {
-				return nil, err
-			}
-		}
 	}
 	return user, nil
 }
@@ -385,14 +377,6 @@ func (uc *IdentityUsecase) generateAffCode() string {
 		b[i] = letters[n.Int64()]
 	}
 	return string(b)
-}
-
-func positiveEnvInt64(key string) int64 {
-	value, err := strconv.ParseInt(os.Getenv(key), 10, 64)
-	if err != nil || value < 0 {
-		return 0
-	}
-	return value
 }
 
 type CreateAccessTokenOptions struct {
