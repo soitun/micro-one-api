@@ -2,9 +2,10 @@ package server
 
 import (
 	"crypto/subtle"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,8 +20,8 @@ import (
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
-//go:embed static/admin.html
-var adminHTML string
+//go:embed all:static/web
+var webFS embed.FS
 
 // AdminAuth creates a middleware that validates Bearer token against ADMIN_TOKEN env var.
 // If ADMIN_TOKEN is not set, the middleware rejects all requests to protected endpoints.
@@ -54,6 +55,13 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	// Health and metrics (unauthenticated)
 	srv.HandleFunc("/", handleAdminPage)
 	srv.HandleFunc("/admin", handleAdminPage)
+	// SPA client-side routes — must mirror entries in web/src/router.tsx
+	srv.HandleFunc("/login", handleAdminPage)
+	srv.HandleFunc("/dashboard", handleAdminPage)
+	srv.HandleFunc("/tokens", handleAdminPage)
+	// Static assets bundled by Vite
+	srv.HandleFunc("/assets/", handleAdminPage)
+	srv.HandleFunc("/favicon.svg", handleAdminPage)
 	srv.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		metrics.Handler().ServeHTTP(w, r)
 	})
@@ -205,9 +213,24 @@ func handleAdminPage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(adminHTML))
+
+	distFS, err := fs.Sub(webFS, "static/web")
+	if err != nil {
+		http.Error(w, "frontend not available", http.StatusInternalServerError)
+		return
+	}
+
+	// SPA fallback: any path without a file extension serves index.html so
+	// client-side routes (/login, /dashboard, /tokens) load the React shell.
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	if path == "" || !strings.Contains(path, ".") {
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/"
+		http.FileServer(http.FS(distFS)).ServeHTTP(w, r2)
+		return
+	}
+
+	http.FileServer(http.FS(distFS)).ServeHTTP(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
