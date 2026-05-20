@@ -225,7 +225,7 @@ export function AdminRedemptionsPage() {
                   <SortableHeader<RedeemCode> columnKey="status" sort={sort} onSortChange={setSort}>
                     Status
                   </SortableHeader>
-                  <TableHead>Created By</TableHead>
+                  <TableHead className="hidden md:table-cell">Created By</TableHead>
                   <SortableHeader<RedeemCode> columnKey="createdAt" sort={sort} onSortChange={setSort}>
                     Created At
                   </SortableHeader>
@@ -250,7 +250,7 @@ export function AdminRedemptionsPage() {
                         {code.status === 1 ? 'Active' : 'Used'}
                       </span>
                     </TableCell>
-                    <TableCell>{code.createdBy || '—'}</TableCell>
+                    <TableCell className="hidden md:table-cell">{code.createdBy || '—'}</TableCell>
                     <TableCell>
                       {new Date(parseInt(code.createdAt) * 1000).toLocaleDateString()}
                     </TableCell>

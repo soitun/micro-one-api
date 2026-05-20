@@ -131,9 +131,9 @@ export function AdminLogsPage() {
                   <SortableHeader<LogEntry> columnKey="amount" sort={sort} onSortChange={setSort}>
                     Amount
                   </SortableHeader>
-                  <TableHead>Balance After</TableHead>
-                  <TableHead>Reference</TableHead>
-                  <TableHead>Remark</TableHead>
+                  <TableHead className="hidden md:table-cell">Balance After</TableHead>
+                  <TableHead className="hidden lg:table-cell">Reference</TableHead>
+                  <TableHead className="hidden lg:table-cell">Remark</TableHead>
                   <SortableHeader<LogEntry> columnKey="createdAt" sort={sort} onSortChange={setSort}>
                     Created At
                   </SortableHeader>
@@ -150,9 +150,9 @@ export function AdminLogsPage() {
                       </span>
                     </TableCell>
                     <TableCell>{formatQuota(log.amount)}</TableCell>
-                    <TableCell>{formatQuota(log.balanceAfter)}</TableCell>
-                    <TableCell className="font-mono text-xs">{log.referenceId || '—'}</TableCell>
-                    <TableCell className="max-w-xs truncate">{log.remark || '—'}</TableCell>
+                    <TableCell className="hidden md:table-cell">{formatQuota(log.balanceAfter)}</TableCell>
+                    <TableCell className="hidden font-mono text-xs lg:table-cell">{log.referenceId || '—'}</TableCell>
+                    <TableCell className="hidden max-w-xs truncate lg:table-cell">{log.remark || '—'}</TableCell>
                     <TableCell>
                       {new Date(parseInt(log.createdAt) * 1000).toLocaleString()}
                     </TableCell>

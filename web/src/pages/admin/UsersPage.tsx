@@ -143,7 +143,7 @@ export function AdminUsersPage() {
                   <SortableHeader<User> columnKey="username" sort={sort} onSortChange={setSort}>
                     Username
                   </SortableHeader>
-                  <TableHead>Display Name</TableHead>
+                  <TableHead className="hidden lg:table-cell">Display Name</TableHead>
                   <SortableHeader<User> columnKey="email" sort={sort} onSortChange={setSort}>
                     Email
                   </SortableHeader>
@@ -165,8 +165,8 @@ export function AdminUsersPage() {
                   <TableRow key={user.id}>
                     <TableCell className="font-mono text-sm">{user.id}</TableCell>
                     <TableCell className="font-medium">{user.username}</TableCell>
-                    <TableCell>{user.displayName || '—'}</TableCell>
-                    <TableCell>{user.email || '—'}</TableCell>
+                    <TableCell className="hidden lg:table-cell">{user.displayName || '—'}</TableCell>
+                    <TableCell className="max-w-56 truncate">{user.email || '—'}</TableCell>
                     <TableCell>{user.group}</TableCell>
                     <TableCell>{formatQuota(user.quota)}</TableCell>
                     <TableCell>{formatQuota(user.usedQuota)}</TableCell>

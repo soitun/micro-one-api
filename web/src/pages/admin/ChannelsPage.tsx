@@ -173,10 +173,10 @@ export function AdminChannelsPage() {
                   <SortableHeader<Channel> columnKey="group" sort={sort} onSortChange={setSort}>
                     Group
                   </SortableHeader>
-                  <SortableHeader<Channel> columnKey="priority" sort={sort} onSortChange={setSort}>
+                  <SortableHeader<Channel> columnKey="priority" sort={sort} onSortChange={setSort} className="hidden lg:table-cell">
                     Priority
                   </SortableHeader>
-                  <SortableHeader<Channel> columnKey="balance" sort={sort} onSortChange={setSort}>
+                  <SortableHeader<Channel> columnKey="balance" sort={sort} onSortChange={setSort} className="hidden md:table-cell">
                     Balance
                   </SortableHeader>
                   <SortableHeader<Channel> columnKey="status" sort={sort} onSortChange={setSort}>
@@ -192,8 +192,8 @@ export function AdminChannelsPage() {
                     <TableCell className="font-medium">{ch.name}</TableCell>
                     <TableCell>{PROVIDER_NAMES[ch.type] || `Type ${ch.type}`}</TableCell>
                     <TableCell>{ch.group}</TableCell>
-                    <TableCell>{ch.priority}</TableCell>
-                    <TableCell>
+                    <TableCell className="hidden lg:table-cell">{ch.priority}</TableCell>
+                    <TableCell className="hidden md:table-cell">
                       {ch.balance !== undefined ? `$${ch.balance.toFixed(2)}` : '—'}
                     </TableCell>
                     <TableCell>

@@ -20,6 +20,20 @@ Object.defineProperty(window, 'localStorage', {
   configurable: true,
 });
 
+Object.defineProperty(window, 'matchMedia', {
+  value: (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  }),
+  configurable: true,
+});
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 
 afterEach(() => {
