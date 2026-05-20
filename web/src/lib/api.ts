@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { toast } from 'sonner';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -27,6 +28,7 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
+      toast.error('Session expired. Please sign in again.');
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -57,7 +59,7 @@ adminApiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('adminToken');
-      alert('Admin token invalid or expired. Please re-enter.');
+      toast.error('Admin token invalid or expired. Please re-enter.');
       window.location.reload();
     }
     return Promise.reject(error);

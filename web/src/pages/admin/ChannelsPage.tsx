@@ -1,8 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { adminApiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { EmptyState } from '@/components/EmptyState';
+import { TableSkeleton } from '@/components/LoadingStates';
 import {
   Table,
   TableBody,
@@ -61,6 +64,7 @@ export function AdminChannelsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-channels'] });
+      toast.success('Channel status updated');
     },
   });
 
@@ -70,6 +74,7 @@ export function AdminChannelsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-channels'] });
+      toast.success('Channel balance refreshed');
     },
   });
 
@@ -92,9 +97,9 @@ export function AdminChannelsPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-muted-foreground">Loading channels...</p>
+        <TableSkeleton columns={['ID', 'Name', 'Type', 'Group', 'Priority', 'Balance', 'Status', 'Actions']} />
       ) : !channels || channels.length === 0 ? (
-        <p className="text-muted-foreground">No channels found.</p>
+        <EmptyState title="No channels found" description="Try clearing the search term or checking another page." />
       ) : (
         <>
           <div className="border rounded-lg overflow-x-auto">

@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { adminApiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { EmptyState } from '@/components/EmptyState';
+import { TableSkeleton } from '@/components/LoadingStates';
 import {
   Table,
   TableBody,
@@ -88,9 +90,9 @@ export function AdminLogsPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-muted-foreground">Loading logs...</p>
+        <TableSkeleton columns={['ID', 'User ID', 'Type', 'Amount', 'Balance After', 'Reference', 'Remark', 'Created At']} rows={8} />
       ) : !logs || logs.length === 0 ? (
-        <p className="text-muted-foreground">No logs found.</p>
+        <EmptyState title="No logs found" description="Adjust the filters or check back after billing events are recorded." />
       ) : (
         <>
           <div className="border rounded-lg overflow-x-auto">

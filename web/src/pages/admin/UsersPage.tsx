@@ -1,8 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { adminApiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { EmptyState } from '@/components/EmptyState';
+import { TableSkeleton } from '@/components/LoadingStates';
 import {
   Table,
   TableBody,
@@ -48,6 +51,7 @@ export function AdminUsersPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      toast.success('User status updated');
     },
   });
 
@@ -74,9 +78,9 @@ export function AdminUsersPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-muted-foreground">Loading users...</p>
+        <TableSkeleton columns={['ID', 'Username', 'Display Name', 'Email', 'Group', 'Quota', 'Used', 'Status', 'Actions']} />
       ) : !users || users.length === 0 ? (
-        <p className="text-muted-foreground">No users found.</p>
+        <EmptyState title="No users found" description="Try clearing the search term or checking another page." />
       ) : (
         <>
           <div className="border rounded-lg">

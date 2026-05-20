@@ -1,17 +1,32 @@
+/* eslint-disable react-refresh/only-export-components */
+import { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
-import { LoginPage } from '@/pages/LoginPage';
-import { DashboardPage } from '@/pages/DashboardPage';
-import { TokensPage } from '@/pages/TokensPage';
-import { AdminUsersPage } from '@/pages/admin/UsersPage';
-import { AdminChannelsPage } from '@/pages/admin/ChannelsPage';
-import { AdminLogsPage } from '@/pages/admin/LogsPage';
-import { AdminRedemptionsPage } from '@/pages/admin/RedemptionsPage';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { PageLoading } from '@/components/PageLoading';
+
+const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })));
+const DashboardPage = lazy(() => import('@/pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
+const TokensPage = lazy(() => import('@/pages/TokensPage').then((m) => ({ default: m.TokensPage })));
+const AdminUsersPage = lazy(() => import('@/pages/admin/UsersPage').then((m) => ({ default: m.AdminUsersPage })));
+const AdminChannelsPage = lazy(() =>
+  import('@/pages/admin/ChannelsPage').then((m) => ({ default: m.AdminChannelsPage }))
+);
+const AdminLogsPage = lazy(() => import('@/pages/admin/LogsPage').then((m) => ({ default: m.AdminLogsPage })));
+const AdminRedemptionsPage = lazy(() =>
+  import('@/pages/admin/RedemptionsPage').then((m) => ({ default: m.AdminRedemptionsPage }))
+);
+const AdminOptionsPage = lazy(() =>
+  import('@/pages/admin/OptionsPage').then((m) => ({ default: m.AdminOptionsPage }))
+);
+
+function withSuspense(element: React.ReactNode) {
+  return <Suspense fallback={<PageLoading />}>{element}</Suspense>;
+}
 
 export const router = createBrowserRouter([
   {
     path: '/login',
-    element: <LoginPage />,
+    element: withSuspense(<LoginPage />),
   },
   {
     path: '/',
@@ -23,27 +38,31 @@ export const router = createBrowserRouter([
       },
       {
         path: 'dashboard',
-        element: <DashboardPage />,
+        element: withSuspense(<DashboardPage />),
       },
       {
         path: 'tokens',
-        element: <TokensPage />,
+        element: withSuspense(<TokensPage />),
       },
       {
         path: 'admin/users',
-        element: <AdminUsersPage />,
+        element: withSuspense(<AdminUsersPage />),
       },
       {
         path: 'admin/channels',
-        element: <AdminChannelsPage />,
+        element: withSuspense(<AdminChannelsPage />),
       },
       {
         path: 'admin/logs',
-        element: <AdminLogsPage />,
+        element: withSuspense(<AdminLogsPage />),
       },
       {
         path: 'admin/redemptions',
-        element: <AdminRedemptionsPage />,
+        element: withSuspense(<AdminRedemptionsPage />),
+      },
+      {
+        path: 'admin/options',
+        element: withSuspense(<AdminOptionsPage />),
       },
     ],
   },

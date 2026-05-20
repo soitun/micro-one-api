@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,6 +21,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { apiClient } from '@/lib/api';
+import { EmptyState } from '@/components/EmptyState';
+import { TableSkeleton } from '@/components/LoadingStates';
 
 interface Token {
   id: number;
@@ -52,6 +55,7 @@ export function TokensPage() {
       queryClient.invalidateQueries({ queryKey: ['tokens'] });
       setIsCreateOpen(false);
       setNewTokenName('');
+      toast.success('Token created');
     },
   });
 
@@ -61,13 +65,16 @@ export function TokensPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tokens'] });
+      toast.success('Token deleted');
     },
   });
 
   const handleCreate = () => {
     if (newTokenName.trim()) {
       createMutation.mutate(newTokenName);
+      return;
     }
+    toast.error('Token name is required');
   };
 
   return (
@@ -106,11 +113,11 @@ export function TokensPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-muted-foreground">Loading tokens...</p>
+        <TableSkeleton columns={['Name', 'Key', 'Status', 'Quota', 'Created', 'Actions']} />
       ) : !tokens || tokens.length === 0 ? (
-        <p className="text-muted-foreground">No tokens yet. Create one to get started.</p>
+        <EmptyState title="No tokens yet" description="Create a token to start calling the API." />
       ) : (
-        <div className="border rounded-lg">
+        <div className="overflow-x-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>

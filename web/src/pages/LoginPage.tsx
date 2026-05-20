@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { apiClient } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api-error';
 
 export function LoginPage() {
   const [username, setUsername] = useState('');
@@ -26,12 +28,17 @@ export function LoginPage() {
 
       if (response.data.success && response.data.data) {
         localStorage.setItem('token', response.data.data);
+        toast.success('Signed in');
         navigate('/dashboard');
       } else {
-        setError(response.data.message || 'Login failed');
+        const message = response.data.message || 'Login failed';
+        setError(message);
+        toast.error(message);
       }
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Network error');
+    } catch (err: unknown) {
+      const message = getApiErrorMessage(err, 'Network error');
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }

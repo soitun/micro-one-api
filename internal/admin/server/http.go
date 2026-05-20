@@ -63,6 +63,7 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandleFunc("/admin/channels", handleAdminPage)
 	srv.HandleFunc("/admin/logs", handleAdminPage)
 	srv.HandleFunc("/admin/redemptions", handleAdminPage)
+	srv.HandleFunc("/admin/options", handleAdminPage)
 	// Static assets bundled by Vite
 	srv.HandleFunc("/assets/", handleAdminPage)
 	srv.HandleFunc("/favicon.svg", handleAdminPage)

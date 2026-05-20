@@ -73,17 +73,17 @@ func (c *adminHTTPIdentityClient) DeleteUser(ctx context.Context, req *identityv
 
 type adminHTTPChannelClient struct {
 	channelv1.ChannelServiceClient
-	createdName            string
-	created                *channelv1.CreateChannelRequest
-	updated                *channelv1.UpdateChannelRequest
-	deletedID              int64
-	deletedIDs             []int64
-	baseURL                string
-	chType                 int32
-	statuses               []int32
-	existingFailureCount   int32
-	existingLastError      string
-	existingLastSuccess    int64
+	createdName          string
+	created              *channelv1.CreateChannelRequest
+	updated              *channelv1.UpdateChannelRequest
+	deletedID            int64
+	deletedIDs           []int64
+	baseURL              string
+	chType               int32
+	statuses             []int32
+	existingFailureCount int32
+	existingLastError    string
+	existingLastSuccess  int64
 }
 
 func (c *adminHTTPChannelClient) CreateChannel(ctx context.Context, req *channelv1.CreateChannelRequest, opts ...grpc.CallOption) (*channelv1.CreateChannelResponse, error) {
@@ -179,16 +179,16 @@ func (c *adminHTTPChannelClient) ListChannels(ctx context.Context, req *channelv
 
 type adminHTTPBillingClient struct {
 	billingv1.BillingServiceClient
-	topupUserID         string
-	topupAmount         int64
-	batchCreated        bool
-	deletedRedeemCode   string
-	reconRuns           []*billingv1.ReconciliationRun
-	reconRunsByID       map[int64]*billingv1.ReconciliationRun
-	reconListErr        error
-	reconGetErr         error
-	reconListLastReq    *billingv1.ListReconciliationRunsRequest
-	reconGetLastRunID   int64
+	topupUserID       string
+	topupAmount       int64
+	batchCreated      bool
+	deletedRedeemCode string
+	reconRuns         []*billingv1.ReconciliationRun
+	reconRunsByID     map[int64]*billingv1.ReconciliationRun
+	reconListErr      error
+	reconGetErr       error
+	reconListLastReq  *billingv1.ListReconciliationRunsRequest
+	reconGetLastRunID int64
 }
 
 func (c *adminHTTPBillingClient) TopUpQuota(ctx context.Context, req *billingv1.TopUpQuotaRequest, opts ...grpc.CallOption) (*billingv1.TopUpQuotaResponse, error) {
@@ -330,7 +330,7 @@ func TestAdminHTTPPageIsServed(t *testing.T) {
 
 func TestAdminHTTPPageSPARouteFallback(t *testing.T) {
 	srv := NewHTTPServer(":0", nil)
-	for _, path := range []string{"/", "/login", "/dashboard", "/tokens"} {
+	for _, path := range []string{"/", "/login", "/dashboard", "/tokens", "/admin/options"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)

@@ -1,9 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { adminApiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { EmptyState } from '@/components/EmptyState';
+import { TableSkeleton } from '@/components/LoadingStates';
 import {
   Table,
   TableBody,
@@ -68,6 +71,7 @@ export function AdminRedemptionsPage() {
       setNewCodeName('');
       setNewCodeAmount('');
       setNewCodeCount('1');
+      toast.success('Redemption code created');
     },
   });
 
@@ -77,6 +81,7 @@ export function AdminRedemptionsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-redemptions'] });
+      toast.success('Redemption code deleted');
     },
   });
 
@@ -87,7 +92,9 @@ export function AdminRedemptionsPage() {
   const handleCreate = () => {
     if (newCodeName.trim() && newCodeAmount && parseFloat(newCodeAmount) > 0) {
       createMutation.mutate();
+      return;
     }
+    toast.error('Name and a positive quota amount are required');
   };
 
   return (
@@ -159,9 +166,9 @@ export function AdminRedemptionsPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-muted-foreground">Loading redemption codes...</p>
+        <TableSkeleton columns={['Code', 'Name', 'Amount', 'Count', 'Status', 'Created By', 'Created At', 'Actions']} />
       ) : !codes || codes.length === 0 ? (
-        <p className="text-muted-foreground">No redemption codes found.</p>
+        <EmptyState title="No redemption codes found" description="Create codes for quota grants or clear the search term." />
       ) : (
         <>
           <div className="border rounded-lg overflow-x-auto">

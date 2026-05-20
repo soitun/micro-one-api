@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/EmptyState';
+import { ChartSkeleton, MetricCardsSkeleton } from '@/components/LoadingStates';
 import {
   AreaChart,
   Area,
@@ -34,7 +36,7 @@ function formatQuota(q: number) {
 }
 
 export function DashboardPage() {
-  const { data: user } = useQuery({
+  const { data: user, isLoading: isUserLoading } = useQuery({
     queryKey: ['user-self'],
     queryFn: async () => {
       const res = await apiClient.get('/user/self');
@@ -62,50 +64,56 @@ export function DashboardPage() {
     <div className="space-y-6">
       <h2 className="text-2xl font-semibold">Dashboard</h2>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Remaining Quota
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{user ? formatQuota(user.quota) : '—'}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Used Quota</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{user ? formatQuota(user.used_quota) : '—'}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Requests (range)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">{totalCount.toLocaleString()}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Tokens (range)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">
-              {totalTokens > 0 ? `${(totalTokens / 1000).toFixed(1)}K` : '—'}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Quota: {formatQuota(totalQuota)}
-            </p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {isUserLoading || isLoading ? (
+          <MetricCardsSkeleton />
+        ) : (
+          <>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Remaining Quota
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{user ? formatQuota(user.quota) : '—'}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Used Quota</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{user ? formatQuota(user.used_quota) : '—'}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Requests (range)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{totalCount.toLocaleString()}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Tokens (range)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">
+                  {totalTokens > 0 ? `${(totalTokens / 1000).toFixed(1)}K` : '—'}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Quota: {formatQuota(totalQuota)}
+                </p>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       <Card>
@@ -114,13 +122,9 @@ export function DashboardPage() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground">
-              Loading...
-            </div>
+            <ChartSkeleton />
           ) : items.length === 0 ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground">
-              No usage data
-            </div>
+            <EmptyState title="No usage data" description="Usage will appear here after requests are processed." />
           ) : (
             <ResponsiveContainer width="100%" height={240}>
               <AreaChart data={items}>

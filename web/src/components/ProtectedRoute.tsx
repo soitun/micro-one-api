@@ -1,7 +1,9 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import { NavLink, Navigate, Outlet } from 'react-router-dom';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import {
   Dialog,
   DialogContent,
@@ -25,44 +27,52 @@ export function ProtectedRoute() {
     localStorage.setItem('adminToken', adminInput);
     setAdminToken(adminInput);
     setAdminDialogOpen(false);
+    toast.success('Admin access enabled');
   };
 
   const handleClearAdminToken = () => {
     localStorage.removeItem('adminToken');
     setAdminToken('');
+    toast.success('Admin access disabled');
   };
 
   const isAdmin = !!adminToken;
+  const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+    `text-sm ${isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`;
 
   return (
     <div className="min-h-screen bg-background">
       <nav className="border-b">
         <div className="container mx-auto px-4 py-3 flex items-center gap-6">
           <h1 className="text-lg font-semibold">One API</h1>
-          <a href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground">
+          <NavLink to="/dashboard" className={navLinkClass}>
             Dashboard
-          </a>
-          <a href="/tokens" className="text-sm text-muted-foreground hover:text-foreground">
+          </NavLink>
+          <NavLink to="/tokens" className={navLinkClass}>
             Tokens
-          </a>
+          </NavLink>
           {isAdmin && (
             <>
               <span className="text-muted-foreground">|</span>
-              <a href="/admin/users" className="text-sm text-muted-foreground hover:text-foreground">
+              <NavLink to="/admin/users" className={navLinkClass}>
                 Users
-              </a>
-              <a href="/admin/channels" className="text-sm text-muted-foreground hover:text-foreground">
+              </NavLink>
+              <NavLink to="/admin/channels" className={navLinkClass}>
                 Channels
-              </a>
-              <a href="/admin/logs" className="text-sm text-muted-foreground hover:text-foreground">
+              </NavLink>
+              <NavLink to="/admin/logs" className={navLinkClass}>
                 Logs
-              </a>
-              <a href="/admin/redemptions" className="text-sm text-muted-foreground hover:text-foreground">
+              </NavLink>
+              <NavLink to="/admin/redemptions" className={navLinkClass}>
                 Redemptions
-              </a>
+              </NavLink>
+              <NavLink to="/admin/options" className={navLinkClass}>
+                Options
+              </NavLink>
             </>
           )}
           <div className="ml-auto flex items-center gap-3">
+            <ThemeToggle />
             {isAdmin ? (
               <Button variant="outline" size="sm" onClick={handleClearAdminToken}>
                 Exit Admin
