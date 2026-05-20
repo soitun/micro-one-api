@@ -1,9 +1,11 @@
 import { useSearchParams } from 'react-router-dom';
 import { getPreference, setPreference } from '@/lib/preferences';
+import type { SortDirection } from '@/lib/table-utils';
 
 interface UseAdminTableStateOptions {
   storageKey: string;
   defaultPageSize?: number;
+  filters?: string[];
 }
 
 function readPositiveInt(value: string | null, fallback: number) {
@@ -11,12 +13,23 @@ function readPositiveInt(value: string | null, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-export function useAdminTableState({ defaultPageSize = 20 }: UseAdminTableStateOptions) {
+function isSortDirection(value: string | null): value is Exclude<SortDirection, null> {
+  return value === 'asc' || value === 'desc';
+}
+
+export function useAdminTableState({ defaultPageSize = 20, filters: filterKeys = [] }: UseAdminTableStateOptions) {
   const [searchParams, setSearchParams] = useSearchParams();
   const preferredPageSize = getPreference('admin-page-size', defaultPageSize);
   const page = readPositiveInt(searchParams.get('page'), 1);
   const pageSize = readPositiveInt(searchParams.get('page_size'), preferredPageSize);
   const search = searchParams.get('search') ?? '';
+  const sortKey = searchParams.get('sort');
+  const sortDirection = isSortDirection(searchParams.get('order')) ? searchParams.get('order') : null;
+  const filters = Object.fromEntries(
+    filterKeys
+      .map((key) => [key, searchParams.get(key)] as const)
+      .filter(([, value]) => value !== null && value !== ''),
+  );
 
   const updateParams = (updates: Record<string, string | number | null>) => {
     setSearchParams((current) => {
@@ -36,6 +49,9 @@ export function useAdminTableState({ defaultPageSize = 20 }: UseAdminTableStateO
     page,
     pageSize,
     search,
+    sortKey,
+    sortDirection,
+    filters,
     setPage: (nextPage: number) => updateParams({ page: Math.max(1, nextPage) }),
     setPageSize: (nextPageSize: number) => {
       setPreference('admin-page-size', nextPageSize);
@@ -43,5 +59,8 @@ export function useAdminTableState({ defaultPageSize = 20 }: UseAdminTableStateO
     },
     setSearch: (nextSearch: string) => updateParams({ page: 1, search: nextSearch.trim() }),
     clearSearch: () => updateParams({ page: 1, search: null }),
+    setSort: (nextSortKey: string | null, nextSortDirection: SortDirection) =>
+      updateParams({ page: 1, sort: nextSortKey, order: nextSortDirection }),
+    setFilter: (key: string, value: string | number | null) => updateParams({ page: 1, [key]: value }),
   };
 }

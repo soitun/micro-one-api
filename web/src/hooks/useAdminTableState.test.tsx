@@ -43,4 +43,45 @@ describe('useAdminTableState', () => {
     expect(result.current.pageSize).toBe(100);
     expect(window.localStorage.getItem('web:admin-page-size')).toBe('100');
   });
+
+  it('initializes sort and filters from URL params', () => {
+    const { result } = renderHook(
+      () => useAdminTableState({ storageKey: 'users', filters: ['status', 'group'] }),
+      {
+        wrapper: wrapper('/admin/users?sort=username&order=desc&status=1&group=default'),
+      },
+    );
+
+    expect(result.current.sortKey).toBe('username');
+    expect(result.current.sortDirection).toBe('desc');
+    expect(result.current.filters).toEqual({ status: '1', group: 'default' });
+  });
+
+  it('resets page to one when a filter changes', () => {
+    const { result } = renderHook(
+      () => useAdminTableState({ storageKey: 'users', filters: ['status'] }),
+      {
+        wrapper: wrapper('/admin/users?page=3&status=0'),
+      },
+    );
+
+    act(() => result.current.setFilter('status', '1'));
+
+    expect(result.current.page).toBe(1);
+    expect(result.current.filters.status).toBe('1');
+  });
+
+  it('removes empty filter values from URL', () => {
+    const { result } = renderHook(
+      () => useAdminTableState({ storageKey: 'users', filters: ['status'] }),
+      {
+        wrapper: wrapper('/admin/users?page=3&status=1'),
+      },
+    );
+
+    act(() => result.current.setFilter('status', ''));
+
+    expect(result.current.page).toBe(1);
+    expect(result.current.filters.status).toBeUndefined();
+  });
 });
