@@ -47,3 +47,28 @@ test('admin options renders core settings', async ({ page }) => {
   await expect(page.getByText('Core Settings')).toBeVisible();
   await expect(page.getByText('Registration enabled')).toBeVisible();
 });
+
+test('admin users sends sort and filter params', async ({ page }) => {
+  const requests: string[] = [];
+  await page.route('**/api/user**', async (route) => {
+    if (route.request().method() === 'GET') {
+      requests.push(route.request().url());
+      await route.fulfill({ json: { success: true, data: [{ id: '1', username: 'alice', status: 1, group: 'default' }] } });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/login');
+  await page.evaluate(() => {
+    localStorage.setItem('token', 'test-user-token');
+    localStorage.setItem('adminToken', 'test-admin-token');
+  });
+  await page.goto('/admin/users');
+  await page.getByLabel('Filter users by status').selectOption('1');
+  await page.getByRole('button', { name: /sort by username/i }).click();
+
+  expect(
+    requests.some((url) => url.includes('status=1') && url.includes('sort=username') && url.includes('order=asc')),
+  ).toBe(true);
+});

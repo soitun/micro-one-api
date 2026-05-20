@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { toast } from 'sonner';
 import { adminApiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import { AdminTableToolbar } from '@/components/admin/AdminTableToolbar';
 import { ExportButton } from '@/components/admin/ExportButton';
 import { SortableHeader } from '@/components/admin/SortableHeader';
 import { useAdminTableState } from '@/hooks/useAdminTableState';
+import { buildAdminListParams } from '@/lib/admin-table-query';
 import { sortRows, type SortState } from '@/lib/table-utils';
 import {
   Table,
@@ -33,21 +34,39 @@ interface User {
 }
 
 export function AdminUsersPage() {
-  const { page, pageSize, search, setPage, setPageSize, setSearch, clearSearch } = useAdminTableState({
+  const {
+    page,
+    pageSize,
+    search,
+    sortKey,
+    sortDirection,
+    filters,
+    setPage,
+    setPageSize,
+    setSearch,
+    clearSearch,
+    setSort,
+    setFilter,
+  } = useAdminTableState({
     storageKey: 'users',
+    filters: ['status', 'group'],
   });
-  const [sort, setSort] = useState<SortState<User>>({ key: null, direction: null });
-  const [statusFilter, setStatusFilter] = useState('');
-  const [groupFilter, setGroupFilter] = useState('');
   const queryClient = useQueryClient();
+  const sort = { key: sortKey as keyof User | null, direction: sortDirection } satisfies SortState<User>;
+  const statusFilter = filters.status ?? '';
+  const groupFilter = filters.group ?? '';
 
   const { data: users, isLoading } = useQuery({
-    queryKey: ['admin-users', page, pageSize, search],
+    queryKey: ['admin-users', page, pageSize, search, sortKey, sortDirection, filters],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      params.set('page', page.toString());
-      params.set('page_size', pageSize.toString());
-      if (search) params.set('keyword', search);
+      const params = buildAdminListParams({
+        page,
+        pageSize,
+        search,
+        sortKey,
+        sortDirection,
+        filters,
+      });
       const res = await adminApiClient.get(`/user?${params}`);
       return res.data.data as User[];
     },
@@ -69,13 +88,8 @@ export function AdminUsersPage() {
   }
 
   const visibleUsers = useMemo(() => {
-    const filtered = (users ?? []).filter((user) => {
-      const statusMatches = !statusFilter || String(user.status) === statusFilter;
-      const groupMatches = !groupFilter || user.group.toLowerCase().includes(groupFilter.toLowerCase());
-      return statusMatches && groupMatches;
-    });
-    return sortRows(filtered, sort);
-  }, [users, statusFilter, groupFilter, sort]);
+    return sortRows(users ?? [], sort);
+  }, [users, sort]);
 
   return (
     <div className="space-y-4">
@@ -110,7 +124,7 @@ export function AdminUsersPage() {
       <div className="flex flex-wrap items-center gap-3">
         <select
           value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value)}
+          onChange={(event) => setFilter('status', event.target.value)}
           className="h-8 rounded-md border bg-background px-2 text-sm"
           aria-label="Filter users by status"
         >
@@ -120,7 +134,7 @@ export function AdminUsersPage() {
         </select>
         <input
           value={groupFilter}
-          onChange={(event) => setGroupFilter(event.target.value)}
+          onChange={(event) => setFilter('group', event.target.value)}
           placeholder="Filter group"
           className="h-8 w-40 rounded-md border bg-background px-2 text-sm"
           aria-label="Filter users by group"

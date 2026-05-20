@@ -1,12 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { adminApiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EmptyState } from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/LoadingStates';
+import { AdminPagination } from '@/components/admin/AdminPagination';
 import { ExportButton } from '@/components/admin/ExportButton';
 import { SortableHeader } from '@/components/admin/SortableHeader';
+import { useAdminTableState } from '@/hooks/useAdminTableState';
+import { buildAdminListParams } from '@/lib/admin-table-query';
 import { sortRows, type SortState } from '@/lib/table-utils';
 import {
   Table,
@@ -36,19 +39,35 @@ const LOG_TYPE_NAMES: Record<string, string> = {
 };
 
 export function AdminLogsPage() {
-  const [page, setPage] = useState(1);
-  const [userId, setUserId] = useState('');
-  const [type, setType] = useState('');
-  const [sort, setSort] = useState<SortState<LogEntry>>({ key: null, direction: null });
+  const {
+    page,
+    pageSize,
+    sortKey,
+    sortDirection,
+    filters,
+    setPage,
+    setPageSize,
+    setSort,
+    setFilter,
+  } = useAdminTableState({
+    storageKey: 'logs',
+    defaultPageSize: 50,
+    filters: ['user_id', 'type'],
+  });
+  const userId = filters.user_id ?? '';
+  const type = filters.type ?? '';
+  const sort = { key: sortKey as keyof LogEntry | null, direction: sortDirection } satisfies SortState<LogEntry>;
 
   const { data: logs, isLoading } = useQuery({
-    queryKey: ['admin-logs', page, userId, type],
+    queryKey: ['admin-logs', page, pageSize, userId, type, sortKey, sortDirection],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      params.set('page', page.toString());
-      params.set('page_size', '50');
-      if (userId) params.set('user_id', userId);
-      if (type) params.set('type', type);
+      const params = buildAdminListParams({
+        page,
+        pageSize,
+        sortKey,
+        sortDirection,
+        filters: { user_id: userId, type },
+      });
       const res = await adminApiClient.get(`/log?${params}`);
       return res.data.data as LogEntry[];
     },
@@ -70,12 +89,12 @@ export function AdminLogsPage() {
         <Input
           placeholder="User ID"
           value={userId}
-          onChange={(e) => setUserId(e.target.value)}
+          onChange={(e) => setFilter('user_id', e.target.value.trim())}
           className="max-w-xs"
         />
         <select
           value={type}
-          onChange={(e) => setType(e.target.value)}
+          onChange={(e) => setFilter('type', e.target.value)}
           className="border rounded px-3 py-2 text-sm"
         >
           <option value="">All Types</option>
@@ -87,8 +106,8 @@ export function AdminLogsPage() {
         <Button
           variant="outline"
           onClick={() => {
-            setUserId('');
-            setType('');
+            setFilter('user_id', '');
+            setFilter('type', '');
           }}
         >
           Clear
@@ -162,15 +181,13 @@ export function AdminLogsPage() {
             </Table>
           </div>
 
-          <div className="flex items-center justify-between">
-            <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
-              Previous
-            </Button>
-            <span className="text-sm text-muted-foreground">Page {page}</span>
-            <Button variant="outline" onClick={() => setPage((p) => p + 1)} disabled={!logs || logs.length < 50}>
-              Next
-            </Button>
-          </div>
+          <AdminPagination
+            page={page}
+            pageSize={pageSize}
+            hasNextPage={!!logs && logs.length >= pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         </>
       )}
     </div>

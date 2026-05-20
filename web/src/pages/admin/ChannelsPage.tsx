@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { toast } from 'sonner';
 import { adminApiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import { AdminTableToolbar } from '@/components/admin/AdminTableToolbar';
 import { ExportButton } from '@/components/admin/ExportButton';
 import { SortableHeader } from '@/components/admin/SortableHeader';
 import { useAdminTableState } from '@/hooks/useAdminTableState';
+import { buildAdminListParams } from '@/lib/admin-table-query';
 import { sortRows, type SortState } from '@/lib/table-utils';
 import {
   Table,
@@ -46,21 +47,39 @@ const PROVIDER_NAMES: Record<number, string> = {
 };
 
 export function AdminChannelsPage() {
-  const { page, pageSize, search, setPage, setPageSize, setSearch, clearSearch } = useAdminTableState({
+  const {
+    page,
+    pageSize,
+    search,
+    sortKey,
+    sortDirection,
+    filters,
+    setPage,
+    setPageSize,
+    setSearch,
+    clearSearch,
+    setSort,
+    setFilter,
+  } = useAdminTableState({
     storageKey: 'channels',
+    filters: ['status', 'type'],
   });
-  const [sort, setSort] = useState<SortState<Channel>>({ key: null, direction: null });
-  const [statusFilter, setStatusFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
   const queryClient = useQueryClient();
+  const sort = { key: sortKey as keyof Channel | null, direction: sortDirection } satisfies SortState<Channel>;
+  const statusFilter = filters.status ?? '';
+  const typeFilter = filters.type ?? '';
 
   const { data: channels, isLoading } = useQuery({
-    queryKey: ['admin-channels', page, pageSize, search],
+    queryKey: ['admin-channels', page, pageSize, search, sortKey, sortDirection, filters],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      params.set('page', page.toString());
-      params.set('page_size', pageSize.toString());
-      if (search) params.set('keyword', search);
+      const params = buildAdminListParams({
+        page,
+        pageSize,
+        search,
+        sortKey,
+        sortDirection,
+        filters,
+      });
       const res = await adminApiClient.get(`/channel?${params}`);
       return res.data.data as Channel[];
     },
@@ -88,13 +107,8 @@ export function AdminChannelsPage() {
   });
 
   const visibleChannels = useMemo(() => {
-    const filtered = (channels ?? []).filter((channel) => {
-      const statusMatches = !statusFilter || String(channel.status) === statusFilter;
-      const typeMatches = !typeFilter || String(channel.type) === typeFilter;
-      return statusMatches && typeMatches;
-    });
-    return sortRows(filtered, sort);
-  }, [channels, statusFilter, typeFilter, sort]);
+    return sortRows(channels ?? [], sort);
+  }, [channels, sort]);
 
   return (
     <div className="space-y-4">
@@ -128,7 +142,7 @@ export function AdminChannelsPage() {
       <div className="flex flex-wrap items-center gap-3">
         <select
           value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value)}
+          onChange={(event) => setFilter('status', event.target.value)}
           className="h-8 rounded-md border bg-background px-2 text-sm"
           aria-label="Filter channels by status"
         >
@@ -138,7 +152,7 @@ export function AdminChannelsPage() {
         </select>
         <select
           value={typeFilter}
-          onChange={(event) => setTypeFilter(event.target.value)}
+          onChange={(event) => setFilter('type', event.target.value)}
           className="h-8 rounded-md border bg-background px-2 text-sm"
           aria-label="Filter channels by provider"
         >

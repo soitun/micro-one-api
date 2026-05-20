@@ -8,6 +8,11 @@ interface UseAdminTableStateOptions {
   filters?: string[];
 }
 
+interface AdminTableSortUpdate {
+  key: PropertyKey | null;
+  direction: SortDirection;
+}
+
 function readPositiveInt(value: string | null, fallback: number) {
   const parsed = Number.parseInt(value || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -24,7 +29,8 @@ export function useAdminTableState({ defaultPageSize = 20, filters: filterKeys =
   const pageSize = readPositiveInt(searchParams.get('page_size'), preferredPageSize);
   const search = searchParams.get('search') ?? '';
   const sortKey = searchParams.get('sort');
-  const sortDirection = isSortDirection(searchParams.get('order')) ? searchParams.get('order') : null;
+  const orderParam = searchParams.get('order');
+  const sortDirection = isSortDirection(orderParam) ? orderParam : null;
   const filters = Object.fromEntries(
     filterKeys
       .map((key) => [key, searchParams.get(key)] as const)
@@ -59,8 +65,8 @@ export function useAdminTableState({ defaultPageSize = 20, filters: filterKeys =
     },
     setSearch: (nextSearch: string) => updateParams({ page: 1, search: nextSearch.trim() }),
     clearSearch: () => updateParams({ page: 1, search: null }),
-    setSort: (nextSortKey: string | null, nextSortDirection: SortDirection) =>
-      updateParams({ page: 1, sort: nextSortKey, order: nextSortDirection }),
+    setSort: (nextSort: AdminTableSortUpdate) =>
+      updateParams({ page: 1, sort: nextSort.key === null ? null : String(nextSort.key), order: nextSort.direction }),
     setFilter: (key: string, value: string | number | null) => updateParams({ page: 1, [key]: value }),
   };
 }

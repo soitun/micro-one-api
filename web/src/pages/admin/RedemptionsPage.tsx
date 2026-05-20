@@ -7,8 +7,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { EmptyState } from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/LoadingStates';
+import { AdminPagination } from '@/components/admin/AdminPagination';
 import { ExportButton } from '@/components/admin/ExportButton';
 import { SortableHeader } from '@/components/admin/SortableHeader';
+import { useAdminTableState } from '@/hooks/useAdminTableState';
+import { buildAdminListParams } from '@/lib/admin-table-query';
 import { sortRows, type SortState } from '@/lib/table-utils';
 import {
   Table,
@@ -38,23 +41,42 @@ interface RedeemCode {
 }
 
 export function AdminRedemptionsPage() {
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [sort, setSort] = useState<SortState<RedeemCode>>({ key: null, direction: null });
+  const {
+    page,
+    pageSize,
+    search,
+    sortKey,
+    sortDirection,
+    filters,
+    setPage,
+    setPageSize,
+    setSearch,
+    clearSearch,
+    setSort,
+    setFilter,
+  } = useAdminTableState({
+    storageKey: 'redemptions',
+    filters: ['status'],
+  });
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newCodeName, setNewCodeName] = useState('');
   const [newCodeAmount, setNewCodeAmount] = useState('');
   const [newCodeCount, setNewCodeCount] = useState('1');
   const queryClient = useQueryClient();
+  const statusFilter = filters.status ?? '';
+  const sort = { key: sortKey as keyof RedeemCode | null, direction: sortDirection } satisfies SortState<RedeemCode>;
 
   const { data: codes, isLoading } = useQuery({
-    queryKey: ['admin-redemptions', page, search],
+    queryKey: ['admin-redemptions', page, pageSize, search, statusFilter, sortKey, sortDirection],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      params.set('page', page.toString());
-      params.set('page_size', '20');
-      if (search) params.set('keyword', search);
+      const params = buildAdminListParams({
+        page,
+        pageSize,
+        search,
+        sortKey,
+        sortDirection,
+        filters: { status: statusFilter },
+      });
       const res = await adminApiClient.get(`/redemption?${params}`);
       return res.data.data as RedeemCode[];
     },
@@ -103,9 +125,8 @@ export function AdminRedemptionsPage() {
   };
 
   const visibleCodes = useMemo(() => {
-    const filtered = (codes ?? []).filter((code) => !statusFilter || String(code.status) === statusFilter);
-    return sortRows(filtered, sort);
-  }, [codes, statusFilter, sort]);
+    return sortRows(codes ?? [], sort);
+  }, [codes, sort]);
 
   return (
     <div className="space-y-4">
@@ -172,7 +193,7 @@ export function AdminRedemptionsPage() {
         />
         <select
           value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value)}
+          onChange={(event) => setFilter('status', event.target.value)}
           className="h-8 rounded-md border bg-background px-2 text-sm"
           aria-label="Filter redemption codes by status"
         >
@@ -180,7 +201,7 @@ export function AdminRedemptionsPage() {
           <option value="1">Active</option>
           <option value="2">Used</option>
         </select>
-        <Button variant="outline" onClick={() => setSearch('')}>
+        <Button variant="outline" onClick={clearSearch}>
           Clear
         </Button>
         <div className="ml-auto">
@@ -270,15 +291,13 @@ export function AdminRedemptionsPage() {
             </Table>
           </div>
 
-          <div className="flex items-center justify-between">
-            <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
-              Previous
-            </Button>
-            <span className="text-sm text-muted-foreground">Page {page}</span>
-            <Button variant="outline" onClick={() => setPage((p) => p + 1)} disabled={!codes || codes.length < 20}>
-              Next
-            </Button>
-          </div>
+          <AdminPagination
+            page={page}
+            pageSize={pageSize}
+            hasNextPage={!!codes && codes.length >= pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         </>
       )}
     </div>
