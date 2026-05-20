@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/subtle"
 	"embed"
+	"encoding/csv"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -105,6 +106,9 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandlePrefix("/api/user/enable/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIUserStatusAlias(w, r, svc, 1, "/api/user/enable/")
 	}))
+	srv.HandleFunc("/api/user/export", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIExportUsers(w, r, svc)
+	}))
 	srv.HandlePrefix("/api/user/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIUserByID(w, r, svc)
 	}))
@@ -144,6 +148,9 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandleFunc("/api/log/self/stat", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleLogStats(w, r, svc, true)
 	}))
+	srv.HandleFunc("/api/log/export", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIExportLogs(w, r, svc)
+	}))
 	srv.HandlePrefix("/api/log/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPILogByID(w, r, svc)
 	}))
@@ -163,6 +170,9 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	}))
 	srv.HandlePrefix("/v1/redeem-codes/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleRedeemCodeByCode(w, r, svc)
+	}))
+	srv.HandleFunc("/api/redemption/export", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIExportRedemptions(w, r, svc)
 	}))
 	srv.HandlePrefix("/api/redemption/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIRedemptionByCode(w, r, svc)
@@ -203,6 +213,9 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	srv.HandlePrefix("/api/channel/enable/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIChannelStatusAlias(w, r, svc, 1, "/api/channel/enable/")
 	}))
+	srv.HandleFunc("/api/channel/export", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleOneAPIExportChannels(w, r, svc)
+	}))
 	srv.HandlePrefix("/api/channel/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIChannelByID(w, r, svc)
 	}))
@@ -211,6 +224,30 @@ func NewHTTPServer(addr string, svc *service.AdminService) *khttp.Server {
 	}))
 
 	return srv
+}
+
+func requireCSVExport(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return false
+	}
+	if r.URL.Query().Get("format") != "csv" {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "unsupported export format", nil))
+		return false
+	}
+	return true
+}
+
+func writeCSV(w http.ResponseWriter, filename string, header []string, rows [][]string) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	writer := csv.NewWriter(w)
+	_ = writer.Write(header)
+	for _, row := range rows {
+		_ = writer.Write(row)
+	}
+	writer.Flush()
 }
 
 func handleAdminPage(w http.ResponseWriter, r *http.Request) {
@@ -646,6 +683,37 @@ func handleOneAPIListUsers(w http.ResponseWriter, r *http.Request, svc *service.
 	writeJSON(w, http.StatusOK, apiResponse(true, "", resp.GetUsers()))
 }
 
+func handleOneAPIExportUsers(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if !requireCSVExport(w, r) {
+		return
+	}
+	resp, err := svc.ListUsers(r.Context(), &adminv1.AdminListUsersRequest{
+		Page:     oneAPIPage(r),
+		PageSize: oneAPIPageSize(r),
+		Keyword:  r.URL.Query().Get("keyword"),
+		Group:    r.URL.Query().Get("group"),
+		Status:   getQueryInt32(r, "status", 0),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	rows := make([][]string, 0, len(resp.GetUsers()))
+	for _, user := range resp.GetUsers() {
+		rows = append(rows, []string{
+			strconv.FormatInt(user.GetId(), 10),
+			user.GetUsername(),
+			user.GetDisplayName(),
+			user.GetEmail(),
+			user.GetGroup(),
+			strconv.FormatInt(user.GetQuota(), 10),
+			strconv.FormatInt(user.GetUsedQuota(), 10),
+			strconv.FormatInt(int64(user.GetStatus()), 10),
+		})
+	}
+	writeCSV(w, "admin-users.csv", []string{"id", "username", "display_name", "email", "group", "quota", "used_quota", "status"}, rows)
+}
+
 func handleOneAPISearchUsers(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	resp, err := svc.ListUsers(r.Context(), &adminv1.AdminListUsersRequest{
 		Page:     1,
@@ -896,6 +964,39 @@ func handleOneAPIListChannels(w http.ResponseWriter, r *http.Request, svc *servi
 		return
 	}
 	writeJSON(w, http.StatusOK, apiResponse(true, "", resp.GetChannels()))
+}
+
+func handleOneAPIExportChannels(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if !requireCSVExport(w, r) {
+		return
+	}
+	resp, err := svc.ListChannels(r.Context(), &adminv1.AdminListChannelsRequest{
+		Page:     oneAPIPage(r),
+		PageSize: oneAPIPageSize(r),
+		Keyword:  r.URL.Query().Get("keyword"),
+		Group:    r.URL.Query().Get("group"),
+		Status:   getQueryInt32(r, "status", 0),
+		Type:     getQueryInt32(r, "type", 0),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	rows := make([][]string, 0, len(resp.GetChannels()))
+	for _, channel := range resp.GetChannels() {
+		rows = append(rows, []string{
+			strconv.FormatInt(channel.GetId(), 10),
+			channel.GetName(),
+			strconv.FormatInt(int64(channel.GetType()), 10),
+			channel.GetGroup(),
+			channel.GetModels(),
+			strconv.FormatInt(int64(channel.GetStatus()), 10),
+			strconv.FormatInt(int64(channel.GetWeight()), 10),
+			strconv.FormatFloat(channel.GetBalance(), 'f', -1, 64),
+			strconv.FormatInt(channel.GetUsedQuota(), 10),
+		})
+	}
+	writeCSV(w, "admin-channels.csv", []string{"id", "name", "type", "group", "models", "status", "weight", "balance", "used_quota"}, rows)
 }
 
 func handleOneAPISearchChannels(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
@@ -1452,6 +1553,38 @@ func handleOneAPIListLogs(w http.ResponseWriter, r *http.Request, svc *service.A
 	writeJSON(w, http.StatusOK, apiResponse(true, "", resp.GetLogs()))
 }
 
+func handleOneAPIExportLogs(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if !requireCSVExport(w, r) {
+		return
+	}
+	resp, err := svc.ListLogs(r.Context(), &adminv1.ListLogsRequest{
+		Page:      oneAPIPage(r),
+		PageSize:  oneAPIPageSize(r),
+		UserId:    r.URL.Query().Get("user_id"),
+		Type:      r.URL.Query().Get("type"),
+		StartTime: getQueryInt64(r, "start_time", 0),
+		EndTime:   getQueryInt64(r, "end_time", 0),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	rows := make([][]string, 0, len(resp.GetLogs()))
+	for _, log := range resp.GetLogs() {
+		rows = append(rows, []string{
+			strconv.FormatInt(log.GetId(), 10),
+			log.GetUserId(),
+			log.GetType(),
+			strconv.FormatInt(log.GetAmount(), 10),
+			strconv.FormatInt(log.GetBalanceAfter(), 10),
+			log.GetReferenceId(),
+			log.GetRemark(),
+			strconv.FormatInt(log.GetCreatedAt(), 10),
+		})
+	}
+	writeCSV(w, "admin-billing-logs.csv", []string{"id", "user_id", "type", "amount", "balance_after", "reference_id", "remark", "created_at"}, rows)
+}
+
 func handleOneAPISearchLogs(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	handleOneAPIListLogs(w, r, svc)
 }
@@ -1614,6 +1747,47 @@ func handleOneAPIRedemptions(w http.ResponseWriter, r *http.Request, svc *servic
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
+}
+
+func handleOneAPIExportRedemptions(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if !requireCSVExport(w, r) {
+		return
+	}
+	var codes []*adminv1.RedeemCodeInfo
+	if keyword := r.URL.Query().Get("keyword"); keyword != "" {
+		resp, err := svc.SearchRedeemCodes(r.Context(), &adminv1.SearchRedeemCodesRequest{Keyword: keyword})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		codes = resp.GetCodes()
+	} else {
+		resp, err := svc.ListRedeemCodes(r.Context(), &adminv1.ListRedeemCodesRequest{
+			Page:     oneAPIPage(r),
+			PageSize: oneAPIPageSize(r),
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		codes = resp.GetCodes()
+	}
+	rows := make([][]string, 0, len(codes))
+	for _, code := range codes {
+		if status := getQueryInt32(r, "status", 0); status != 0 && code.GetStatus() != status {
+			continue
+		}
+		rows = append(rows, []string{
+			code.GetCode(),
+			code.GetName(),
+			strconv.FormatInt(code.GetAmount(), 10),
+			strconv.FormatInt(int64(code.GetCount()), 10),
+			strconv.FormatInt(int64(code.GetStatus()), 10),
+			code.GetCreatedBy(),
+			strconv.FormatInt(code.GetCreatedAt(), 10),
+		})
+	}
+	writeCSV(w, "admin-redemptions.csv", []string{"code", "name", "amount", "count", "status", "created_by", "created_at"}, rows)
 }
 
 func handleListRedeemCodes(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {

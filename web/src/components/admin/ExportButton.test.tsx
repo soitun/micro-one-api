@@ -8,4 +8,10 @@ describe('ExportButton', () => {
 
     expect(screen.getByRole('button', { name: /export csv/i })).toBeDisabled();
   });
+
+  it('enables backend export when href is provided', () => {
+    render(<ExportButton filename="users.csv" href="/api/user/export?format=csv" />);
+
+    expect(screen.getByRole('button', { name: /export csv/i })).toBeEnabled();
+  });
 });

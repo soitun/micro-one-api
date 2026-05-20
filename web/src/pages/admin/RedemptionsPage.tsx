@@ -65,6 +65,16 @@ export function AdminRedemptionsPage() {
   const queryClient = useQueryClient();
   const statusFilter = filters.status ?? '';
   const sort = { key: sortKey as keyof RedeemCode | null, direction: sortDirection } satisfies SortState<RedeemCode>;
+  const exportParams = buildAdminListParams({
+    page,
+    pageSize,
+    search,
+    sortKey,
+    sortDirection,
+    filters: { status: statusFilter },
+  });
+  exportParams.set('format', 'csv');
+  const exportHref = `/redemption/export?${exportParams}`;
 
   const { data: codes, isLoading } = useQuery({
     queryKey: ['admin-redemptions', page, pageSize, search, statusFilter, sortKey, sortDirection],
@@ -207,6 +217,7 @@ export function AdminRedemptionsPage() {
         <div className="ml-auto">
           <ExportButton
             filename="admin-redemptions.csv"
+            href={exportHref}
             rows={visibleCodes}
             columns={[
               { key: 'code', label: 'Code' },

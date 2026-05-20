@@ -57,6 +57,15 @@ export function AdminLogsPage() {
   const userId = filters.user_id ?? '';
   const type = filters.type ?? '';
   const sort = { key: sortKey as keyof LogEntry | null, direction: sortDirection } satisfies SortState<LogEntry>;
+  const exportParams = buildAdminListParams({
+    page,
+    pageSize,
+    sortKey,
+    sortDirection,
+    filters: { user_id: userId, type },
+  });
+  exportParams.set('format', 'csv');
+  const exportHref = `/log/export?${exportParams}`;
 
   const { data: logs, isLoading } = useQuery({
     queryKey: ['admin-logs', page, pageSize, userId, type, sortKey, sortDirection],
@@ -115,6 +124,7 @@ export function AdminLogsPage() {
         <div className="ml-auto">
           <ExportButton
             filename="admin-billing-logs.csv"
+            href={exportHref}
             rows={visibleLogs}
             columns={[
               { key: 'id', label: 'ID' },

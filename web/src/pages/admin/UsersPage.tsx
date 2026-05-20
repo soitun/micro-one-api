@@ -55,6 +55,9 @@ export function AdminUsersPage() {
   const sort = { key: sortKey as keyof User | null, direction: sortDirection } satisfies SortState<User>;
   const statusFilter = filters.status ?? '';
   const groupFilter = filters.group ?? '';
+  const exportParams = buildAdminListParams({ page, pageSize, search, sortKey, sortDirection, filters });
+  exportParams.set('format', 'csv');
+  const exportHref = `/user/export?${exportParams}`;
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['admin-users', page, pageSize, search, sortKey, sortDirection, filters],
@@ -105,6 +108,7 @@ export function AdminUsersPage() {
         actions={
           <ExportButton
             filename="admin-users.csv"
+            href={exportHref}
             rows={visibleUsers}
             columns={[
               { key: 'id', label: 'ID' },

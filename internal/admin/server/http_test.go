@@ -971,6 +971,47 @@ func TestAdminHTTPOneAPIUserManageRoute(t *testing.T) {
 	}
 }
 
+func TestAdminHTTPOneAPIExportRoutesReturnCSV(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{"/api/user/export?format=csv", "username"},
+		{"/api/channel/export?format=csv", "openai"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req.Header.Set("Authorization", "Bearer admin-token")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200, body=%s", tc.path, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/csv") {
+			t.Fatalf("%s content-type = %q, want text/csv", tc.path, got)
+		}
+		if !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("%s csv missing %q: %s", tc.path, tc.want, rec.Body.String())
+		}
+	}
+}
+
+func TestAdminHTTPOneAPIExportRoutesRequireAuth(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+	req := httptest.NewRequest(http.MethodGet, "/api/user/export?format=csv", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminHTTPOneAPIRootAliasesAcceptNoTrailingSlash(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})

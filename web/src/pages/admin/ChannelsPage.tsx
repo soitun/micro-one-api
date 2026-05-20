@@ -68,6 +68,9 @@ export function AdminChannelsPage() {
   const sort = { key: sortKey as keyof Channel | null, direction: sortDirection } satisfies SortState<Channel>;
   const statusFilter = filters.status ?? '';
   const typeFilter = filters.type ?? '';
+  const exportParams = buildAdminListParams({ page, pageSize, search, sortKey, sortDirection, filters });
+  exportParams.set('format', 'csv');
+  const exportHref = `/channel/export?${exportParams}`;
 
   const { data: channels, isLoading } = useQuery({
     queryKey: ['admin-channels', page, pageSize, search, sortKey, sortDirection, filters],
@@ -124,6 +127,7 @@ export function AdminChannelsPage() {
         actions={
           <ExportButton
             filename="admin-channels.csv"
+            href={exportHref}
             rows={visibleChannels}
             columns={[
               { key: 'id', label: 'ID' },
