@@ -166,6 +166,21 @@ dev-test-all:
 	@make dev-test-integration
 	@echo "All tests completed!"
 
+.PHONY: test-e2e
+# run e2e tests (docker-compose environment)
+test-e2e:
+	./scripts/test-e2e-flow.sh
+
+.PHONY: test-e2e-suite
+# run e2e Go test suite (docker-compose environment)
+test-e2e-suite:
+	./scripts/test-e2e-flow.sh --suite
+
+.PHONY: test-e2e-local
+# run e2e Go test suite against local services (no docker)
+test-e2e-local:
+	go test -v -count=1 -timeout 120s ./test/e2e/suite/
+
 .PHONY: clean
 # clean build artifacts and logs
 clean:

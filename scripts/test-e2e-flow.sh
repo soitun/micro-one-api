@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # End-to-end flow test: Register -> Login -> Models -> Chat Completion -> Billing
 #
-# Usage: ./scripts/test-e2e-flow.sh
+# Usage:
+#   ./scripts/test-e2e-flow.sh              # Run standalone binary flow
+#   ./scripts/test-e2e-flow.sh --suite      # Run Go test suite (go test)
 #
 # Prerequisites:
 #   - Docker and docker-compose installed
@@ -11,7 +13,7 @@
 # This script:
 #   1. Starts services with test override (exposes gRPC ports, adds mock upstream)
 #   2. Updates test channel to point to mock upstream
-#   3. Builds and runs Go E2E test (register, login, models, chat, billing)
+#   3. Builds and runs E2E tests (register, login, models, chat, billing, admin)
 #   4. Tears down the environment
 
 set -euo pipefail
@@ -23,6 +25,14 @@ COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
 COMPOSE_TEST="$COMPOSE_DIR/docker-compose.test.yml"
 E2E_DIR="$PROJECT_ROOT/test/e2e"
 ENV_FILE="$COMPOSE_DIR/.env"
+
+# Parse flags
+RUN_SUITE=false
+for arg in "$@"; do
+  case "$arg" in
+    --suite) RUN_SUITE=true ;;
+  esac
+done
 
 # Colors
 RED='\033[0;31m'
@@ -122,38 +132,56 @@ else
     exit 1
 fi
 
-# ── Step 2: Register test user and set quota ──
+# ── Step 2: Run tests ──
 
-log "Building E2E test binary..."
-cd "$PROJECT_ROOT"
-go build -o "$E2E_DIR/e2e-test" "$E2E_DIR/main.go"
+if [ "$RUN_SUITE" = true ]; then
+    # Run Go test suite
+    log "Running Go test suite..."
+    cd "$PROJECT_ROOT"
+    env_args=(
+        "ADMIN_TOKEN=${ADMIN_TOKEN:-test-admin-token-for-dev}"
+    )
+    [ -n "${PROVIDER_API_KEY:-}" ] && env_args+=("PROVIDER_API_KEY=$PROVIDER_API_KEY")
+    [ -n "${PROVIDER_BASE_URL:-}" ] && env_args+=("PROVIDER_BASE_URL=$PROVIDER_BASE_URL")
+    [ -n "${PROVIDER_MODEL:-}" ] && env_args+=("PROVIDER_MODEL=$PROVIDER_MODEL")
+    [ -n "${TEST_MODEL:-}" ] && env_args+=("TEST_MODEL=$TEST_MODEL")
 
-# Run register+login only first to get user_id and token
-log "Registering test user..."
-REGISTER_OUTPUT=$("$E2E_DIR/e2e-test" --step register 2>&1) || true
-echo "$REGISTER_OUTPUT"
+    env "${env_args[@]}" \
+        go test -v -count=1 -timeout 120s ./test/e2e/suite/ \
+        || { fail "Go test suite failed"; exit 1; }
+    log "Go test suite passed!"
+else
+    # Run standalone binary flow (original behavior)
+    log "Building E2E test binary..."
+    cd "$PROJECT_ROOT"
+    go build -o "$E2E_DIR/e2e-test" "$E2E_DIR/main.go"
 
-# Extract user_id from register output
-E2E_USER_ID=$(echo "$REGISTER_OUTPUT" | sed -n 's/.*user_id=\([0-9]*\).*/\1/p' | head -1)
-if [ -z "$E2E_USER_ID" ]; then
-    fail "Could not extract user_id from registration"
-    exit 1
+    # Run register+login only first to get user_id and token
+    log "Registering test user..."
+    REGISTER_OUTPUT=$("$E2E_DIR/e2e-test" --step register 2>&1) || true
+    echo "$REGISTER_OUTPUT"
+
+    # Extract user_id from register output
+    E2E_USER_ID=$(echo "$REGISTER_OUTPUT" | sed -n 's/.*user_id=\([0-9]*\).*/\1/p' | head -1)
+    if [ -z "$E2E_USER_ID" ]; then
+        fail "Could not extract user_id from registration"
+        exit 1
+    fi
+    log "Registered user_id=$E2E_USER_ID"
+
+    # Set quota for the test user (registration doesn't set default quota)
+    log "Setting quota for test user..."
+    docker exec mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}" oneapi -e \
+        "UPDATE users SET quota=1000000 WHERE id=$E2E_USER_ID;" 2>/dev/null
+    log "Quota set to 1000000"
+
+    # Run full E2E test
+    log "Running full E2E test..."
+    "$E2E_DIR/e2e-test" --step all
+    E2E_EXIT=$?
+
+    # Cleanup binary
+    rm -f "$E2E_DIR/e2e-test"
+
+    exit $E2E_EXIT
 fi
-log "Registered user_id=$E2E_USER_ID"
-
-# Set quota for the test user (registration doesn't set default quota)
-log "Setting quota for test user..."
-docker exec mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}" oneapi -e \
-    "UPDATE users SET quota=1000000 WHERE id=$E2E_USER_ID;" 2>/dev/null
-log "Quota set to 1000000"
-
-# ── Step 3: Run full E2E test ──
-
-log "Running full E2E test..."
-"$E2E_DIR/e2e-test" --step all
-E2E_EXIT=$?
-
-# Cleanup binary
-rm -f "$E2E_DIR/e2e-test"
-
-exit $E2E_EXIT

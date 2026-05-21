@@ -1,0 +1,71 @@
+# Combined test + port override for e2e testing when default ports are in use.
+# Usage: COMPOSE_PROJECT_NAME=e2e-test docker-compose -f docker-compose.yml -f docker-compose.e2e-ports.yml up -d
+#
+# This file REPLACES docker-compose.test.yml and uses non-conflicting ports.
+
+services:
+  mock-upstream:
+    image: python:3-alpine
+    container_name: e2e-mock-upstream
+    command: ["python3", "/mock/mock_server.py"]
+    volumes:
+      - ../../test/mockupstream/mock_server.py:/mock/mock_server.py:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9999/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mysql:
+    container_name: e2e-mysql
+    ports:
+      - "23306:3306"
+
+  redis:
+    container_name: e2e-redis
+    ports:
+      - "26379:6379"
+
+  relay-gateway:
+    container_name: e2e-relay-gateway
+    ports:
+      - "28080:8080"
+    environment:
+      - PROVIDER_DISABLE_SSRF_CHECK=true
+
+  identity-service:
+    container_name: e2e-identity-service
+    ports:
+      - "28001:8001"
+      - "29001:9001"
+
+  channel-service:
+    container_name: e2e-channel-service
+    ports:
+      - "28002:8002"
+      - "29002:9002"
+
+  billing-service:
+    container_name: e2e-billing-service
+    ports:
+      - "28004:8004"
+      - "29004:9004"
+
+  admin-api:
+    container_name: e2e-admin-api
+    ports:
+      - "23000:8000"
+
+  config-service:
+    container_name: e2e-config-service
+
+  log-service:
+    container_name: e2e-log-service
+
+  monitor-worker:
+    container_name: e2e-monitor-worker
+
+  notify-worker:
+    container_name: e2e-notify-worker
