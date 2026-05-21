@@ -148,6 +148,10 @@ func (uc *BillingUsecase) CommitQuota(ctx context.Context, reservationID string,
 		}
 
 		if diff > 0 {
+			if _, err := uc.accountRepo.UpdateQuota(ctx, reservation.UserID, diff, LedgerTypeRefund); err != nil {
+				return 0, 0, fmt.Errorf("refund quota: %w", err)
+			}
+
 			refundBalanceAfter := balanceAfter + diff
 			refundLedger := &Ledger{
 				UserID:       reservation.UserID,
