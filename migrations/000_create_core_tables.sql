@@ -23,14 +23,12 @@ CREATE TABLE IF NOT EXISTS `users` (
 CREATE TABLE IF NOT EXISTS `tokens` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `user_id` bigint NOT NULL,
-  `name` varchar(128) DEFAULT '',
   `key` varchar(64) NOT NULL,
   `status` int DEFAULT 0 COMMENT '0=enabled, 1=disabled',
   `expired_time` bigint DEFAULT 0,
   `remain_quota` bigint DEFAULT 0,
   `unlimited_quota` tinyint(1) DEFAULT 0,
   `models` text DEFAULT NULL,
-  `created_at` bigint DEFAULT 0,
   PRIMARY KEY (`id`),
   KEY `idx_user_id` (`user_id`),
   KEY `idx_key` (`key`)
