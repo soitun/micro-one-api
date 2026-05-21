@@ -493,7 +493,9 @@ func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Requ
 
 		jsonData, err := sonic.Marshal(chunk)
 		if err != nil {
-			applogger.Log.Warn("failed to marshal chunk", zap.Error(err))
+			if applogger.Log != nil {
+				applogger.Log.Warn("failed to marshal chunk", zap.Error(err))
+			}
 			continue
 		}
 
@@ -554,7 +556,7 @@ func (s *HTTPServer) ingestUsageLog(ctx context.Context, in usageLogInput) {
 		ElapsedTime:      in.ElapsedTime,
 		IsStream:         in.IsStream,
 	})
-	if err != nil {
+	if err != nil && applogger.Log != nil {
 		applogger.Log.Warn("failed to ingest usage log", zap.Error(err))
 	}
 }
