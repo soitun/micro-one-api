@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS `alert_rules` (
 -- Seed data: default admin user and test token
 -- status=1 means enabled (matches biz.TokenStatusEnabled=1, biz.UserStatusEnabled=1)
 INSERT INTO `users` (`id`, `username`, `display_name`, `email`, `group`, `status`, `password_hash`, `quota`)
-VALUES (1, 'admin', 'Administrator', 'admin@example.com', 'default', 1, '', 1000000)
+VALUES (1, 'admin', 'Administrator', 'admin@example.com', 'default', 1, '$2a$10$mQbGwDjn.r1F21benveHEOAZWMoctZWkl.wjkV1x1xu3lI7IIW2NG', 1000000)
 ON DUPLICATE KEY UPDATE `username`=`username`;
 
 INSERT INTO `tokens` (`id`, `user_id`, `key`, `status`, `expired_time`, `remain_quota`, `unlimited_quota`)
