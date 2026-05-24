@@ -144,6 +144,9 @@ func NewHTTPServerWithRegistrationPolicy(addr string, uc *biz.IdentityUsecase, o
 	srv.HandleFunc("/api/user/quota", func(w http.ResponseWriter, r *http.Request) {
 		handleUserDashboard(w, r, uc, billingClient)
 	})
+	srv.HandleFunc("/api/user/logs", func(w http.ResponseWriter, r *http.Request) {
+		handleUserLogs(w, r, uc, billingClient)
+	})
 	srv.HandleFunc("/dashboard/billing/usage", func(w http.ResponseWriter, r *http.Request) {
 		handleDashboardBillingUsage(w, r, uc, billingClient)
 	})
@@ -439,6 +442,64 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 		"group":         account.GetGroup(),
 		"group_ratio":   account.GetGroupRatio(),
 		"frozen_quota":  account.GetFrozenQuota(),
+	}})
+}
+
+func handleUserLogs(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, billingClient billingv1.BillingServiceClient) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	if billingClient == nil {
+		writeJSON(w, http.StatusServiceUnavailable, apiResponse{Success: false, Message: "billing service unavailable"})
+		return
+	}
+
+	page := queryInt32(r, "page", 1)
+	pageSize := queryInt32(r, "page_size", 20)
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	resp, err := billingClient.ListLedger(r.Context(), &billingv1.ListLedgerRequest{
+		UserId:   strconv.FormatInt(snapshot.UserID, 10),
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+		return
+	}
+
+	logType := strings.TrimSpace(r.URL.Query().Get("type"))
+	items := make([]map[string]interface{}, 0, len(resp.GetEntries()))
+	for _, entry := range resp.GetEntries() {
+		if logType != "" && entry.GetType() != logType {
+			continue
+		}
+		createdAt := int64(0)
+		if entry.GetCreatedAt() != nil {
+			createdAt = entry.GetCreatedAt().AsTime().Unix()
+		}
+		items = append(items, map[string]interface{}{
+			"id":            entry.GetId(),
+			"user_id":       entry.GetUserId(),
+			"type":          entry.GetType(),
+			"amount":        entry.GetAmount(),
+			"balance_after": entry.GetBalanceAfter(),
+			"reference_id":  entry.GetReferenceId(),
+			"remark":        entry.GetRemark(),
+			"created_at":    createdAt,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{
+		"items": items,
+		"total": resp.GetTotal(),
 	}})
 }
 

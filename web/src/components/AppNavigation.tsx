@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 const userLinks = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/tokens', label: 'Tokens' },
+  { to: '/usage', label: 'Usage' },
 ];
 
 const adminLinks = [

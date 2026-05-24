@@ -16,6 +16,7 @@ import (
 	"micro-one-api/internal/pkg/oauth"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestIdentityHTTPRegisterLoginAndSelf(t *testing.T) {
@@ -522,6 +523,36 @@ func TestIdentityHTTPDashboardRequiresBillingClient(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"success":false`) {
 		t.Fatalf("dashboard response mismatch: %s", rec.Body.String())
+	}
+}
+
+func TestIdentityHTTPUserLogsUsesAuthenticatedUser(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	user, authToken := registerAndLoginForHTTPTest(t, uc)
+	billingClient := &identityHTTPBillingClient{}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/logs?page=1&page_size=20&type=consume&user_id=999", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if billingClient.lastLedgerRequest == nil {
+		t.Fatal("expected billing ListLedger to be called")
+	}
+	if billingClient.lastLedgerRequest.GetUserId() != strconv.FormatInt(user.ID, 10) {
+		t.Fatalf("ledger user_id = %q, want authenticated user %d", billingClient.lastLedgerRequest.GetUserId(), user.ID)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"success":true`) || !strings.Contains(body, `"type":"consume"`) {
+		t.Fatalf("logs response mismatch: %s", body)
+	}
+	if strings.Contains(body, `"type":"recharge"`) {
+		t.Fatalf("logs response should apply type filter: %s", body)
 	}
 }
 
@@ -1231,12 +1262,13 @@ func TestIdentityHTTPOAuthBindRejectsDuplicateProviderIdentity(t *testing.T) {
 
 type identityHTTPBillingClient struct {
 	billingv1.BillingServiceClient
-	snapshot       *commonv1.AccountSnapshot
-	redeemResponse *billingv1.RedeemCodeResponse
+	snapshot            *commonv1.AccountSnapshot
+	redeemResponse      *billingv1.RedeemCodeResponse
 	createOrderResponse *billingv1.PaymentOrderResponse
-	redeemCode     string
-	topUpCalls     []capturedTopUp
-	createOrderCalls []billingv1.CreatePaymentOrderRequest
+	redeemCode          string
+	topUpCalls          []capturedTopUp
+	createOrderCalls    []billingv1.CreatePaymentOrderRequest
+	lastLedgerRequest   *billingv1.ListLedgerRequest
 }
 
 type capturedTopUp struct {
@@ -1308,6 +1340,35 @@ func (c *identityHTTPBillingClient) TopUpQuota(ctx context.Context, req *billing
 		Remark:     req.GetRemark(),
 	})
 	return &billingv1.TopUpQuotaResponse{Success: true, NewQuota: req.GetAmount()}, nil
+}
+
+func (c *identityHTTPBillingClient) ListLedger(ctx context.Context, req *billingv1.ListLedgerRequest, opts ...grpc.CallOption) (*billingv1.ListLedgerResponse, error) {
+	c.lastLedgerRequest = req
+	return &billingv1.ListLedgerResponse{
+		Entries: []*commonv1.LedgerEntry{
+			{
+				Id:           "1",
+				UserId:       req.GetUserId(),
+				Type:         "consume",
+				Amount:       -25,
+				BalanceAfter: 975,
+				ReferenceId:  "res-1",
+				Remark:       "model=mimo-v2.5, tokens=25",
+				CreatedAt:    timestamppb.Now(),
+			},
+			{
+				Id:           "2",
+				UserId:       req.GetUserId(),
+				Type:         "recharge",
+				Amount:       1000,
+				BalanceAfter: 1000,
+				ReferenceId:  "topup-1",
+				Remark:       "manual",
+				CreatedAt:    timestamppb.Now(),
+			},
+		},
+		Total: 2,
+	}, nil
 }
 
 func registerAndLoginForHTTPTest(t *testing.T, uc *biz.IdentityUsecase) (*biz.User, string) {
