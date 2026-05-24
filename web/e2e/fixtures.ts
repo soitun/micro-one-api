@@ -10,6 +10,15 @@ export async function mockApi(page: Page) {
     });
   });
 
+  await page.route('**/api/user/register', async (route) => {
+    await route.fulfill({
+      json: {
+        success: true,
+        data: { user_id: 1 },
+      },
+    });
+  });
+
   await page.route('**/api/user/self', async (route) => {
     await route.fulfill({
       json: {

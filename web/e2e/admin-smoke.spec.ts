@@ -39,6 +39,30 @@ test('login stores token and shows dashboard', async ({ page }) => {
   await expect(page.evaluate(() => localStorage.getItem('token'))).resolves.toBe('test-user-token');
 });
 
+test('register creates account and signs in', async ({ page }) => {
+  const requests: string[] = [];
+  await page.route('**/api/user/register', async (route) => {
+    requests.push(route.request().postData() || '');
+    await route.fulfill({
+      json: {
+        success: true,
+        data: { user_id: 1 },
+      },
+    });
+  });
+
+  await page.goto('/login');
+  await page.getByRole('button', { name: 'Create a new account' }).click();
+  await page.getByLabel('Username').fill('bob');
+  await page.getByLabel('Password', { exact: true }).fill('password123');
+  await page.getByLabel('Confirm password').fill('password123');
+  await page.getByRole('button', { name: 'Create account' }).click();
+
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.evaluate(() => localStorage.getItem('token'))).resolves.toBe('test-user-token');
+  await expect.poll(() => requests.some((body) => body.includes('"username":"bob"'))).toBe(true);
+});
+
 test('admin token enables Options nav', async ({ page }) => {
   await seedAdminSession(page);
   await page.goto('/dashboard');
