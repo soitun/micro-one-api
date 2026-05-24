@@ -360,6 +360,13 @@ func (s *AdminService) ListPaymentOrders(ctx context.Context, req *billingv1.Lis
 	return s.billingClient.ListPaymentOrders(ctx, req)
 }
 
+func (s *AdminService) GetPaymentOrderByTradeNo(ctx context.Context, req *billingv1.GetPaymentOrderByTradeNoRequest) (*billingv1.PaymentOrderResponse, error) {
+	if s.billingClient == nil {
+		return &billingv1.PaymentOrderResponse{Success: false, ErrorMessage: "billing service unavailable"}, nil
+	}
+	return s.billingClient.GetPaymentOrderByTradeNo(ctx, req)
+}
+
 // GetAccountSnapshot 获取账户快照
 func (s *AdminService) GetAccountSnapshot(ctx context.Context, req *adminv1.GetAccountSnapshotRequest) (*adminv1.AdminAccountSnapshotResponse, error) {
 	billingReq := &billingv1.GetAccountSnapshotRequest{

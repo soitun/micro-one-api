@@ -190,6 +190,7 @@ type adminHTTPBillingClient struct {
 	reconListLastReq   *billingv1.ListReconciliationRunsRequest
 	reconGetLastRunID  int64
 	paymentListLastReq *billingv1.ListPaymentOrdersRequest
+	paymentGetLastReq  *billingv1.GetPaymentOrderByTradeNoRequest
 }
 
 func (c *adminHTTPBillingClient) TopUpQuota(ctx context.Context, req *billingv1.TopUpQuotaRequest, opts ...grpc.CallOption) (*billingv1.TopUpQuotaResponse, error) {
@@ -269,6 +270,27 @@ func (c *adminHTTPBillingClient) ListPaymentOrders(ctx context.Context, req *bil
 	}, nil
 }
 
+func (c *adminHTTPBillingClient) GetPaymentOrderByTradeNo(ctx context.Context, req *billingv1.GetPaymentOrderByTradeNoRequest, opts ...grpc.CallOption) (*billingv1.PaymentOrderResponse, error) {
+	c.paymentGetLastReq = req
+	return &billingv1.PaymentOrderResponse{
+		Success: true,
+		Order: &billingv1.PaymentOrder{
+			Id:               1,
+			UserId:           "42",
+			TradeNo:          req.GetTradeNo(),
+			Channel:          "alipay",
+			AssetType:        "quota",
+			AssetAmount:      500000,
+			MoneyCents:       1000,
+			Currency:         "CNY",
+			Status:           "paid",
+			ProviderTradeNo:  "ALI-1",
+			AssetIssueStatus: "issued",
+			CreatedAt:        timestamppb.Now(),
+		},
+	}, nil
+}
+
 func (c *adminHTTPBillingClient) ListReconciliationRuns(ctx context.Context, req *billingv1.ListReconciliationRunsRequest, opts ...grpc.CallOption) (*billingv1.ListReconciliationRunsResponse, error) {
 	c.reconListLastReq = req
 	if c.reconListErr != nil {
@@ -312,6 +334,11 @@ func newAdminHTTPTestServerWithOptions(identity identityv1.IdentityServiceClient
 	return NewHTTPServer(":0", adminSvc)
 }
 
+func newAdminHTTPTestServerWithIdentityEndpoint(identityEndpoint string) http.Handler {
+	adminSvc := service.NewAdminService(nil, nil, nil, nil)
+	return NewHTTPServer(":0", adminSvc, identityEndpoint)
+}
+
 func newAdminHTTPOptionTestServer(store service.SystemOptionsStore) http.Handler {
 	adminSvc := service.NewAdminService(nil, nil, nil, store)
 	return NewHTTPServer(":0", adminSvc)
@@ -329,6 +356,32 @@ func TestAdminHTTPStatusIsUnauthenticated(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"success":true`) {
 		t.Fatalf("status response missing success: %s", rec.Body.String())
+	}
+}
+
+func TestAdminHTTPProxiesUserPaymentOrderDetail(t *testing.T) {
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"order":{"trade_no":"PAY-DETAIL","status":"paid"}}}`))
+	}))
+	defer upstream.Close()
+
+	srv := newAdminHTTPTestServerWithIdentityEndpoint(upstream.URL)
+	req := httptest.NewRequest(http.MethodGet, "/api/user/payment/orders/PAY-DETAIL", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/api/user/payment/orders/PAY-DETAIL" {
+		t.Fatalf("proxied path = %q, want /api/user/payment/orders/PAY-DETAIL", gotPath)
+	}
+	if !strings.Contains(rec.Body.String(), `"trade_no":"PAY-DETAIL"`) {
+		t.Fatalf("response was not proxied: %s", rec.Body.String())
 	}
 }
 
@@ -1153,6 +1206,29 @@ func TestAdminHTTPListPaymentOrders(t *testing.T) {
 		t.Fatalf("ListPaymentOrders called with %+v", got)
 	}
 	for _, want := range []string{`"success":true`, `"orders":`, `"trade_no":"PAY-1"`, `"total":1`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("response missing %s: %s", want, rec.Body.String())
+		}
+	}
+}
+
+func TestAdminHTTPGetPaymentOrderByTradeNo(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	billingClient := &adminHTTPBillingClient{}
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, billingClient)
+	req := httptest.NewRequest(http.MethodGet, "/api/payment/orders/PAY-1", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if billingClient.paymentGetLastReq == nil || billingClient.paymentGetLastReq.GetTradeNo() != "PAY-1" {
+		t.Fatalf("GetPaymentOrderByTradeNo called with %+v", billingClient.paymentGetLastReq)
+	}
+	for _, want := range []string{`"success":true`, `"order":`, `"trade_no":"PAY-1"`, `"status":"paid"`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("response missing %s: %s", want, rec.Body.String())
 		}

@@ -1,9 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/LoadingStates';
-import { apiClient } from '@/lib/api';
+import { adminApiClient, apiClient } from '@/lib/api';
 import { unwrapApiData } from '@/lib/api-response';
 import {
   Table,
@@ -30,12 +30,62 @@ interface LedgerLogData {
   total?: number;
 }
 
+interface PaymentOrder {
+  id?: number | string;
+  user_id?: string;
+  userId?: string;
+  trade_no?: string;
+  tradeNo?: string;
+  channel?: string;
+  asset_amount?: number;
+  assetAmount?: number;
+  money_cents?: number;
+  moneyCents?: number;
+  currency?: string;
+  status?: string;
+  provider_trade_no?: string;
+  providerTradeNo?: string;
+  asset_issue_status?: string;
+  assetIssueStatus?: string;
+  created_at?: number | string | { seconds?: number };
+  createdAt?: number | string | { seconds?: number };
+}
+
+interface PaymentOrdersPayload {
+  orders?: PaymentOrder[];
+  total?: number;
+}
+
+interface PaymentOrderPayload {
+  order?: PaymentOrder;
+}
+
+interface OrderRow {
+  id: string;
+  type: string;
+  amount: string;
+  balance: string;
+  reference: string;
+  remark: string;
+  createdAt: number;
+  userID?: string;
+  status?: string;
+  paymentOrder?: PaymentOrder;
+}
+
 const ORDER_TYPES = new Set(['recharge', 'redeem', 'refund']);
 
 const TYPE_NAMES: Record<string, string> = {
+  payment: '支付充值',
   recharge: '充值',
   redeem: '兑换',
   refund: '退款',
+};
+
+const STATUS_NAMES: Record<string, string> = {
+  pending: '待支付',
+  paid: '已支付',
+  closed: '已关闭',
 };
 
 function normalizeLogs(data: LedgerLog[] | LedgerLogData): LedgerLog[] {
@@ -45,8 +95,25 @@ function normalizeLogs(data: LedgerLog[] | LedgerLogData): LedgerLog[] {
   return [];
 }
 
+function numberValue(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function formatQuota(value: number) {
   return (value / 500000).toFixed(4);
+}
+
+function formatMoney(cents: unknown, currency?: string) {
+  return `${currency || 'CNY'} ${(numberValue(cents) / 100).toFixed(2)}`;
+}
+
+function timestampSeconds(value: unknown): number {
+  if (!value) return 0;
+  if (typeof value === 'object' && 'seconds' in value) {
+    return numberValue((value as { seconds?: number }).seconds);
+  }
+  return numberValue(value);
 }
 
 function formatDate(value: number) {
@@ -54,30 +121,123 @@ function formatDate(value: number) {
   return new Date(value * 1000).toLocaleString();
 }
 
+function getTradeNo(order: PaymentOrder) {
+  return order.trade_no || order.tradeNo || '-';
+}
+
+function getUserID(order: PaymentOrder) {
+  return order.user_id || order.userId || '';
+}
+
+function getAssetAmount(order: PaymentOrder) {
+  return numberValue(order.asset_amount ?? order.assetAmount);
+}
+
+function getMoneyCents(order: PaymentOrder) {
+  return numberValue(order.money_cents ?? order.moneyCents);
+}
+
+function getCreatedAt(order: PaymentOrder) {
+  return timestampSeconds(order.created_at ?? order.createdAt);
+}
+
+function paymentOrderToRow(order: PaymentOrder): OrderRow {
+  const tradeNo = getTradeNo(order);
+  const issueStatus = order.asset_issue_status || order.assetIssueStatus || '-';
+  return {
+    id: `payment-${order.id || tradeNo}`,
+    type: 'payment',
+    amount: formatMoney(getMoneyCents(order), order.currency),
+    balance: formatQuota(getAssetAmount(order)),
+    reference: tradeNo,
+    remark: `状态：${STATUS_NAMES[order.status || ''] || order.status || '-'}；资产：${issueStatus}`,
+    createdAt: getCreatedAt(order),
+    userID: getUserID(order),
+    status: order.status,
+    paymentOrder: order,
+  };
+}
+
+function ledgerToRow(log: LedgerLog, index: number): OrderRow {
+  return {
+    id: `ledger-${log.id || log.reference_id || log.created_at}-${index}`,
+    type: log.type,
+    amount: formatQuota(log.amount ?? 0),
+    balance: formatQuota(log.balance_after ?? 0),
+    reference: log.reference_id || '-',
+    remark: log.remark || '-',
+    createdAt: log.created_at,
+  };
+}
+
 export function OrdersPage() {
   const [page, setPage] = useState(1);
   const [type, setType] = useState('');
   const pageSize = 20;
+  const adminToken = localStorage.getItem('adminToken');
+  const isAdminView = Boolean(adminToken);
+  const queryClient = useQueryClient();
+  const queryKey = ['user-orders', page, type, isAdminView];
 
   const { data, isLoading } = useQuery({
-    queryKey: ['user-orders', page, type],
+    queryKey,
     queryFn: async () => {
       const params = new URLSearchParams({
         page: String(page),
         page_size: String(pageSize),
       });
-      if (type) params.set('type', type);
-      const res = await apiClient.get(`/user/logs?${params}`);
-      const payload = unwrapApiData<LedgerLog[] | LedgerLogData>(res.data);
-      const logs = normalizeLogs(payload).filter((log) => ORDER_TYPES.has(log.type));
-      return {
-        logs,
-        total: Array.isArray(payload) ? logs.length : payload.total,
-      };
+      const paymentParams = new URLSearchParams(params);
+      if (type === 'payment' || type === 'recharge') {
+        paymentParams.set('channel', 'alipay');
+      }
+      const shouldLoadPayments = !type || type === 'payment' || type === 'recharge';
+      const shouldLoadLedger = !type || type !== 'payment';
+
+      const [paymentResult, ledgerResult] = await Promise.allSettled([
+        shouldLoadPayments
+          ? (isAdminView ? adminApiClient : apiClient).get(
+              `${isAdminView ? '/payment/orders' : '/user/payment/orders'}?${paymentParams}`,
+            )
+          : Promise.resolve(null),
+        shouldLoadLedger
+          ? apiClient.get(`/user/logs?${params}${type ? `&type=${encodeURIComponent(type)}` : ''}`)
+          : Promise.resolve(null),
+      ]);
+
+      const paymentRows =
+        paymentResult.status === 'fulfilled' && paymentResult.value
+          ? (unwrapApiData<PaymentOrdersPayload>(paymentResult.value.data).orders ?? []).map(paymentOrderToRow)
+          : [];
+
+      const ledgerRows =
+        ledgerResult.status === 'fulfilled' && ledgerResult.value
+          ? normalizeLogs(unwrapApiData<LedgerLog[] | LedgerLogData>(ledgerResult.value.data))
+              .filter((log) => ORDER_TYPES.has(log.type))
+              .filter((log) => !type || log.type === type)
+              .map(ledgerToRow)
+          : [];
+
+      return [...paymentRows, ...ledgerRows].sort((a, b) => b.createdAt - a.createdAt);
     },
   });
 
-  const logs = data?.logs ?? [];
+  const refreshPaymentOrder = useMutation({
+    mutationFn: async (tradeNo: string) => {
+      const client = isAdminView ? adminApiClient : apiClient;
+      const path = isAdminView ? `/payment/orders/${encodeURIComponent(tradeNo)}` : `/user/payment/orders/${encodeURIComponent(tradeNo)}`;
+      const res = await client.get(path);
+      return unwrapApiData<PaymentOrderPayload>(res.data);
+    },
+    onSuccess: (payload) => {
+      if (!payload.order) return;
+      const updatedRow = paymentOrderToRow(payload.order);
+      queryClient.setQueryData<OrderRow[]>(queryKey, (current) =>
+        (current ?? []).map((row) => (row.reference === updatedRow.reference ? updatedRow : row)),
+      );
+    },
+  });
+
+  const rows = useMemo(() => data ?? [], [data]);
 
   return (
     <div className="space-y-5">
@@ -85,7 +245,7 @@ export function OrdersPage() {
         <div>
           <h2 className="text-2xl font-black tracking-normal text-slate-950 dark:text-white">我的订单</h2>
           <p className="mt-1 text-sm font-medium text-slate-500 dark:text-slate-400">
-            展示充值、兑换和退款相关记录。
+            {isAdminView ? '展示全部支付订单，并合并当前账号的兑换和退款记录。' : '展示支付充值、兑换和退款相关记录。'}
           </p>
         </div>
         <select
@@ -97,6 +257,7 @@ export function OrdersPage() {
           className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold dark:border-white/10 dark:bg-background"
         >
           <option value="">全部订单</option>
+          <option value="payment">支付订单</option>
           <option value="recharge">充值记录</option>
           <option value="redeem">兑换记录</option>
           <option value="refund">退款记录</option>
@@ -104,8 +265,8 @@ export function OrdersPage() {
       </div>
 
       {isLoading ? (
-        <TableSkeleton columns={['类型', '金额', '余额', '关联 ID', '备注', '时间']} rows={8} />
-      ) : logs.length === 0 ? (
+        <TableSkeleton columns={['类型', '金额', '到账/余额', '关联 ID', '备注', '时间']} rows={8} />
+      ) : rows.length === 0 ? (
         <EmptyState title="暂无订单记录" description="充值、兑换或退款后会显示在这里。" />
       ) : (
         <>
@@ -114,26 +275,44 @@ export function OrdersPage() {
               <TableHeader>
                 <TableRow className="bg-slate-50 hover:bg-slate-50 dark:bg-white/5">
                   <TableHead>类型</TableHead>
+                  {isAdminView && <TableHead>用户</TableHead>}
                   <TableHead>金额</TableHead>
-                  <TableHead>余额</TableHead>
+                  <TableHead>到账/余额</TableHead>
                   <TableHead>关联 ID</TableHead>
                   <TableHead>备注</TableHead>
                   <TableHead>时间</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {logs.map((log, index) => (
-                  <TableRow key={`${log.id || log.reference_id || log.created_at}-${index}`}>
+                {rows.map((row) => (
+                  <TableRow key={row.id}>
                     <TableCell>
                       <span className="inline-flex rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
-                        {TYPE_NAMES[log.type] || log.type || '-'}
+                        {TYPE_NAMES[row.type] || row.type || '-'}
                       </span>
                     </TableCell>
-                    <TableCell className="font-semibold">{formatQuota(log.amount ?? 0)}</TableCell>
-                    <TableCell>{formatQuota(log.balance_after ?? 0)}</TableCell>
-                    <TableCell className="font-mono text-xs">{log.reference_id || '-'}</TableCell>
-                    <TableCell className="max-w-sm truncate">{log.remark || '-'}</TableCell>
-                    <TableCell>{formatDate(log.created_at)}</TableCell>
+                    {isAdminView && <TableCell className="font-mono text-xs">{row.userID || '-'}</TableCell>}
+                    <TableCell className="font-semibold">{row.amount}</TableCell>
+                    <TableCell>{row.balance}</TableCell>
+                    <TableCell className="font-mono text-xs">{row.reference}</TableCell>
+                    <TableCell className="max-w-sm truncate">{row.remark}</TableCell>
+                    <TableCell>{formatDate(row.createdAt)}</TableCell>
+                    <TableCell className="text-right">
+                      {row.paymentOrder ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={refreshPaymentOrder.isPending}
+                          onClick={() => refreshPaymentOrder.mutate(row.reference)}
+                        >
+                          刷新
+                        </Button>
+                      ) : (
+                        '-'
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -145,7 +324,7 @@ export function OrdersPage() {
               上一页
             </Button>
             <span className="min-w-14 text-center text-sm text-muted-foreground">第 {page} 页</span>
-            <Button variant="outline" size="sm" onClick={() => setPage((value) => value + 1)} disabled={logs.length < pageSize}>
+            <Button variant="outline" size="sm" onClick={() => setPage((value) => value + 1)} disabled={rows.length < pageSize}>
               下一页
             </Button>
           </div>

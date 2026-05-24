@@ -62,7 +62,7 @@ const secondaryUserLinks: SecondaryNavItem[] = [
   { label: '个人资料', icon: UserCircle },
   { label: '模型价格', icon: Database },
   { label: '我的订阅', icon: ScrollText },
-  { label: '充值 / 订阅', icon: CreditCard },
+  { label: '充值 / 订阅', icon: CreditCard, to: '/recharge' },
   { label: '我的订单', icon: Ticket, to: '/orders' },
   { label: '兑换码', icon: Gift },
 ];
@@ -81,6 +81,7 @@ const routeTitles: Record<string, string> = {
   '/dashboard': '仪表盘',
   '/tokens': 'API 密钥',
   '/usage': '使用记录',
+  '/recharge': '充值 / 订阅',
   '/orders': '我的订单',
   '/admin': '管理总览',
   '/admin/users': '用户管理',

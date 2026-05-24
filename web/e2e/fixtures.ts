@@ -63,15 +63,35 @@ export async function mockApi(page: Page) {
     await route.fulfill({
       json: {
         success: true,
-        data: [
-          {
-            date: '2026-05-20',
-            count: 3,
-            quota: 150000,
-            prompt_tokens: 100,
-            completion_tokens: 200,
+        data: {
+          quota: 5000000,
+          used_quota: 1000000,
+          usage: [
+            {
+              date: '2026-05-20',
+              count: 3,
+              quota: 150000,
+              prompt_tokens: 100,
+              completion_tokens: 200,
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  await page.route('**/api/user/pay', async (route) => {
+    await route.fulfill({
+      json: {
+        success: true,
+        data: {
+          trade_no: 'PAY-TEST',
+          pay_url: 'mock://payment/PAY-TEST',
+          order: {
+            trade_no: 'PAY-TEST',
+            pay_url: 'mock://payment/PAY-TEST',
           },
-        ],
+        },
       },
     });
   });
@@ -128,6 +148,30 @@ export async function mockApi(page: Page) {
   });
 
   await page.route('**/api/payment/orders**', async (route) => {
+    if (/\/api\/payment\/orders\/[^/?]+/.test(new URL(route.request().url()).pathname)) {
+      await route.fulfill({
+        json: {
+          success: true,
+          data: {
+            order: {
+              id: 1,
+              user_id: '1',
+              trade_no: 'PAY-1',
+              channel: 'alipay',
+              asset_type: 'quota',
+              asset_amount: 500000,
+              money_cents: 1000,
+              currency: 'CNY',
+              status: 'paid',
+              provider_trade_no: 'ALI-1',
+              asset_issue_status: 'issued',
+              created_at: { seconds: 1779200000 },
+            },
+          },
+        },
+      });
+      return;
+    }
     await route.fulfill({
       json: {
         success: true,
@@ -146,6 +190,55 @@ export async function mockApi(page: Page) {
               provider_trade_no: 'ALI-1',
               asset_issue_status: 'issued',
               created_at: { seconds: 1779200000 },
+            },
+          ],
+          total: 1,
+        },
+      },
+    });
+  });
+
+  await page.route('**/api/user/payment/orders**', async (route) => {
+    if (/\/api\/user\/payment\/orders\/[^/?]+/.test(new URL(route.request().url()).pathname)) {
+      await route.fulfill({
+        json: {
+          success: true,
+          data: {
+            order: {
+              id: 11,
+              user_id: '1',
+              trade_no: 'PAY-USER-1',
+              channel: 'alipay',
+              asset_type: 'quota',
+              asset_amount: 50000000,
+              money_cents: 1000,
+              currency: 'CNY',
+              status: 'paid',
+              asset_issue_status: 'issued',
+              created_at: { seconds: 1779200200 },
+            },
+          },
+        },
+      });
+      return;
+    }
+    await route.fulfill({
+      json: {
+        success: true,
+        data: {
+          orders: [
+            {
+              id: 11,
+              user_id: '1',
+              trade_no: 'PAY-USER-1',
+              channel: 'alipay',
+              asset_type: 'quota',
+              asset_amount: 50000000,
+              money_cents: 1000,
+              currency: 'CNY',
+              status: 'pending',
+              asset_issue_status: 'pending',
+              created_at: { seconds: 1779200200 },
             },
           ],
           total: 1,

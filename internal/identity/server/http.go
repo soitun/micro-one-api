@@ -22,6 +22,8 @@ import (
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
+const paymentQuotaPerCNY = int64(5000000)
+
 type TurnstileVerifier interface {
 	VerifyTurnstile(ctx context.Context, secret, token, remoteIP string) error
 }
@@ -147,6 +149,12 @@ func NewHTTPServerWithRegistrationPolicy(addr string, uc *biz.IdentityUsecase, o
 	srv.HandleFunc("/api/user/logs", func(w http.ResponseWriter, r *http.Request) {
 		handleUserLogs(w, r, uc, billingClient)
 	})
+	srv.HandleFunc("/api/user/payment/orders", func(w http.ResponseWriter, r *http.Request) {
+		handleUserPaymentOrders(w, r, uc, billingClient)
+	})
+	srv.HandlePrefix("/api/user/payment/orders/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleUserPaymentOrderByTradeNo(w, r, uc, billingClient)
+	}))
 	srv.HandleFunc("/dashboard/billing/usage", func(w http.ResponseWriter, r *http.Request) {
 		handleDashboardBillingUsage(w, r, uc, billingClient)
 	})
@@ -661,7 +669,7 @@ func handleCreatePaymentOrder(w http.ResponseWriter, r *http.Request, uc *biz.Id
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "invalid payment_method"})
 		return
 	}
-	assetAmount := int64(req.Amount * 500000)
+	assetAmount := int64(req.Amount * float64(paymentQuotaPerCNY))
 	if assetAmount <= 0 {
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "amount too small"})
 		return
@@ -701,6 +709,87 @@ func handleCreatePaymentOrder(w http.ResponseWriter, r *http.Request, uc *biz.Id
 			"asset_type": resp.GetOrder().GetAssetType(),
 		},
 	})
+}
+
+func handleUserPaymentOrders(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, billingClient billingv1.BillingServiceClient) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	if billingClient == nil {
+		writeJSON(w, http.StatusServiceUnavailable, apiResponse{Success: false, Message: "billing service unavailable"})
+		return
+	}
+	userID := strconv.FormatInt(snapshot.UserID, 10)
+	user, err := uc.GetUser(r.Context(), snapshot.UserID)
+	if err == nil && user != nil && user.Username == "admin" {
+		userID = ""
+	}
+	query := r.URL.Query()
+	pageSize := queryInt32(r, "page_size", 20)
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	resp, err := billingClient.ListPaymentOrders(r.Context(), &billingv1.ListPaymentOrdersRequest{
+		Page:     queryInt32(r, "page", 1),
+		PageSize: pageSize,
+		UserId:   userID,
+		Status:   query.Get("status"),
+		Channel:  query.Get("channel"),
+		TradeNo:  query.Get("trade_no"),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: resp})
+}
+
+func handleUserPaymentOrderByTradeNo(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, billingClient billingv1.BillingServiceClient) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
+	snapshot, err := authSnapshotFromRequest(r, uc)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "unauthorized"})
+		return
+	}
+	if billingClient == nil {
+		writeJSON(w, http.StatusServiceUnavailable, apiResponse{Success: false, Message: "billing service unavailable"})
+		return
+	}
+	tradeNo := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/user/payment/orders/"), "/")
+	if tradeNo == "" || strings.Contains(tradeNo, "/") {
+		writeJSON(w, http.StatusBadRequest, apiResponse{Success: false, Message: "trade_no is required"})
+		return
+	}
+	resp, err := billingClient.GetPaymentOrderByTradeNo(r.Context(), &billingv1.GetPaymentOrderByTradeNoRequest{TradeNo: tradeNo})
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+		return
+	}
+	if !resp.GetSuccess() {
+		message := resp.GetErrorMessage()
+		if message == "" {
+			message = "payment order not found"
+		}
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: message})
+		return
+	}
+	order := resp.GetOrder()
+	user, userErr := uc.GetUser(r.Context(), snapshot.UserID)
+	isAdminUser := userErr == nil && user != nil && user.Username == "admin"
+	if !isAdminUser && order.GetUserId() != strconv.FormatInt(snapshot.UserID, 10) {
+		writeJSON(w, http.StatusForbidden, apiResponse{Success: false, Message: "forbidden"})
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{"order": order}})
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {

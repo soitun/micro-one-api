@@ -871,6 +871,143 @@ func TestIdentityHTTPOnlinePaymentCompatibilityRoutesAreDisabled(t *testing.T) {
 			t.Fatalf("%s response mismatch: %s", tc.path, rec.Body.String())
 		}
 	}
+	if len(billingClient.createOrderCalls) != 2 {
+		t.Fatalf("CreatePaymentOrder calls = %d, want 2", len(billingClient.createOrderCalls))
+	}
+	for _, call := range billingClient.createOrderCalls {
+		if call.GetChannel() != "alipay" || call.GetAssetType() != "quota" || call.GetCurrency() != "CNY" {
+			t.Fatalf("payment order request mismatch: %+v", call)
+		}
+		if call.GetMoneyCents() != 1000 {
+			t.Fatalf("money cents = %d, want 1000", call.GetMoneyCents())
+		}
+		if call.GetAssetAmount() != 50000000 {
+			t.Fatalf("asset amount = %d, want 50000000", call.GetAssetAmount())
+		}
+	}
+}
+
+func TestIdentityHTTPUserPaymentOrdersFiltersToAuthenticatedUser(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	user, authToken := registerAndLoginForHTTPTest(t, uc)
+	billingClient := &identityHTTPBillingClient{}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/payment/orders?page=2&page_size=50&user_id=999&status=paid&channel=alipay&trade_no=PAY", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	got := billingClient.lastPaymentListReq
+	if got == nil {
+		t.Fatal("ListPaymentOrders was not called")
+	}
+	if got.GetUserId() != strconv.FormatInt(user.ID, 10) {
+		t.Fatalf("user_id = %q, want authenticated user %d", got.GetUserId(), user.ID)
+	}
+	if got.GetPage() != 2 || got.GetPageSize() != 50 || got.GetStatus() != "paid" || got.GetChannel() != "alipay" || got.GetTradeNo() != "PAY" {
+		t.Fatalf("ListPaymentOrders request mismatch: %+v", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"trade_no":"PAY-USER"`) {
+		t.Fatalf("response missing payment order: %s", rec.Body.String())
+	}
+}
+
+func TestIdentityHTTPAdminUserPaymentOrdersCanListAllUsers(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	user, err := uc.Register(context.Background(), "admin", "password123", "admin@example.com", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, authToken, err := uc.Login(context.Background(), user.Username, "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	billingClient := &identityHTTPBillingClient{}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/payment/orders?page=1&page_size=20&user_id=999", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	got := billingClient.lastPaymentListReq
+	if got == nil {
+		t.Fatal("ListPaymentOrders was not called")
+	}
+	if got.GetUserId() != "" {
+		t.Fatalf("user_id = %q, want empty for admin user", got.GetUserId())
+	}
+}
+
+func TestIdentityHTTPUserPaymentOrderDetailRefreshesAndScopesOrder(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	user, authToken := registerAndLoginForHTTPTest(t, uc)
+	billingClient := &identityHTTPBillingClient{
+		paymentGetResponse: &billingv1.PaymentOrderResponse{
+			Success: true,
+			Order: &billingv1.PaymentOrder{
+				UserId:           strconv.FormatInt(user.ID, 10),
+				TradeNo:          "PAY-DETAIL",
+				Channel:          "alipay",
+				AssetAmount:      50000000,
+				MoneyCents:       1000,
+				Currency:         "CNY",
+				Status:           "paid",
+				AssetIssueStatus: "issued",
+			},
+		},
+	}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/payment/orders/PAY-DETAIL", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if billingClient.lastPaymentGetReq == nil || billingClient.lastPaymentGetReq.GetTradeNo() != "PAY-DETAIL" {
+		t.Fatalf("GetPaymentOrderByTradeNo request mismatch: %+v", billingClient.lastPaymentGetReq)
+	}
+	if !strings.Contains(rec.Body.String(), `"trade_no":"PAY-DETAIL"`) || !strings.Contains(rec.Body.String(), `"status":"paid"`) {
+		t.Fatalf("response mismatch: %s", rec.Body.String())
+	}
+}
+
+func TestIdentityHTTPUserPaymentOrderDetailRejectsOtherUser(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	billingClient := &identityHTTPBillingClient{
+		paymentGetResponse: &billingv1.PaymentOrderResponse{
+			Success: true,
+			Order: &billingv1.PaymentOrder{
+				UserId:  "999",
+				TradeNo: "PAY-OTHER",
+			},
+		},
+	}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/payment/orders/PAY-OTHER", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403, body=%s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestIdentityHTTPTokenCRUD(t *testing.T) {
@@ -1274,6 +1411,9 @@ type identityHTTPBillingClient struct {
 	topUpCalls          []capturedTopUp
 	createOrderCalls    []billingv1.CreatePaymentOrderRequest
 	lastLedgerRequest   *billingv1.ListLedgerRequest
+	lastPaymentListReq  *billingv1.ListPaymentOrdersRequest
+	lastPaymentGetReq   *billingv1.GetPaymentOrderByTradeNoRequest
+	paymentGetResponse  *billingv1.PaymentOrderResponse
 }
 
 type capturedTopUp struct {
@@ -1335,6 +1475,55 @@ func (c *identityHTTPBillingClient) CreatePaymentOrder(ctx context.Context, req 
 		return &billingv1.PaymentOrderResponse{Success: true, Order: &billingv1.PaymentOrder{TradeNo: "PAY-TEST", PayUrl: "mock://payment/PAY-TEST"}}, nil
 	}
 	return c.createOrderResponse, nil
+}
+
+func (c *identityHTTPBillingClient) GetPaymentOrderByTradeNo(ctx context.Context, req *billingv1.GetPaymentOrderByTradeNoRequest, opts ...grpc.CallOption) (*billingv1.PaymentOrderResponse, error) {
+	c.lastPaymentGetReq = req
+	if c.paymentGetResponse != nil {
+		return c.paymentGetResponse, nil
+	}
+	return &billingv1.PaymentOrderResponse{
+		Success: true,
+		Order: &billingv1.PaymentOrder{
+			Id:               7,
+			UserId:           "1",
+			TradeNo:          req.GetTradeNo(),
+			Channel:          "alipay",
+			AssetType:        "quota",
+			AssetAmount:      50000000,
+			MoneyCents:       1000,
+			Currency:         "CNY",
+			Status:           "paid",
+			AssetIssueStatus: "issued",
+			CreatedAt:        timestamppb.Now(),
+		},
+	}, nil
+}
+
+func (c *identityHTTPBillingClient) MarkPaymentOrderPaid(ctx context.Context, req *billingv1.MarkPaymentOrderPaidRequest, opts ...grpc.CallOption) (*billingv1.PaymentOrderResponse, error) {
+	return &billingv1.PaymentOrderResponse{}, nil
+}
+
+func (c *identityHTTPBillingClient) ListPaymentOrders(ctx context.Context, req *billingv1.ListPaymentOrdersRequest, opts ...grpc.CallOption) (*billingv1.ListPaymentOrdersResponse, error) {
+	c.lastPaymentListReq = req
+	return &billingv1.ListPaymentOrdersResponse{
+		Orders: []*billingv1.PaymentOrder{
+			{
+				Id:               7,
+				UserId:           req.GetUserId(),
+				TradeNo:          "PAY-USER",
+				Channel:          "alipay",
+				AssetType:        "quota",
+				AssetAmount:      50000000,
+				MoneyCents:       1000,
+				Currency:         "CNY",
+				Status:           "paid",
+				AssetIssueStatus: "issued",
+				CreatedAt:        timestamppb.Now(),
+			},
+		},
+		Total: 1,
+	}, nil
 }
 
 func (c *identityHTTPBillingClient) TopUpQuota(ctx context.Context, req *billingv1.TopUpQuotaRequest, opts ...grpc.CallOption) (*billingv1.TopUpQuotaResponse, error) {

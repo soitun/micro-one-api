@@ -49,8 +49,7 @@ test('admin token enables Options nav', async ({ page }) => {
 });
 
 test('regular user shell does not show admin login control', async ({ page }) => {
-  await page.goto('/login');
-  await page.evaluate(() => {
+  await page.addInitScript(() => {
     localStorage.setItem('token', 'test-user-token');
     localStorage.removeItem('adminToken');
   });
@@ -140,6 +139,55 @@ test('admin payment orders sends filters to backend', async ({ page }) => {
     .poll(() => requests.some((url) => url.includes('status=paid') && url.includes('channel=alipay') && url.includes('user_id=42')))
     .toBe(true);
   await expect(page.getByText('PAY-1')).toBeVisible();
+});
+
+test('recharge page can be opened and creates alipay order', async ({ page }) => {
+  const paymentRequests: unknown[] = [];
+  await page.route('**/api/user/pay', async (route) => {
+    paymentRequests.push(route.request().postDataJSON());
+    await route.fulfill({
+      json: {
+        success: true,
+        data: {
+          trade_no: 'PAY-TEST',
+          pay_url: 'mock://payment/PAY-TEST',
+        },
+      },
+    });
+  });
+
+  await page.addInitScript(() => {
+    localStorage.setItem('token', 'test-user-token');
+    localStorage.removeItem('adminToken');
+  });
+  await page.goto('/dashboard');
+  await openMobileNavIfVisible(page);
+  await page.getByText('充值 / 订阅').click();
+
+  await expect(page).toHaveURL(/\/recharge$/);
+  await expect(page.getByRole('heading', { name: '快捷金额' })).toBeVisible();
+  await page.getByRole('button', { name: /¥50/ }).click();
+  await expect(page.getByRole('button', { name: /确认支付 ¥ 50.00/ })).toBeEnabled();
+  const pagePromise = page.context().waitForEvent('page');
+  await page.getByRole('button', { name: /确认支付 ¥ 50.00/ }).click();
+  const paymentPage = await pagePromise;
+
+  await expect.poll(() => paymentRequests.length).toBe(1);
+  expect(paymentRequests[0]).toMatchObject({ amount: 50, payment_method: 'alipay' });
+  expect(paymentPage.url()).toBe('about:blank');
+  await expect(page.getByText(/测试订单已创建/)).toBeVisible();
+  await paymentPage.close();
+});
+
+test('orders page shows admin payment orders', async ({ page }) => {
+  await seedAdminSession(page);
+  await page.goto('/orders');
+
+  await expect(page.getByRole('heading', { name: '我的订单' })).toBeVisible();
+  await expect(page.getByText('PAY-1')).toBeVisible();
+  await expect(page.getByText('支付充值')).toBeVisible();
+  await page.getByRole('button', { name: '刷新' }).first().click();
+  await expect(page.getByText(/状态：已支付/)).toBeVisible();
 });
 
 test('mobile navigation exposes admin links and closes after navigation', async ({ page }, testInfo) => {

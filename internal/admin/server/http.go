@@ -66,6 +66,7 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 	srv.HandleFunc("/dashboard", handleAdminPage)
 	srv.HandleFunc("/tokens", handleAdminPage)
 	srv.HandleFunc("/usage", handleAdminPage)
+	srv.HandleFunc("/recharge", handleAdminPage)
 	srv.HandleFunc("/orders", handleAdminPage)
 	srv.HandleFunc("/admin/users", handleAdminPage)
 	srv.HandleFunc("/admin/channels", handleAdminPage)
@@ -111,6 +112,8 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 		srv.HandleFunc("/api/user/dashboard", identityProxy.ServeHTTP)
 		srv.HandleFunc("/api/user/quota", identityProxy.ServeHTTP)
 		srv.HandleFunc("/api/user/logs", identityProxy.ServeHTTP)
+		srv.HandleFunc("/api/user/payment/orders", identityProxy.ServeHTTP)
+		srv.HandlePrefix("/api/user/payment/orders/", identityProxy)
 		srv.HandleFunc("/api/user/amount", identityProxy.ServeHTTP)
 		srv.HandleFunc("/api/user/pay", identityProxy.ServeHTTP)
 		srv.HandleFunc("/api/token", identityProxy.ServeHTTP)
@@ -216,6 +219,9 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 	}))
 	srv.HandleFunc("/api/payment/orders", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handlePaymentOrders(w, r, svc)
+	}))
+	srv.HandlePrefix("/api/payment/orders/", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handlePaymentOrderByTradeNo(w, r, svc)
 	}))
 	srv.HandleFunc("/api/channel/test", AdminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleTestChannels(w, r, svc)
@@ -2043,6 +2049,32 @@ func handlePaymentOrders(w http.ResponseWriter, r *http.Request, svc *service.Ad
 		"orders": resp.GetOrders(),
 		"total":  resp.GetTotal(),
 	}))
+}
+
+func handlePaymentOrderByTradeNo(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	tradeNo, ok := parsePathValue(r.URL.Path, "/api/payment/orders/")
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "trade_no is required", nil))
+		return
+	}
+	resp, err := svc.GetPaymentOrderByTradeNo(r.Context(), &billingv1.GetPaymentOrderByTradeNoRequest{TradeNo: tradeNo})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse(false, err.Error(), nil))
+		return
+	}
+	if !resp.GetSuccess() {
+		message := resp.GetErrorMessage()
+		if message == "" {
+			message = "payment order not found"
+		}
+		writeJSON(w, http.StatusOK, apiResponse(false, message, nil))
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"order": resp.GetOrder()}))
 }
 
 func writeServiceResponse(w http.ResponseWriter, resp interface{}, err error) {
