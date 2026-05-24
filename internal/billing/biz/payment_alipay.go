@@ -78,7 +78,11 @@ func (p *alipayPaymentProvider) CreateOrder(ctx context.Context, order *PaymentO
 	if err := p.addCertParams(params); err != nil {
 		return nil, err
 	}
-	params["sign"] = signAlipayParams(params, privateKey)
+	signature, err := signAlipayParams(params, privateKey)
+	if err != nil {
+		return nil, err
+	}
+	params["sign"] = signature
 	payURL, err := alipayGatewayURL(p.config.FormURL, params)
 	if err != nil {
 		return nil, err
@@ -142,7 +146,11 @@ func (p *alipayPaymentProvider) QueryOrder(ctx context.Context, order *PaymentOr
 	if err := p.addCertParams(params); err != nil {
 		return nil, err
 	}
-	params["sign"] = signAlipayParams(params, privateKey)
+	signature, err := signAlipayParams(params, privateKey)
+	if err != nil {
+		return nil, err
+	}
+	params["sign"] = signature
 	queryURL, err := alipayGatewayURL(p.config.FormURL, params)
 	if err != nil {
 		return nil, err
@@ -263,7 +271,7 @@ func (p *alipayPaymentProvider) addCertParams(params map[string]string) error {
 	return nil
 }
 
-func signAlipayParams(params map[string]string, key string) string {
+func signAlipayParams(params map[string]string, key string) (string, error) {
 	keys := make([]string, 0, len(params))
 	for k, v := range params {
 		if k == "sign" || strings.TrimSpace(v) == "" {
@@ -353,11 +361,10 @@ func verifyAlipaySign(params map[string]string, signature, publicKeyPEM string) 
 	return verifyRSA2(b.String(), signature, publicKeyPEM)
 }
 
-func signRSA2(content, privateKeyPEM string) string {
-	block, _ := pem.Decode([]byte(formatAlipayPrivateKey(privateKeyPEM)))
+func signRSA2(content, privateKeyPEM string) (string, error) {
+	block, _ := pem.Decode([]byte(normalizePEM(privateKeyPEM)))
 	if block == nil {
-		sum := sha256.Sum256([]byte(content + privateKeyPEM))
-		return base64.StdEncoding.EncodeToString(sum[:])
+		return "", errors.New("failed to decode alipay private key pem")
 	}
 	var privateKey *rsa.PrivateKey
 	if pkcs8Key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
@@ -371,26 +378,20 @@ func signRSA2(content, privateKeyPEM string) string {
 		}
 	}
 	if privateKey == nil {
-		sum := sha256.Sum256([]byte(content + privateKeyPEM))
-		return base64.StdEncoding.EncodeToString(sum[:])
+		return "", errors.New("failed to parse alipay private key")
 	}
 	h := sha256.Sum256([]byte(content))
 	sig, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, h[:])
 	if err != nil {
-		sum := sha256.Sum256([]byte(content + privateKeyPEM))
-		return base64.StdEncoding.EncodeToString(sum[:])
+		return "", err
 	}
-	return base64.StdEncoding.EncodeToString(sig)
+	return base64.StdEncoding.EncodeToString(sig), nil
 }
 
 func verifyRSA2(content, signature, publicKeyPEM string) error {
-	block, _ := pem.Decode([]byte(formatAlipayPublicKey(publicKeyPEM)))
+	block, _ := pem.Decode([]byte(normalizePEM(publicKeyPEM)))
 	if block == nil {
-		sum := sha256.Sum256([]byte(content + publicKeyPEM))
-		if base64.StdEncoding.EncodeToString(sum[:]) == signature {
-			return nil
-		}
-		return errors.New("invalid alipay signature")
+		return errors.New("failed to decode alipay public key pem")
 	}
 	var publicKey *rsa.PublicKey
 	if pkixKey, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
@@ -472,35 +473,11 @@ func isAlipayRootCertSignatureAlgorithmAllowed(algorithm x509.SignatureAlgorithm
 	}
 }
 
-func formatAlipayPrivateKey(key string) string {
-	return formatPEMKey(key, "PRIVATE KEY")
-}
-
-func formatAlipayPublicKey(key string) string {
-	return formatPEMKey(key, "PUBLIC KEY")
-}
-
-func formatPEMKey(key, typ string) string {
+func normalizePEM(key string) string {
 	key = strings.TrimSpace(key)
-	if key == "" || strings.Contains(key, "-----BEGIN ") {
-		return key
-	}
-	key = strings.ReplaceAll(key, "\r", "")
-	key = strings.ReplaceAll(key, "\n", "")
-	var b strings.Builder
-	b.WriteString("-----BEGIN ")
-	b.WriteString(typ)
-	b.WriteString("-----\n")
-	for len(key) > 64 {
-		b.WriteString(key[:64])
-		b.WriteByte('\n')
-		key = key[64:]
-	}
-	b.WriteString(key)
-	b.WriteString("\n-----END ")
-	b.WriteString(typ)
-	b.WriteString("-----")
-	return b.String()
+	key = strings.ReplaceAll(key, `\r\n`, "\n")
+	key = strings.ReplaceAll(key, `\n`, "\n")
+	return key
 }
 
 func formValueMap(r *http.Request) map[string]string {

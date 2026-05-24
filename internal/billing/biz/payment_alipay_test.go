@@ -2,10 +2,15 @@ package biz
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -13,10 +18,11 @@ func TestAlipayProviderReadsKeyFiles(t *testing.T) {
 	dir := t.TempDir()
 	privateKeyPath := filepath.Join(dir, "app_private_key.pem")
 	publicKeyPath := filepath.Join(dir, "alipay_public_key.pem")
-	if err := os.WriteFile(privateKeyPath, []byte(" private-key-from-file \n"), 0o600); err != nil {
+	privateKeyPEM, publicKeyPEM := testAlipayKeyPairPEM(t)
+	if err := os.WriteFile(privateKeyPath, []byte(" "+privateKeyPEM+" \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(publicKeyPath, []byte(" public-key-from-file \n"), 0o600); err != nil {
+	if err := os.WriteFile(publicKeyPath, []byte(" "+publicKeyPEM+" \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -29,7 +35,7 @@ func TestAlipayProviderReadsKeyFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if privateKey != "private-key-from-file" {
+	if privateKey != strings.TrimSpace(privateKeyPEM) {
 		t.Fatalf("private key = %q", privateKey)
 	}
 
@@ -37,12 +43,13 @@ func TestAlipayProviderReadsKeyFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if publicKey != "public-key-from-file" {
+	if publicKey != strings.TrimSpace(publicKeyPEM) {
 		t.Fatalf("public key = %q", publicKey)
 	}
 }
 
 func TestAlipayProviderQueryOrderPaid(t *testing.T) {
+	privateKeyPEM, _ := testAlipayKeyPairPEM(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("method"); got != "alipay.trade.query" {
 			t.Fatalf("method = %q", got)
@@ -59,7 +66,7 @@ func TestAlipayProviderQueryOrderPaid(t *testing.T) {
 		Enabled:    true,
 		FormURL:    server.URL,
 		AppID:      "app-1",
-		PrivateKey: "test-private-key",
+		PrivateKey: privateKeyPEM,
 	})
 	status, err := provider.QueryOrder(context.Background(), &PaymentOrder{TradeNo: "PAY-1"})
 	if err != nil {
@@ -71,4 +78,54 @@ func TestAlipayProviderQueryOrderPaid(t *testing.T) {
 	if status.ProviderTradeNo != "ALI-1" {
 		t.Fatalf("provider_trade_no = %q", status.ProviderTradeNo)
 	}
+}
+
+func TestAlipayProviderRejectsNonPEMPrivateKey(t *testing.T) {
+	provider := NewAlipayPaymentProvider(AlipayConfig{
+		Enabled:    true,
+		FormURL:    "https://openapi-sandbox.dl.alipaydev.com/gateway.do",
+		AppID:      "app-1",
+		PrivateKey: "test-private-key",
+	})
+	_, err := provider.QueryOrder(context.Background(), &PaymentOrder{TradeNo: "PAY-1"})
+	if err == nil {
+		t.Fatal("expected non-PEM private key error")
+	}
+}
+
+func TestAlipayRejectsNonPEMPublicKey(t *testing.T) {
+	err := verifyRSA2("content", "signature", "test-public-key")
+	if err == nil {
+		t.Fatal("expected non-PEM public key error")
+	}
+}
+
+func TestAlipayRSA2WithPEM(t *testing.T) {
+	privateKeyPEM, publicKeyPEM := testAlipayKeyPairPEM(t)
+	signature, err := signRSA2("content", strings.ReplaceAll(privateKeyPEM, "\n", `\n`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyRSA2("content", signature, strings.ReplaceAll(publicKeyPEM, "\n", `\n`)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testAlipayKeyPairPEM(t *testing.T) (string, string) {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKeyDER, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER})
+	publicKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicKeyDER})
+	return string(privateKeyPEM), string(publicKeyPEM)
 }
