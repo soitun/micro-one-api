@@ -551,6 +551,11 @@ func TestIdentityHTTPUserLogsUsesAuthenticatedUser(t *testing.T) {
 	if !strings.Contains(body, `"success":true`) || !strings.Contains(body, `"type":"consume"`) {
 		t.Fatalf("logs response mismatch: %s", body)
 	}
+	for _, want := range []string{`"model_name":"mimo-v2.5"`, `"prompt_tokens":10`, `"completion_tokens":15`, `"endpoint":"/v1/chat/completions"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("logs response missing %s: %s", want, body)
+		}
+	}
 	if strings.Contains(body, `"type":"recharge"`) {
 		t.Fatalf("logs response should apply type filter: %s", body)
 	}
@@ -1347,14 +1352,22 @@ func (c *identityHTTPBillingClient) ListLedger(ctx context.Context, req *billing
 	return &billingv1.ListLedgerResponse{
 		Entries: []*commonv1.LedgerEntry{
 			{
-				Id:           "1",
-				UserId:       req.GetUserId(),
-				Type:         "consume",
-				Amount:       -25,
-				BalanceAfter: 975,
-				ReferenceId:  "res-1",
-				Remark:       "model=mimo-v2.5, tokens=25",
-				CreatedAt:    timestamppb.Now(),
+				Id:               "1",
+				UserId:           req.GetUserId(),
+				Type:             "consume",
+				Amount:           -25,
+				BalanceAfter:     975,
+				ReferenceId:      "res-1",
+				Remark:           "model=mimo-v2.5, tokens=25",
+				CreatedAt:        timestamppb.Now(),
+				TokenName:        "token-1",
+				ModelName:        "mimo-v2.5",
+				Quota:            25,
+				PromptTokens:     10,
+				CompletionTokens: 15,
+				ChannelId:        2,
+				ElapsedTime:      123,
+				Endpoint:         "/v1/chat/completions",
 			},
 			{
 				Id:           "2",

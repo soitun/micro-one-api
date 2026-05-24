@@ -58,6 +58,15 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			type TEXT,
 			reference_id TEXT,
 			remark TEXT,
+			token_name TEXT DEFAULT '',
+			model_name TEXT DEFAULT '',
+			quota INTEGER DEFAULT 0,
+			prompt_tokens INTEGER DEFAULT 0,
+			completion_tokens INTEGER DEFAULT 0,
+			channel_id INTEGER DEFAULT 0,
+			elapsed_time INTEGER DEFAULT 0,
+			is_stream INTEGER DEFAULT 0,
+			endpoint TEXT DEFAULT '',
 			created_at DATETIME
 		)
 	`).Error
@@ -214,6 +223,35 @@ func TestAccountRepo_UpdateQuota_InsufficientQuota(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, biz.ErrInsufficientQuota)
+}
+
+func TestAccountRepo_UpdateUsage_Success(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	}()
+
+	err := db.Exec(`
+		INSERT INTO users (id, username, display_name, "group", quota, used_quota, request_count, frozen_quota, status)
+		VALUES (1, 'testuser', 'Test User', 'default', 1000, 100, 10, 50, 1)
+	`).Error
+	require.NoError(t, err)
+
+	data := &Data{db: db}
+	repo := NewAccountRepo(data)
+
+	err = repo.UpdateUsage(context.Background(), "1", 25, 1)
+	require.NoError(t, err)
+
+	var account struct {
+		UsedQuota    int64 `gorm:"column:used_quota"`
+		RequestCount int64 `gorm:"column:request_count"`
+	}
+	err = db.Raw("SELECT used_quota, request_count FROM users WHERE id = 1").Scan(&account).Error
+	require.NoError(t, err)
+	assert.Equal(t, int64(125), account.UsedQuota)
+	assert.Equal(t, int64(11), account.RequestCount)
 }
 
 func TestAccountRepo_UpdateFrozenQuota_Success(t *testing.T) {

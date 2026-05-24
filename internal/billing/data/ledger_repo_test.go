@@ -26,6 +26,15 @@ func setupLedgerTestDB(t *testing.T) *gorm.DB {
 			type TEXT,
 			reference_id TEXT,
 			remark TEXT,
+			token_name TEXT DEFAULT '',
+			model_name TEXT DEFAULT '',
+			quota INTEGER DEFAULT 0,
+			prompt_tokens INTEGER DEFAULT 0,
+			completion_tokens INTEGER DEFAULT 0,
+			channel_id INTEGER DEFAULT 0,
+			elapsed_time INTEGER DEFAULT 0,
+			is_stream INTEGER DEFAULT 0,
+			endpoint TEXT DEFAULT '',
 			created_at DATETIME
 		)
 	`).Error
@@ -52,6 +61,14 @@ func TestLedgerRepo_CreateLedger(t *testing.T) {
 		Type:         "consume",
 		ReferenceID:  "res_test_001",
 		Remark:       "test consume",
+		TokenName:    "token-1",
+		ModelName:    "gpt-test",
+		Quota:        12,
+		PromptTokens: 7,
+		CompletionTokens: 5,
+		ChannelID:    3,
+		ElapsedTime:  123,
+		Endpoint:     "/v1/chat/completions",
 	}
 
 	err := repo.CreateLedger(ctx, ledger)
@@ -65,6 +82,9 @@ func TestLedgerRepo_CreateLedger(t *testing.T) {
 	assert.Equal(t, int64(-100), model.Amount)
 	assert.Equal(t, int64(900), model.BalanceAfter)
 	assert.Equal(t, "consume", model.Type)
+	assert.Equal(t, "token-1", model.TokenName)
+	assert.Equal(t, "gpt-test", model.ModelName)
+	assert.Equal(t, int64(12), model.Quota)
 }
 
 func TestLedgerRepo_ListLedgers(t *testing.T) {

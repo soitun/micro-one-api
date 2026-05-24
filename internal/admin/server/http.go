@@ -63,6 +63,7 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 	srv.HandleFunc("/dashboard", handleAdminPage)
 	srv.HandleFunc("/tokens", handleAdminPage)
 	srv.HandleFunc("/usage", handleAdminPage)
+	srv.HandleFunc("/orders", handleAdminPage)
 	srv.HandleFunc("/admin/users", handleAdminPage)
 	srv.HandleFunc("/admin/channels", handleAdminPage)
 	srv.HandleFunc("/admin/logs", handleAdminPage)

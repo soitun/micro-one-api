@@ -51,6 +51,12 @@ message CommitQuotaRequest {
   int64 actual_tokens = 2;
   int64 actual_cost = 3;
   bool success = 4;
+  string token_name = 5;
+  string endpoint = 6;
+  int64 prompt_tokens = 7;
+  int64 completion_tokens = 8;
+  int64 elapsed_time = 9;
+  bool is_stream = 10;
 }
 
 message CommitQuotaResponse {

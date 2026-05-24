@@ -139,6 +139,15 @@ message LedgerEntry {
   string reference_id = 6;
   string remark = 7;
   google.protobuf.Timestamp created_at = 8;
+  string token_name = 9;
+  string model_name = 10;
+  int64 quota = 11;
+  int64 prompt_tokens = 12;
+  int64 completion_tokens = 13;
+  int64 channel_id = 14;
+  int64 elapsed_time = 15;
+  bool is_stream = 16;
+  string endpoint = 17;
 }
 
 // ========== 流水信息（管理端视图）==========

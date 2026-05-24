@@ -17,5 +17,14 @@ type Ledger struct {
 	Type         string
 	ReferenceID  string
 	Remark       string
-	CreatedAt    time.Time
+	TokenName        string
+	ModelName        string
+	Quota            int64
+	PromptTokens     int64
+	CompletionTokens int64
+	ChannelID        int64
+	ElapsedTime      int64
+	IsStream         bool
+	Endpoint         string
+	CreatedAt        time.Time
 }

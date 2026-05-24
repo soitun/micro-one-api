@@ -1,12 +1,31 @@
-import { NavLink, useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  BarChart3,
+  Bell,
+  ChevronsLeft,
+  CreditCard,
+  Database,
+  Gift,
+  KeyRound,
+  LayoutDashboard,
+  Languages,
+  LogOut,
+  ScrollText,
+  Settings2,
+  Ticket,
+  UserCircle,
+  Users,
+  WalletCards,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { MobileNav } from '@/components/MobileNav';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { adminApiClient } from '@/lib/api';
+import { adminApiClient, apiClient } from '@/lib/api';
 import { canAccessAdmin, type AdminAccessSnapshot } from '@/lib/admin-access';
 import {
   Dialog,
@@ -18,68 +37,198 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
-const userLinks = [
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/tokens', label: 'Tokens' },
-  { to: '/usage', label: 'Usage' },
+interface NavItem {
+  to: string;
+  label: string;
+  ariaLabel: string;
+  icon: LucideIcon;
+}
+
+interface SecondaryNavItem {
+  label: string;
+  icon: LucideIcon;
+  to?: string;
+}
+
+interface UserSelf {
+  username?: string;
+  display_name?: string;
+}
+
+interface AccountDashboard {
+  quota?: number;
+  used_quota?: number;
+}
+
+const userLinks: NavItem[] = [
+  { to: '/dashboard', label: '仪表盘', ariaLabel: 'Dashboard', icon: LayoutDashboard },
+  { to: '/tokens', label: 'API 密钥', ariaLabel: 'Tokens', icon: KeyRound },
+  { to: '/usage', label: '使用记录', ariaLabel: 'Usage', icon: BarChart3 },
 ];
 
-const adminLinks = [
-  { to: '/admin/users', label: 'Users' },
-  { to: '/admin/channels', label: 'Channels' },
-  { to: '/admin/logs', label: 'Logs' },
-  { to: '/admin/redemptions', label: 'Redemptions' },
-  { to: '/admin/options', label: 'Options' },
+const secondaryUserLinks: SecondaryNavItem[] = [
+  { label: '个人资料', icon: UserCircle },
+  { label: '模型价格', icon: Database },
+  { label: '我的订阅', icon: ScrollText },
+  { label: '充值 / 订阅', icon: CreditCard },
+  { label: '我的订单', icon: Ticket, to: '/orders' },
+  { label: '兑换码', icon: Gift },
 ];
+
+const adminLinks: NavItem[] = [
+  { to: '/admin/users', label: '用户', ariaLabel: 'Users', icon: Users },
+  { to: '/admin/channels', label: '渠道', ariaLabel: 'Channels', icon: Database },
+  { to: '/admin/logs', label: '日志', ariaLabel: 'Logs', icon: ScrollText },
+  { to: '/admin/redemptions', label: '兑换码', ariaLabel: 'Redemptions', icon: Ticket },
+  { to: '/admin/options', label: '设置', ariaLabel: 'Options', icon: Settings2 },
+];
+
+const routeTitles: Record<string, string> = {
+  '/dashboard': '仪表盘',
+  '/tokens': 'API 密钥',
+  '/usage': '使用记录',
+  '/orders': '我的订单',
+  '/admin/users': '用户管理',
+  '/admin/channels': '渠道管理',
+  '/admin/logs': '系统日志',
+  '/admin/redemptions': '兑换码',
+  '/admin/options': '系统设置',
+};
+
+function formatQuota(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 'US$0.00';
+  }
+  return `US$${(value / 500000).toFixed(2)}`;
+}
 
 function NavigationLinks({
-  isAdmin,
+  items,
   onNavigate,
-  stacked = false,
 }: {
-  isAdmin: boolean;
+  items: NavItem[];
   onNavigate?: () => void;
-  stacked?: boolean;
 }) {
-  const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-    cn(
-      'rounded-md text-sm transition-colors',
-      stacked ? 'px-2 py-2' : 'px-0 py-1',
-      isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-    );
-
   return (
-    <div className={cn(stacked ? 'flex flex-col gap-1' : 'flex items-center gap-6')}>
-      {userLinks.map((link) => (
-        <NavLink key={link.to} to={link.to} className={navLinkClass} onClick={onNavigate}>
-          {link.label}
-        </NavLink>
-      ))}
-      {isAdmin && (
-        <>
-          {!stacked && <span className="text-muted-foreground">|</span>}
-          {adminLinks.map((link) => (
-            <NavLink key={link.to} to={link.to} className={navLinkClass} onClick={onNavigate}>
-              {link.label}
+    <div className="space-y-2">
+      {items.map((link) => {
+        const Icon = link.icon;
+        return (
+          <NavLink
+            key={link.to}
+            to={link.to}
+            aria-label={link.ariaLabel}
+            className={({ isActive }) =>
+              cn(
+                'flex h-12 items-center gap-3 rounded-2xl px-4 text-sm font-semibold transition-colors',
+                isActive
+                  ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white',
+              )
+            }
+            onClick={onNavigate}
+          >
+            <Icon className="size-5" />
+            <span aria-hidden="true">{link.label}</span>
+          </NavLink>
+        );
+      })}
+    </div>
+  );
+}
+
+function SecondaryLinks({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <div className="space-y-2">
+      {secondaryUserLinks.map((item) => {
+        const Icon = item.icon;
+        const content = (
+          <>
+            <Icon className="size-5" />
+            <span className="min-w-0 flex-1">{item.label}</span>
+            {!item.to && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-400 dark:bg-white/10">
+                开发中
+              </span>
+            )}
+          </>
+        );
+
+        if (item.to) {
+          return (
+            <NavLink
+              key={item.label}
+              to={item.to}
+              className={({ isActive }) =>
+                cn(
+                  'flex h-11 w-full items-center gap-3 rounded-2xl px-4 text-left text-sm font-semibold transition-colors',
+                  isActive
+                    ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'
+                    : 'text-slate-500 hover:bg-slate-50 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white',
+                )
+              }
+              onClick={onNavigate}
+            >
+              {content}
             </NavLink>
-          ))}
-        </>
-      )}
+          );
+        }
+
+        return (
+          <button
+            key={item.label}
+            type="button"
+            disabled
+            title="开发中"
+            className="flex h-11 w-full cursor-not-allowed items-center gap-3 rounded-2xl px-4 text-left text-sm font-semibold text-slate-400 opacity-75 dark:text-slate-500"
+          >
+            {content}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 export function AppNavigation() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [adminToken, setAdminToken] = useState(localStorage.getItem('adminToken') || '');
   const [adminDialogOpen, setAdminDialogOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [adminInput, setAdminInput] = useState('');
   const [adminSnapshot, setAdminSnapshot] = useState<AdminAccessSnapshot | null>(null);
+  const [user, setUser] = useState<UserSelf | null>(null);
+  const [account, setAccount] = useState<AccountDashboard | null>(null);
   const isWide = useMediaQuery('(min-width: 768px)');
   const effectiveAdminSnapshot = adminToken ? adminSnapshot : null;
   const isAdmin = canAccessAdmin({ adminToken, snapshot: effectiveAdminSnapshot });
   const effectiveMobileOpen = !isWide && mobileOpen;
+  const currentTitle = routeTitles[location.pathname] ?? '仪表盘';
+  const displayName = user?.display_name || user?.username || '用户';
+  const initials = useMemo(() => displayName.slice(0, 2).toUpperCase(), [displayName]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.allSettled([apiClient.get('/user/self'), apiClient.get('/user/dashboard')]).then((results) => {
+      if (cancelled) return;
+
+      const userResult = results[0];
+      if (userResult.status === 'fulfilled') {
+        setUser(userResult.value.data?.data ?? null);
+      }
+
+      const dashboardResult = results[1];
+      if (dashboardResult.status === 'fulfilled') {
+        setAccount(dashboardResult.value.data?.data ?? null);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!adminToken) {
@@ -136,12 +285,12 @@ export function AppNavigation() {
 
   const adminControl = isAdmin ? (
     <Button variant="outline" size="sm" onClick={handleClearAdminToken}>
-      Exit Admin
+      退出管理
     </Button>
   ) : (
     <Dialog open={adminDialogOpen} onOpenChange={setAdminDialogOpen}>
-      <DialogTrigger render={<Button variant="outline" size="sm" />}>
-        Admin
+      <DialogTrigger render={<Button variant="outline" size="sm" aria-label="Admin" />}>
+        管理
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -163,33 +312,102 @@ export function AppNavigation() {
     </Dialog>
   );
 
-  return (
-    <nav className="border-b">
-      <div className="container mx-auto flex items-center gap-4 px-4 py-3">
-        <h1 className="text-lg font-semibold">One API</h1>
-        <div className="hidden md:block">
-          <NavigationLinks isAdmin={isAdmin} />
-        </div>
-        <div className="ml-auto hidden items-center gap-3 md:flex">
-          <ThemeToggle />
-          {adminControl}
-          <Button type="button" variant="ghost" size="sm" onClick={handleLogout}>
-            Logout
-          </Button>
-        </div>
-        <div className="ml-auto flex items-center gap-2 md:hidden">
-          <ThemeToggle />
-          <MobileNav open={effectiveMobileOpen} onOpenChange={setMobileOpen}>
-            <NavigationLinks isAdmin={isAdmin} stacked onNavigate={() => setMobileOpen(false)} />
-            <div className="mt-2 flex flex-col gap-2 border-t pt-3">
-              {adminControl}
-              <Button type="button" variant="ghost" size="sm" onClick={handleLogout}>
-                Logout
-              </Button>
-            </div>
-          </MobileNav>
+  const sidebar = (
+    <div className="flex h-full flex-col bg-white dark:bg-card">
+      <div className="flex h-20 items-center border-b border-slate-200 px-6 dark:border-white/10">
+        <div className="flex items-center gap-3">
+          <div className="grid size-10 place-items-center rounded-xl bg-slate-950 text-lg font-black text-white dark:bg-white dark:text-slate-950">
+            M
+          </div>
+          <div>
+            <div className="text-xl font-black tracking-normal text-slate-950 dark:text-white">Micro API</div>
+            <div className="text-xs font-semibold text-slate-400">Console</div>
+          </div>
         </div>
       </div>
-    </nav>
+
+      <div className="flex-1 overflow-y-auto px-4 py-6">
+        <p className="mb-3 px-4 text-xs font-bold text-slate-400">核心功能</p>
+        <NavigationLinks items={userLinks} onNavigate={() => setMobileOpen(false)} />
+
+        <p className="mb-3 mt-7 px-4 text-xs font-bold text-slate-400">钱包 & 活动</p>
+        <SecondaryLinks onNavigate={() => setMobileOpen(false)} />
+
+        {isAdmin && (
+          <>
+            <p className="mb-3 mt-7 px-4 text-xs font-bold text-slate-400">管理后台</p>
+            <NavigationLinks items={adminLinks} onNavigate={() => setMobileOpen(false)} />
+          </>
+        )}
+      </div>
+
+      <div className="border-t border-slate-200 p-4 dark:border-white/10">
+        <button
+          type="button"
+          className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-semibold text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-white/5"
+        >
+          <ChevronsLeft className="size-5" />
+          <span>
+            <span className="block text-slate-900 dark:text-white">收起侧边栏</span>
+            <span className="block text-xs font-medium text-slate-400">为内容保留更多空间</span>
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-slate-200 md:block dark:border-white/10">
+        {sidebar}
+      </aside>
+
+      <header className="fixed left-0 right-0 top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur md:left-72 dark:border-white/10 dark:bg-card/95">
+        <div className="flex h-20 items-center gap-3 px-4 sm:px-5 md:px-8 xl:px-10">
+          <div className="flex items-center gap-3 md:hidden">
+            <MobileNav open={effectiveMobileOpen} onOpenChange={setMobileOpen}>
+              {sidebar}
+            </MobileNav>
+          </div>
+
+          <h1 className="min-w-0 text-xl font-black tracking-normal text-slate-950 dark:text-white sm:text-2xl">
+            {currentTitle}
+          </h1>
+
+          <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
+            <Button type="button" variant="outline" size="icon-sm" aria-label="Notifications" className="hidden sm:inline-flex">
+              <Bell className="size-4" />
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="hidden gap-2 sm:inline-flex">
+              <Languages className="size-4" />
+              CN ZH
+            </Button>
+            <div className="hidden h-10 items-center gap-2 rounded-2xl bg-emerald-50 px-4 text-sm font-black text-emerald-600 sm:flex dark:bg-emerald-500/10 dark:text-emerald-300">
+              <WalletCards className="size-4" />
+              {formatQuota(account?.quota)}
+            </div>
+            <ThemeToggle />
+            {adminControl}
+            <button
+              type="button"
+              className="hidden min-w-0 items-center gap-3 rounded-2xl border border-blue-100 bg-white px-3 py-2 shadow-sm sm:flex dark:border-white/10 dark:bg-card"
+            >
+              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-500 text-sm font-black text-white">
+                {initials}
+              </span>
+              <span className="min-w-0 text-left">
+                <span className="block max-w-36 truncate text-sm font-black text-slate-950 dark:text-white">
+                  {displayName}
+                </span>
+                <span className="block text-xs font-semibold text-slate-400">控制台用户</span>
+              </span>
+            </button>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Logout" onClick={handleLogout}>
+              <LogOut className="size-4" />
+            </Button>
+          </div>
+        </div>
+      </header>
+    </>
   );
 }

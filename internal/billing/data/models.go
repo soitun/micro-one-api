@@ -35,14 +35,23 @@ type reservationModel struct {
 func (reservationModel) TableName() string { return "billing_reservations" }
 
 type ledgerModel struct {
-	ID           uint      `gorm:"primaryKey;column:id"`
-	UserID       string    `gorm:"index;column:user_id"`
-	Amount       int64     `gorm:"column:amount"`
-	BalanceAfter int64     `gorm:"column:balance_after"`
-	Type         string    `gorm:"index;column:type"`
-	ReferenceID  *string   `gorm:"index;column:reference_id"`
-	Remark       *string   `gorm:"column:remark"`
-	CreatedAt    time.Time `gorm:"index;column:created_at"`
+	ID               uint      `gorm:"primaryKey;column:id"`
+	UserID           string    `gorm:"index;column:user_id"`
+	Amount           int64     `gorm:"column:amount"`
+	BalanceAfter     int64     `gorm:"column:balance_after"`
+	Type             string    `gorm:"index;column:type"`
+	ReferenceID      *string   `gorm:"index;column:reference_id"`
+	Remark           *string   `gorm:"column:remark"`
+	TokenName        string    `gorm:"column:token_name"`
+	ModelName        string    `gorm:"column:model_name;index"`
+	Quota            int64     `gorm:"column:quota"`
+	PromptTokens     int64     `gorm:"column:prompt_tokens"`
+	CompletionTokens int64     `gorm:"column:completion_tokens"`
+	ChannelID        int64     `gorm:"column:channel_id"`
+	ElapsedTime      int64     `gorm:"column:elapsed_time"`
+	IsStream         bool      `gorm:"column:is_stream"`
+	Endpoint         string    `gorm:"column:endpoint"`
+	CreatedAt        time.Time `gorm:"index;column:created_at"`
 }
 
 func (ledgerModel) TableName() string { return "billing_ledgers" }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -96,6 +97,19 @@ func (uc *BillingUsecase) ReserveQuota(ctx context.Context, userID, requestID st
 }
 
 func (uc *BillingUsecase) CommitQuota(ctx context.Context, reservationID string, actualTokens int64, success bool) (int64, int64, error) {
+	return uc.CommitQuotaWithUsage(ctx, reservationID, actualTokens, success, LedgerUsage{})
+}
+
+type LedgerUsage struct {
+	TokenName        string
+	Endpoint         string
+	PromptTokens     int64
+	CompletionTokens int64
+	ElapsedTime      int64
+	IsStream         bool
+}
+
+func (uc *BillingUsecase) CommitQuotaWithUsage(ctx context.Context, reservationID string, actualTokens int64, success bool, usage LedgerUsage) (int64, int64, error) {
 	reservation, err := uc.reservationRepo.GetReservation(ctx, reservationID)
 	if err != nil {
 		return 0, 0, fmt.Errorf("get reservation: %w", err)
@@ -128,13 +142,26 @@ func (uc *BillingUsecase) CommitQuota(ctx context.Context, reservationID string,
 			return 0, 0, fmt.Errorf("release frozen quota: %w", err)
 		}
 
+		if err := uc.accountRepo.UpdateUsage(ctx, reservation.UserID, actualCost, 1); err != nil {
+			return 0, 0, fmt.Errorf("update usage: %w", err)
+		}
+
 		ledger := &Ledger{
-			UserID:       reservation.UserID,
-			Amount:       -actualCost,
-			BalanceAfter: account.Quota,
-			Type:         LedgerTypeConsume,
-			ReferenceID:  reservationID,
-			Remark:       fmt.Sprintf("model=%s, tokens=%d", reservation.Model, actualTokens),
+			UserID:           reservation.UserID,
+			Amount:           -actualCost,
+			BalanceAfter:     account.Quota,
+			Type:             LedgerTypeConsume,
+			ReferenceID:      reservationID,
+			Remark:           fmt.Sprintf("model=%s, tokens=%d", reservation.Model, actualTokens),
+			TokenName:        usage.TokenName,
+			ModelName:        reservation.Model,
+			Quota:            actualTokens,
+			PromptTokens:     usage.PromptTokens,
+			CompletionTokens: usage.CompletionTokens,
+			ChannelID:        parseInt64Default(reservation.ChannelID, 0),
+			ElapsedTime:      usage.ElapsedTime,
+			IsStream:         usage.IsStream,
+			Endpoint:         usage.Endpoint,
 		}
 
 		if err := uc.ledgerRepo.CreateLedger(ctx, ledger); err != nil {
@@ -142,22 +169,8 @@ func (uc *BillingUsecase) CommitQuota(ctx context.Context, reservationID string,
 		}
 
 		if diff > 0 {
-			refundBalanceAfter, err := uc.accountRepo.UpdateQuota(ctx, reservation.UserID, diff, LedgerTypeRefund)
-			if err != nil {
+			if _, err := uc.accountRepo.UpdateQuota(ctx, reservation.UserID, diff, LedgerTypeRefund); err != nil {
 				return 0, 0, fmt.Errorf("refund quota: %w", err)
-			}
-
-			refundLedger := &Ledger{
-				UserID:       reservation.UserID,
-				Amount:       diff,
-				BalanceAfter: refundBalanceAfter,
-				Type:         LedgerTypeRefund,
-				ReferenceID:  reservationID,
-				Remark:       "refund from reservation",
-			}
-
-			if err := uc.ledgerRepo.CreateLedger(ctx, refundLedger); err != nil {
-				return 0, 0, fmt.Errorf("create refund ledger: %w", err)
 			}
 		}
 
@@ -441,6 +454,17 @@ func DefaultGroupRatios() map[string]float64 {
 
 func generateReservationID() string {
 	return fmt.Sprintf("res_%d_%d", time.Now().UnixNano(), time.Now().Unix())
+}
+
+func parseInt64Default(value string, fallback int64) int64 {
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func generateRedeemCode() string {

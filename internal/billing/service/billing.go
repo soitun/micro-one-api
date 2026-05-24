@@ -43,7 +43,14 @@ func (s *BillingService) ReserveQuota(ctx context.Context, req *billingv1.Reserv
 }
 
 func (s *BillingService) CommitQuota(ctx context.Context, req *billingv1.CommitQuotaRequest) (*billingv1.CommitQuotaResponse, error) {
-	committedAmount, refundAmount, err := s.uc.CommitQuota(ctx, req.ReservationId, req.ActualTokens, req.Success)
+	committedAmount, refundAmount, err := s.uc.CommitQuotaWithUsage(ctx, req.ReservationId, req.ActualTokens, req.Success, biz.LedgerUsage{
+		TokenName:        req.TokenName,
+		Endpoint:         req.Endpoint,
+		PromptTokens:     req.PromptTokens,
+		CompletionTokens: req.CompletionTokens,
+		ElapsedTime:      req.ElapsedTime,
+		IsStream:         req.IsStream,
+	})
 	if err != nil {
 		return &billingv1.CommitQuotaResponse{
 			Success:      false,
@@ -270,14 +277,23 @@ func (s *BillingService) ListLedger(ctx context.Context, req *billingv1.ListLedg
 	entries := make([]*commonv1.LedgerEntry, len(ledgers))
 	for i, ledger := range ledgers {
 		entries[i] = &commonv1.LedgerEntry{
-			Id:           fmt.Sprintf("%d", ledger.ID),
-			UserId:       ledger.UserID,
-			Amount:       ledger.Amount,
-			BalanceAfter: ledger.BalanceAfter,
-			Type:         ledger.Type,
-			ReferenceId:  ledger.ReferenceID,
-			Remark:       ledger.Remark,
-			CreatedAt:    toProtoTimestamp(ledger.CreatedAt),
+			Id:               fmt.Sprintf("%d", ledger.ID),
+			UserId:           ledger.UserID,
+			Amount:           ledger.Amount,
+			BalanceAfter:     ledger.BalanceAfter,
+			Type:             ledger.Type,
+			ReferenceId:      ledger.ReferenceID,
+			Remark:           ledger.Remark,
+			CreatedAt:        toProtoTimestamp(ledger.CreatedAt),
+			TokenName:        ledger.TokenName,
+			ModelName:        ledger.ModelName,
+			Quota:            ledger.Quota,
+			PromptTokens:     ledger.PromptTokens,
+			CompletionTokens: ledger.CompletionTokens,
+			ChannelId:        ledger.ChannelID,
+			ElapsedTime:      ledger.ElapsedTime,
+			IsStream:         ledger.IsStream,
+			Endpoint:         ledger.Endpoint,
 		}
 	}
 

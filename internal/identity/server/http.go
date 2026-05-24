@@ -486,14 +486,23 @@ func handleUserLogs(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsec
 			createdAt = entry.GetCreatedAt().AsTime().Unix()
 		}
 		items = append(items, map[string]interface{}{
-			"id":            entry.GetId(),
-			"user_id":       entry.GetUserId(),
-			"type":          entry.GetType(),
-			"amount":        entry.GetAmount(),
-			"balance_after": entry.GetBalanceAfter(),
-			"reference_id":  entry.GetReferenceId(),
-			"remark":        entry.GetRemark(),
-			"created_at":    createdAt,
+			"id":                entry.GetId(),
+			"user_id":           entry.GetUserId(),
+			"type":              entry.GetType(),
+			"amount":            entry.GetAmount(),
+			"balance_after":     entry.GetBalanceAfter(),
+			"reference_id":      entry.GetReferenceId(),
+			"remark":            entry.GetRemark(),
+			"created_at":        createdAt,
+			"token_name":        entry.GetTokenName(),
+			"model_name":        entry.GetModelName(),
+			"quota":             entry.GetQuota(),
+			"prompt_tokens":     entry.GetPromptTokens(),
+			"completion_tokens": entry.GetCompletionTokens(),
+			"channel_id":        entry.GetChannelId(),
+			"elapsed_time":      entry.GetElapsedTime(),
+			"is_stream":         entry.GetIsStream(),
+			"endpoint":          entry.GetEndpoint(),
 		})
 	}
 

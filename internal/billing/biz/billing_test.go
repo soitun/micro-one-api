@@ -11,8 +11,9 @@ import (
 
 // 保留原有的 mock 实现
 type mockAccountRepo struct {
-	account     *Account
-	updateQuota int64
+	account          *Account
+	updateQuota      int64
+	updateUsageCalls int
 }
 
 func (m *mockAccountRepo) GetAccountSnapshot(ctx context.Context, userID string) (*Account, error) {
@@ -26,6 +27,13 @@ func (m *mockAccountRepo) UpdateQuota(ctx context.Context, userID string, delta 
 	m.account.Quota += delta
 	m.updateQuota = delta
 	return m.account.Quota, nil
+}
+
+func (m *mockAccountRepo) UpdateUsage(ctx context.Context, userID string, usedQuotaDelta, requestCountDelta int64) error {
+	m.account.UsedQuota += usedQuotaDelta
+	m.account.RequestCount += requestCountDelta
+	m.updateUsageCalls++
+	return nil
 }
 
 func (m *mockAccountRepo) UpdateFrozenQuota(ctx context.Context, userID string, delta int64) error {
@@ -229,7 +237,7 @@ func TestCommitQuota_Success_CorrectLogic(t *testing.T) {
 	assert.Equal(t, int64(20), refund)             // 100 - 80 = 20 退还
 	assert.Equal(t, int64(0), account.FrozenQuota) // 冻结配额应该被释放
 	assert.Equal(t, int64(920), account.Quota)     // 预扣 100 后退还 20，实际净消费 80
-	assert.Len(t, ledgerRepo.ledgers, 2)           // 应该有 2 个 ledger: 消费和退还
+	assert.Len(t, ledgerRepo.ledgers, 1)           // 只记录真实消费，预扣恢复不写流水
 }
 
 // 正确的失败提交流程测试 - 从 1000 开始，预扣 100，请求失败
@@ -577,6 +585,53 @@ func TestListLedgers_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, result, 3)
 	assert.Equal(t, int64(3), total)
+}
+
+func TestCommitQuotaWithUsage_UpdatesUsageCounters(t *testing.T) {
+	account := &Account{
+		UserID:       "user1",
+		Quota:        1000,
+		UsedQuota:    20,
+		RequestCount: 2,
+		FrozenQuota:  100,
+		Group:        "default",
+	}
+	reservation := &Reservation{
+		ReservationID: "res-1",
+		UserID:        "user1",
+		Amount:        100,
+		Status:        ReservationStatusReserved,
+		Model:         "mimo-v2.5",
+		ChannelID:     "2",
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	accountRepo := &mockAccountRepo{account: account}
+	reservationRepo := &mockReservationRepo{reservations: map[string]*Reservation{"res-1": reservation}}
+	ledgerRepo := &mockLedgerRepo{}
+	redeemRepo := &mockRedeemRepo{}
+	uc := NewBillingUsecase(accountRepo, reservationRepo, ledgerRepo, redeemRepo, nil)
+
+	committed, refund, err := uc.CommitQuotaWithUsage(context.Background(), "res-1", 80, true, LedgerUsage{
+		TokenName:        "token-7",
+		Endpoint:         "/v1/chat/completions",
+		PromptTokens:     30,
+		CompletionTokens: 50,
+		ElapsedTime:      1234,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(80), committed)
+	assert.Equal(t, int64(20), refund)
+	assert.Equal(t, int64(100), account.UsedQuota)
+	assert.Equal(t, int64(3), account.RequestCount)
+	assert.Equal(t, 1, accountRepo.updateUsageCalls)
+	require.Len(t, ledgerRepo.ledgers, 1)
+	assert.Equal(t, LedgerTypeConsume, ledgerRepo.ledgers[0].Type)
+	assert.Equal(t, int64(80), ledgerRepo.ledgers[0].Quota)
+	assert.Equal(t, int64(30), ledgerRepo.ledgers[0].PromptTokens)
+	assert.Equal(t, int64(50), ledgerRepo.ledgers[0].CompletionTokens)
 }
 
 // 测试分组倍率影响

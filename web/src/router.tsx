@@ -8,6 +8,7 @@ const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default:
 const DashboardPage = lazy(() => import('@/pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
 const TokensPage = lazy(() => import('@/pages/TokensPage').then((m) => ({ default: m.TokensPage })));
 const UsagePage = lazy(() => import('@/pages/UsagePage').then((m) => ({ default: m.UsagePage })));
+const OrdersPage = lazy(() => import('@/pages/OrdersPage').then((m) => ({ default: m.OrdersPage })));
 const AdminUsersPage = lazy(() => import('@/pages/admin/UsersPage').then((m) => ({ default: m.AdminUsersPage })));
 const AdminChannelsPage = lazy(() =>
   import('@/pages/admin/ChannelsPage').then((m) => ({ default: m.AdminChannelsPage }))
@@ -48,6 +49,10 @@ export const router = createBrowserRouter([
       {
         path: 'usage',
         element: withSuspense(<UsagePage />),
+      },
+      {
+        path: 'orders',
+        element: withSuspense(<OrdersPage />),
       },
       {
         path: 'admin/users',

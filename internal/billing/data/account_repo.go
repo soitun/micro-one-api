@@ -88,6 +88,15 @@ func (r *accountRepo) UpdateQuota(ctx context.Context, userID string, delta int6
 	return newQuota, nil
 }
 
+func (r *accountRepo) UpdateUsage(ctx context.Context, userID string, usedQuotaDelta, requestCountDelta int64) error {
+	return r.data.db.WithContext(ctx).Table("users").
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"used_quota":    gorm.Expr("used_quota + ?", usedQuotaDelta),
+			"request_count": gorm.Expr("request_count + ?", requestCountDelta),
+		}).Error
+}
+
 func (r *accountRepo) UpdateFrozenQuota(ctx context.Context, userID string, delta int64) error {
 	// 先查询当前值
 	var account struct {
