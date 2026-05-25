@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -409,7 +410,7 @@ func TestAdminHTTPPageIsServed(t *testing.T) {
 
 func TestAdminHTTPPageSPARouteFallback(t *testing.T) {
 	srv := NewHTTPServer(":0", nil)
-	for _, path := range []string{"/", "/login", "/dashboard", "/tokens", "/admin/options"} {
+	for _, path := range []string{"/", "/login", "/register", "/dashboard", "/tokens", "/admin/options"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -420,6 +421,45 @@ func TestAdminHTTPPageSPARouteFallback(t *testing.T) {
 			t.Fatalf("path %s did not fall back to SPA shell: %s", path, rec.Body.String())
 		}
 	}
+}
+
+func TestAdminHTTPEmbeddedLoginBundleIncludesRegistration(t *testing.T) {
+	srv := NewHTTPServer(":0", nil)
+	shell := adminHTTPGetBody(t, srv, "/login")
+	entryPath := firstSubmatch(t, shell, `<script[^>]+src="([^"]+)"`)
+	entry := adminHTTPGetBody(t, srv, entryPath)
+	loginChunkPath := firstSubmatch(t, entry, "import\\(`\\./(LoginPage-[^`]+\\.js)`\\)")
+	loginChunk := adminHTTPGetBody(t, srv, "/assets/"+loginChunkPath)
+
+	for _, want := range []string{
+		"Create a new account",
+		"/user/register",
+		"Confirm password",
+	} {
+		if !strings.Contains(loginChunk, want) {
+			t.Fatalf("embedded login chunk missing %q", want)
+		}
+	}
+}
+
+func adminHTTPGetBody(t *testing.T, srv http.Handler, path string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s status = %d, want 200, body=%s", path, rec.Code, rec.Body.String())
+	}
+	return rec.Body.String()
+}
+
+func firstSubmatch(t *testing.T, value string, pattern string) string {
+	t.Helper()
+	matches := regexp.MustCompile(pattern).FindStringSubmatch(value)
+	if len(matches) != 2 {
+		t.Fatalf("pattern %q did not match", pattern)
+	}
+	return matches[1]
 }
 
 func TestAdminHTTPOptionRequiresAuth(t *testing.T) {

@@ -39,6 +39,10 @@ export const router = createBrowserRouter([
     element: withSuspense(<LoginPage />),
   },
   {
+    path: '/register',
+    element: withSuspense(<LoginPage />),
+  },
+  {
     path: '/',
     element: <ProtectedRoute />,
     children: [

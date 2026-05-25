@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,8 @@ import { getApiErrorMessage } from '@/lib/api-error';
 import { unwrapApiData } from '@/lib/api-response';
 
 export function LoginPage() {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const location = useLocation();
+  const [mode, setMode] = useState<'login' | 'register'>(location.pathname === '/register' ? 'register' : 'login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -131,7 +132,11 @@ export function LoginPage() {
               className="w-full"
               disabled={loading}
               onClick={() => {
-                setMode((current) => (current === 'login' ? 'register' : 'login'));
+                setMode((current) => {
+                  const nextMode = current === 'login' ? 'register' : 'login';
+                  navigate(nextMode === 'register' ? '/register' : '/login', { replace: true });
+                  return nextMode;
+                });
                 setError('');
                 setConfirmPassword('');
               }}

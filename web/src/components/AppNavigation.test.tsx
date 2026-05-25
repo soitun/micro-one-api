@@ -40,11 +40,11 @@ describe('AppNavigation', () => {
     expect(screen.getByRole('link', { name: 'Options' })).toBeInTheDocument();
   });
 
-  it('hides admin navigation before an admin token exists', async () => {
+  it('shows admin access control before an admin token exists', async () => {
     renderNavigation();
 
     expect(screen.queryByText('管理后台')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '进入管理' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '进入管理' })).toHaveAttribute('href', '/admin');
     expect(screen.queryByRole('link', { name: 'Channels' })).not.toBeInTheDocument();
   });
 

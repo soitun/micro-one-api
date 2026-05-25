@@ -51,8 +51,8 @@ test('register creates account and signs in', async ({ page }) => {
     });
   });
 
-  await page.goto('/login');
-  await page.getByRole('button', { name: 'Create a new account' }).click();
+  await page.goto('/register');
+  await expect(page.getByText('Register with a username and password')).toBeVisible();
   await page.getByLabel('Username').fill('bob');
   await page.getByLabel('Password', { exact: true }).fill('password123');
   await page.getByLabel('Confirm password').fill('password123');

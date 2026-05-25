@@ -1,4 +1,4 @@
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { MobileNav } from '@/components/MobileNav';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -272,7 +272,12 @@ export function AppNavigation() {
     <Button variant="outline" size="sm" onClick={handleClearAdminToken}>
       退出管理
     </Button>
-  ) : null;
+  ) : (
+    <Link to="/admin" aria-label="进入管理" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+      <MonitorCog className="size-4" />
+      进入管理
+    </Link>
+  );
 
   const sidebar = (
     <div className="flex h-full flex-col bg-white dark:bg-card">

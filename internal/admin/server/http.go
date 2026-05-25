@@ -63,6 +63,7 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 	srv.HandleFunc("/admin/", handleAdminPage)
 	// SPA client-side routes — must mirror entries in web/src/router.tsx
 	srv.HandleFunc("/login", handleAdminPage)
+	srv.HandleFunc("/register", handleAdminPage)
 	srv.HandleFunc("/dashboard", handleAdminPage)
 	srv.HandleFunc("/tokens", handleAdminPage)
 	srv.HandleFunc("/usage", handleAdminPage)
