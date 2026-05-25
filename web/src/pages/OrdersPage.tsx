@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { EmptyState } from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/LoadingStates';
 import { adminApiClient, apiClient } from '@/lib/api';
@@ -47,6 +55,8 @@ interface PaymentOrder {
   providerTradeNo?: string;
   asset_issue_status?: string;
   assetIssueStatus?: string;
+  pay_url?: string;
+  payUrl?: string;
   created_at?: number | string | { seconds?: number };
   createdAt?: number | string | { seconds?: number };
 }
@@ -141,6 +151,10 @@ function getCreatedAt(order: PaymentOrder) {
   return timestampSeconds(order.created_at ?? order.createdAt);
 }
 
+function getPayURL(order: PaymentOrder) {
+  return order.pay_url || order.payUrl || '';
+}
+
 function paymentOrderToRow(order: PaymentOrder): OrderRow {
   const tradeNo = getTradeNo(order);
   const issueStatus = order.asset_issue_status || order.assetIssueStatus || '-';
@@ -173,6 +187,7 @@ function ledgerToRow(log: LedgerLog, index: number): OrderRow {
 export function OrdersPage() {
   const [page, setPage] = useState(1);
   const [type, setType] = useState('');
+  const [selectedOrder, setSelectedOrder] = useState<PaymentOrder | null>(null);
   const pageSize = 20;
   const adminToken = localStorage.getItem('adminToken');
   const isAdminView = Boolean(adminToken);
@@ -221,7 +236,7 @@ export function OrdersPage() {
     },
   });
 
-  const refreshPaymentOrder = useMutation({
+  const paymentOrderDetail = useMutation({
     mutationFn: async (tradeNo: string) => {
       const client = isAdminView ? adminApiClient : apiClient;
       const path = isAdminView ? `/payment/orders/${encodeURIComponent(tradeNo)}` : `/user/payment/orders/${encodeURIComponent(tradeNo)}`;
@@ -230,6 +245,7 @@ export function OrdersPage() {
     },
     onSuccess: (payload) => {
       if (!payload.order) return;
+      setSelectedOrder(payload.order);
       const updatedRow = paymentOrderToRow(payload.order);
       queryClient.setQueryData<OrderRow[]>(queryKey, (current) =>
         (current ?? []).map((row) => (row.reference === updatedRow.reference ? updatedRow : row)),
@@ -238,6 +254,20 @@ export function OrdersPage() {
   });
 
   const rows = useMemo(() => data ?? [], [data]);
+  const selectedPayURL = selectedOrder ? getPayURL(selectedOrder) : '';
+  const canContinuePayment = selectedOrder?.status === 'pending' && selectedPayURL !== '';
+
+  const handleOpenPaymentDetail = (row: OrderRow) => {
+    if (!row.paymentOrder) return;
+    setSelectedOrder(row.paymentOrder);
+    paymentOrderDetail.mutate(row.reference);
+  };
+
+  const handleContinuePayment = () => {
+    if (!selectedPayURL) return;
+    if (selectedPayURL.startsWith('mock://')) return;
+    window.open(selectedPayURL, '_blank', 'noopener,noreferrer');
+  };
 
   return (
     <div className="space-y-5">
@@ -304,10 +334,11 @@ export function OrdersPage() {
                           type="button"
                           variant="outline"
                           size="sm"
-                          disabled={refreshPaymentOrder.isPending}
-                          onClick={() => refreshPaymentOrder.mutate(row.reference)}
+                          disabled={paymentOrderDetail.isPending}
+                          aria-label={`查看订单 ${row.reference}`}
+                          onClick={() => handleOpenPaymentDetail(row)}
                         >
-                          刷新
+                          详情
                         </Button>
                       ) : (
                         '-'
@@ -330,6 +361,60 @@ export function OrdersPage() {
           </div>
         </>
       )}
+
+      <Dialog open={Boolean(selectedOrder)} onOpenChange={(open) => !open && setSelectedOrder(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>订单详情</DialogTitle>
+            <DialogDescription>查看支付订单状态，未支付订单可继续打开原支付链接。</DialogDescription>
+          </DialogHeader>
+
+          {selectedOrder && (
+            <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm dark:border-white/10 dark:bg-background">
+              <DetailRow label="订单号" value={getTradeNo(selectedOrder)} mono />
+              {isAdminView && <DetailRow label="用户" value={getUserID(selectedOrder) || '-'} mono />}
+              <DetailRow label="支付渠道" value={selectedOrder.channel || '-'} />
+              <DetailRow label="状态" value={STATUS_NAMES[selectedOrder.status || ''] || selectedOrder.status || '-'} />
+              <DetailRow label="支付金额" value={formatMoney(getMoneyCents(selectedOrder), selectedOrder.currency)} />
+              <DetailRow label="到账额度" value={formatQuota(getAssetAmount(selectedOrder))} />
+              <DetailRow label="资产状态" value={selectedOrder.asset_issue_status || selectedOrder.assetIssueStatus || '-'} />
+              <DetailRow label="创建时间" value={formatDate(getCreatedAt(selectedOrder))} />
+            </div>
+          )}
+
+          <DialogFooter>
+            {selectedOrder?.status === 'pending' ? (
+              <Button
+                type="button"
+                disabled={!canContinuePayment}
+                onClick={handleContinuePayment}
+                className="bg-blue-600 text-white hover:bg-blue-700"
+              >
+                继续支付
+              </Button>
+            ) : selectedOrder?.status === 'paid' ? (
+              <div className="rounded-lg bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                订单已支付
+              </div>
+            ) : selectedOrder?.status === 'closed' ? (
+              <div className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                订单已关闭
+              </div>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="grid gap-1 sm:grid-cols-[6rem_1fr] sm:items-center">
+      <div className="text-xs font-bold text-slate-500 dark:text-slate-400">{label}</div>
+      <div className={mono ? 'break-all font-mono text-xs text-slate-950 dark:text-white' : 'break-all font-semibold text-slate-950 dark:text-white'}>
+        {value}
+      </div>
     </div>
   );
 }
