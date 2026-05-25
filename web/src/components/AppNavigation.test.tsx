@@ -40,6 +40,14 @@ describe('AppNavigation', () => {
     expect(screen.getByRole('link', { name: 'Options' })).toBeInTheDocument();
   });
 
+  it('hides admin navigation before an admin token exists', async () => {
+    renderNavigation();
+
+    expect(screen.queryByText('管理后台')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '进入管理' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Channels' })).not.toBeInTheDocument();
+  });
+
   it('clears admin token when access snapshot is rejected', async () => {
     window.localStorage.setItem('adminToken', 'admin-token');
     server.use(http.get('/api/admin/access', () => new HttpResponse(null, { status: 401 })));
