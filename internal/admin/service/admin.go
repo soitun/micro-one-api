@@ -471,6 +471,21 @@ func (s *AdminService) DeleteUser(ctx context.Context, req *adminv1.AdminDeleteU
 	return &adminv1.AdminDeleteUserResponse{Success: resp.Success, Message: resp.Message}, nil
 }
 
+func (s *AdminService) SetUserRole(ctx context.Context, req *adminv1.AdminSetUserRoleRequest) (*adminv1.AdminSetUserRoleResponse, error) {
+	resp, err := s.identityClient.SetUserRole(ctx, &identityv1.SetUserRoleRequest{
+		UserId: req.UserId,
+		Role:   req.Role,
+	})
+	if err != nil {
+		return &adminv1.AdminSetUserRoleResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &adminv1.AdminSetUserRoleResponse{
+		Success: resp.Success,
+		Message: resp.Message,
+		Role:    resp.Role,
+	}, nil
+}
+
 func (s *AdminService) ResetUserQuota(ctx context.Context, req *adminv1.ResetUserQuotaRequest) (*adminv1.ResetUserQuotaResponse, error) {
 	snapshot, err := s.billingClient.GetAccountSnapshot(ctx, &billingv1.GetAccountSnapshotRequest{
 		UserId: fmt.Sprintf("%d", req.UserId),

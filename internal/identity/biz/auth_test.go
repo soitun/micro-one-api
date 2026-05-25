@@ -298,6 +298,10 @@ func (m *mockIdentityRepo) ListUsers(ctx context.Context, page, pageSize int32, 
 	return result, int64(len(result)), nil
 }
 
+func (m *mockIdentityRepo) CountUsers(ctx context.Context) (int64, error) {
+	return int64(len(m.users)), nil
+}
+
 func TestIdentityUsecase_ValidateToken_ValidToken(t *testing.T) {
 	repo := &mockIdentityRepo{
 		tokens: map[string]*Token{
@@ -1268,5 +1272,70 @@ func TestIdentityUsecase_GetUser_NotFound(t *testing.T) {
 	_, err := uc.GetUser(context.Background(), 999)
 	if !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("expected ErrUserNotFound, got: %v", err)
+	}
+}
+
+func TestIdentityUsecase_SetRole_PromoteCommonToAdmin(t *testing.T) {
+	repo := &mockIdentityRepo{users: map[int64]*User{
+		7: {ID: 7, Username: "alice", Role: RoleCommonUser, Status: UserStatusEnabled},
+	}, tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+
+	got, err := uc.SetRole(context.Background(), 7, RoleAdminUser)
+	if err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	if got.Role != RoleAdminUser {
+		t.Fatalf("returned role = %d, want %d", got.Role, RoleAdminUser)
+	}
+	if !got.IsAdmin() {
+		t.Fatalf("IsAdmin() should be true after promotion")
+	}
+	if repo.users[7].Role != RoleAdminUser {
+		t.Fatalf("repo role = %d, want %d", repo.users[7].Role, RoleAdminUser)
+	}
+}
+
+func TestIdentityUsecase_SetRole_DemoteAdminToCommon(t *testing.T) {
+	repo := &mockIdentityRepo{users: map[int64]*User{
+		7: {ID: 7, Username: "alice", Role: RoleAdminUser, Status: UserStatusEnabled},
+	}, tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+
+	got, err := uc.SetRole(context.Background(), 7, RoleCommonUser)
+	if err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	if got.Role != RoleCommonUser || got.IsAdmin() {
+		t.Fatalf("demote did not clear admin role: got %+v", got)
+	}
+}
+
+func TestIdentityUsecase_SetRole_RootCannotBeChanged(t *testing.T) {
+	repo := &mockIdentityRepo{users: map[int64]*User{
+		1: {ID: 1, Username: "admin", Role: RoleRootUser, Status: UserStatusEnabled},
+	}, tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+
+	if _, err := uc.SetRole(context.Background(), 1, RoleCommonUser); !errors.Is(err, ErrCannotChangeRootRole) {
+		t.Fatalf("expected ErrCannotChangeRootRole, got %v", err)
+	}
+	if repo.users[1].Role != RoleRootUser {
+		t.Fatalf("root role mutated to %d", repo.users[1].Role)
+	}
+}
+
+func TestIdentityUsecase_SetRole_RejectsRootValueAndInvalid(t *testing.T) {
+	repo := &mockIdentityRepo{users: map[int64]*User{
+		7: {ID: 7, Username: "alice", Role: RoleCommonUser, Status: UserStatusEnabled},
+	}, tokens: make(map[string]*Token)}
+	uc := NewIdentityUsecase(repo)
+
+	// Granting root via SetRole is not allowed — root is only set by bootstrap.
+	if _, err := uc.SetRole(context.Background(), 7, RoleRootUser); !errors.Is(err, ErrInvalidRole) {
+		t.Fatalf("expected ErrInvalidRole for root, got %v", err)
+	}
+	if _, err := uc.SetRole(context.Background(), 7, 42); !errors.Is(err, ErrInvalidRole) {
+		t.Fatalf("expected ErrInvalidRole for 42, got %v", err)
 	}
 }

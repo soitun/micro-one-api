@@ -31,6 +31,7 @@ type userModel struct {
 	Email         string `gorm:"column:email"`
 	Group         string `gorm:"column:group"`
 	Status        int32  `gorm:"column:status"`
+	Role          int32  `gorm:"column:role"`
 	PasswordHash  string `gorm:"column:password_hash"`
 	OAuthProvider string `gorm:"column:oauth_provider;index"`
 	OAuthID       string `gorm:"column:oauth_id;index"`
@@ -539,6 +540,7 @@ func (r *Repository) createUserDB(ctx context.Context, user *biz.User) error {
 		Email:         user.Email,
 		Group:         user.Group,
 		Status:        user.Status,
+		Role:          user.Role,
 		PasswordHash:  user.PasswordHash,
 		OAuthProvider: user.OAuthProvider,
 		OAuthID:       user.OAuthID,
@@ -560,6 +562,7 @@ func (r *Repository) updateUserDB(ctx context.Context, user *biz.User) error {
 		"email":          user.Email,
 		"group":          user.Group,
 		"status":         user.Status,
+		"role":           user.Role,
 		"password_hash":  user.PasswordHash,
 		"oauth_provider": user.OAuthProvider,
 		"oauth_id":       user.OAuthID,
@@ -705,6 +708,7 @@ func userModelToBiz(model userModel) *biz.User {
 		Email:         model.Email,
 		Group:         model.Group,
 		Status:        model.Status,
+		Role:          model.Role,
 		PasswordHash:  model.PasswordHash,
 		OAuthProvider: model.OAuthProvider,
 		OAuthID:       model.OAuthID,
@@ -758,12 +762,26 @@ func (r *Repository) listUsersDB(ctx context.Context, page, pageSize int32, keyw
 			Email:       m.Email,
 			Group:       m.Group,
 			Status:      m.Status,
+			Role:        m.Role,
 			Quota:       m.Quota,
 			AffCode:     m.AffCode,
 			InviterID:   m.InviterID,
 		}
 	}
 	return users, total, nil
+}
+
+func (r *Repository) CountUsers(ctx context.Context) (int64, error) {
+	if r.db != nil {
+		var total int64
+		if err := r.db.WithContext(ctx).Model(&userModel{}).Count(&total).Error; err != nil {
+			return 0, err
+		}
+		return total, nil
+	}
+	r.identityLock.RLock()
+	defer r.identityLock.RUnlock()
+	return int64(len(r.usersByID)), nil
 }
 
 func strPtr(s string) *string { return &s }

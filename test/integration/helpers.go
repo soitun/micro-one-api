@@ -366,6 +366,10 @@ func (m *testIdentityRepo) ListUsers(ctx context.Context, page, pageSize int32, 
 	return result, int64(len(result)), nil
 }
 
+func (m *testIdentityRepo) CountUsers(ctx context.Context) (int64, error) {
+	return int64(len(m.users)), nil
+}
+
 type testChannelRepo struct {
 	channels  map[int64]*channelbiz.Channel
 	abilities map[string][]channelbiz.Ability

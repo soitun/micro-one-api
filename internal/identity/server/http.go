@@ -727,7 +727,7 @@ func handleUserPaymentOrders(w http.ResponseWriter, r *http.Request, uc *biz.Ide
 	}
 	userID := strconv.FormatInt(snapshot.UserID, 10)
 	user, err := uc.GetUser(r.Context(), snapshot.UserID)
-	if err == nil && user != nil && user.Username == "admin" {
+	if err == nil && user.IsAdmin() {
 		userID = ""
 	}
 	query := r.URL.Query()
@@ -784,7 +784,7 @@ func handleUserPaymentOrderByTradeNo(w http.ResponseWriter, r *http.Request, uc 
 	}
 	order := resp.GetOrder()
 	user, userErr := uc.GetUser(r.Context(), snapshot.UserID)
-	isAdminUser := userErr == nil && user != nil && user.Username == "admin"
+	isAdminUser := userErr == nil && user.IsAdmin()
 	if !isAdminUser && order.GetUserId() != strconv.FormatInt(snapshot.UserID, 10) {
 		writeJSON(w, http.StatusForbidden, apiResponse{Success: false, Message: "forbidden"})
 		return

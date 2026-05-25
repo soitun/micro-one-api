@@ -77,6 +77,7 @@ func (s *IdentityService) GetUser(ctx context.Context, req *identityv1.GetUserRe
 			Email:       user.Email,
 			Group:       user.Group,
 			Status:      user.Status,
+			Role:        user.Role,
 		},
 	}, nil
 }
@@ -142,6 +143,7 @@ func (s *IdentityService) ListUsers(ctx context.Context, req *identityv1.ListUse
 			Email:       u.Email,
 			Group:       u.Group,
 			Status:      u.Status,
+			Role:        u.Role,
 		}
 	}
 	return &identityv1.ListUsersResponse{
@@ -199,6 +201,24 @@ func (s *IdentityService) DeleteUser(ctx context.Context, req *identityv1.Delete
 	return &identityv1.DeleteUserResponse{
 		Success: true,
 		Message: "ok",
+	}, nil
+}
+
+func (s *IdentityService) SetUserRole(ctx context.Context, req *identityv1.SetUserRoleRequest) (*identityv1.SetUserRoleResponse, error) {
+	user, err := s.uc.SetRole(ctx, req.UserId, req.Role)
+	if err != nil {
+		if applogger.Log != nil {
+			applogger.Log.Warn("SetUserRole failed", zap.Error(err))
+		}
+		return &identityv1.SetUserRoleResponse{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
+	return &identityv1.SetUserRoleResponse{
+		Success: true,
+		Message: "ok",
+		Role:    user.Role,
 	}, nil
 }
 

@@ -38,6 +38,7 @@ service AdminService {
   rpc UpdateUser(AdminUpdateUserRequest) returns (AdminUpdateUserResponse);
   rpc DeleteUser(AdminDeleteUserRequest) returns (AdminDeleteUserResponse);
   rpc ResetUserQuota(ResetUserQuotaRequest) returns (ResetUserQuotaResponse);
+  rpc SetUserRole(AdminSetUserRoleRequest) returns (AdminSetUserRoleResponse);
 
   // ========== 渠道管理（透传 channel-service）==========
   rpc ListChannels(AdminListChannelsRequest) returns (AdminListChannelsResponse) {
@@ -263,6 +264,17 @@ message ResetUserQuotaRequest {
 message ResetUserQuotaResponse {
   bool success = 1;
   string message = 2;
+}
+
+message AdminSetUserRoleRequest {
+  int64 user_id = 1;
+  int32 role = 2;
+}
+
+message AdminSetUserRoleResponse {
+  bool success = 1;
+  string message = 2;
+  int32 role = 3;
 }
 
 // ========== 渠道管理 ==========

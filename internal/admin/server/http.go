@@ -799,7 +799,7 @@ func handleOneAPIUserManage(w http.ResponseWriter, r *http.Request, svc *service
 			writeJSON(w, http.StatusOK, apiResponse(false, message, nil))
 			return
 		}
-		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"status": status, "role": 0}))
+		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"status": status, "role": user.GetRole()}))
 	case "delete":
 		resp, err := svc.DeleteUser(r.Context(), &adminv1.AdminDeleteUserRequest{UserId: userID})
 		if err != nil || !resp.GetSuccess() {
@@ -813,9 +813,29 @@ func handleOneAPIUserManage(w http.ResponseWriter, r *http.Request, svc *service
 			writeJSON(w, http.StatusOK, apiResponse(false, message, nil))
 			return
 		}
-		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"status": user.GetStatus(), "role": 0}))
+		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"status": user.GetStatus(), "role": user.GetRole()}))
 	case "promote", "demote":
-		writeJSON(w, http.StatusOK, apiResponse(false, "role management is not supported", nil))
+		// 0=guest, 1=common, 10=admin, 100=root. Promote raises a common
+		// user to admin; demote returns them to common. Root cannot be
+		// changed via this endpoint — that constraint is enforced by
+		// identity-service so we just surface its error.
+		newRole := int32(10) // admin
+		if req.Action == "demote" {
+			newRole = 1 // common user
+		}
+		resp, err := svc.SetUserRole(r.Context(), &adminv1.AdminSetUserRoleRequest{UserId: userID, Role: newRole})
+		if err != nil || !resp.GetSuccess() {
+			message := ""
+			if resp != nil {
+				message = resp.GetMessage()
+			}
+			if err != nil {
+				message = err.Error()
+			}
+			writeJSON(w, http.StatusOK, apiResponse(false, message, nil))
+			return
+		}
+		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"status": user.GetStatus(), "role": resp.GetRole()}))
 	default:
 		writeJSON(w, http.StatusOK, apiResponse(false, "unsupported action", nil))
 	}

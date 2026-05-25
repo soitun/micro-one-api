@@ -105,6 +105,26 @@ go run ./cmd/relay-gateway
 ### identity-service
 - `IDENTITY_GRPC_ADDR` - gRPC 监听地址（默认: 127.0.0.1:9001）
 - `IDENTITY_SQL_DSN` - 数据库连接字符串（测试环境可为空）
+- `INITIAL_ADMIN_USERNAME` - 首次启动创建的管理员用户名（默认: `admin`）
+- `INITIAL_ADMIN_EMAIL` - 首次启动创建的管理员邮箱（默认: `admin@example.com`）
+- `INITIAL_ADMIN_PASSWORD` - 首次启动创建的管理员密码；**未设置时随机生成 16 字符并打印到 identity-service 日志一次**
+
+> 仅在 `users` 表为空时才会创建,已有用户则跳过;请关注启动日志中的 `INITIAL ADMIN CREATED` 块以获取随机密码。
+> 忘记密码可用离线工具 `go run ./cmd/admin-reset -username admin` 重置(读取 `ADMIN_RESET_DSN` / `IDENTITY_SQL_DSN` / `SQL_DSN`);
+> 通过 `-role` 可设置角色(0=guest, 1=user, 10=admin, 100=root),创建新用户时不指定默认 100。
+
+#### 用户角色
+
+`users.role` 字段(migration 025 加入)决定权限,数值越大越高:
+
+| 数值 | 角色 | 含义 |
+|---|---|---|
+| 0   | `RoleGuestUser`  | 访客 |
+| 1   | `RoleCommonUser` | 默认普通用户(注册即此角色) |
+| 10  | `RoleAdminUser`  | 管理员(通过 `user.IsAdmin()` 判定) |
+| 100 | `RoleRootUser`   | 首启 bootstrap 创建的超级管理员 |
+
+代码内务必通过 `user.IsAdmin()` / `user.IsRoot()` 判定,**不要**再用 `user.Username == "admin"`。
 
 ### channel-service
 - `CHANNEL_GRPC_ADDR` - gRPC 监听地址（默认: 127.0.0.1:9002）

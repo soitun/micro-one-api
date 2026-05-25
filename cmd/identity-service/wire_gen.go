@@ -3,10 +3,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"os"
 
 	"github.com/go-kratos/kratos/v2"
 	kconfig "github.com/go-kratos/kratos/v2/config"
+	"github.com/go-kratos/kratos/v2/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -48,6 +51,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	}
 
 	uc := biz.NewIdentityUsecase(repo)
+	bootstrapAdmin(uc)
 	svc := service.NewIdentityService(uc)
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
 
@@ -86,6 +90,34 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	}
 
 	return app, cleanup, nil
+}
+
+// bootstrapAdmin creates the initial admin user if the users table is empty.
+// Failures are logged but do not abort startup — operators can run the
+// admin-reset tool or retry later. A generated password is printed once and
+// will not be recoverable, so it is logged at WARN level with a clear marker.
+func bootstrapAdmin(uc *biz.IdentityUsecase) {
+	helper := log.NewHelper(log.NewStdLogger(os.Stdout))
+	result, err := uc.EnsureRootAdmin(context.Background())
+	if err != nil {
+		helper.Warnf("admin bootstrap skipped: %v", err)
+		return
+	}
+	if !result.Created {
+		return
+	}
+	if result.Generated {
+		helper.Warnf("======== INITIAL ADMIN CREATED ========")
+		helper.Warnf("username: %s", result.Username)
+		helper.Warnf("email:    %s", result.Email)
+		helper.Warnf("password: %s", result.PlainPassword)
+		helper.Warnf("This password was randomly generated and will NOT be shown again.")
+		helper.Warnf("Save it now, then log in and change it immediately.")
+		helper.Warnf("To pre-set a password, set INITIAL_ADMIN_PASSWORD before first start.")
+		helper.Warnf("=======================================")
+		return
+	}
+	helper.Infof("initial admin %q created from INITIAL_ADMIN_PASSWORD env var", result.Username)
 }
 
 func registrationPolicyFromConfig(cfg *identitycfg.Config) server.RegistrationPolicy {

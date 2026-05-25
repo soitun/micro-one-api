@@ -25,6 +25,7 @@ type adminHTTPIdentityClient struct {
 	createdUser   *identityv1.CreateUserRequest
 	updatedUser   *identityv1.UpdateUserRequest
 	userStatuses  []int32
+	setRoleReq    *identityv1.SetUserRoleRequest
 }
 
 func (c *adminHTTPIdentityClient) GetUser(ctx context.Context, req *identityv1.GetUserRequest, opts ...grpc.CallOption) (*identityv1.GetUserReply, error) {
@@ -70,6 +71,11 @@ func (c *adminHTTPIdentityClient) UpdateUser(ctx context.Context, req *identityv
 func (c *adminHTTPIdentityClient) DeleteUser(ctx context.Context, req *identityv1.DeleteUserRequest, opts ...grpc.CallOption) (*identityv1.DeleteUserResponse, error) {
 	c.deletedUserID = req.UserId
 	return &identityv1.DeleteUserResponse{Success: true, Message: "deleted"}, nil
+}
+
+func (c *adminHTTPIdentityClient) SetUserRole(ctx context.Context, req *identityv1.SetUserRoleRequest, opts ...grpc.CallOption) (*identityv1.SetUserRoleResponse, error) {
+	c.setRoleReq = req
+	return &identityv1.SetUserRoleResponse{Success: true, Message: "ok", Role: req.Role}, nil
 }
 
 type adminHTTPChannelClient struct {
@@ -1085,8 +1091,26 @@ func TestAdminHTTPOneAPIUserManageRoute(t *testing.T) {
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":false`) {
-		t.Fatalf("unsupported action response mismatch: status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("promote response mismatch: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if identityClient.setRoleReq == nil || identityClient.setRoleReq.GetRole() != 10 {
+		t.Fatalf("promote did not call SetUserRole(role=10): got %+v", identityClient.setRoleReq)
+	}
+	if !strings.Contains(rec.Body.String(), `"role":10`) {
+		t.Fatalf("promote response missing role=10: %s", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/user/manage", strings.NewReader(`{"username":"alice","action":"demote"}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("demote response mismatch: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if identityClient.setRoleReq == nil || identityClient.setRoleReq.GetRole() != 1 {
+		t.Fatalf("demote did not call SetUserRole(role=1): got %+v", identityClient.setRoleReq)
 	}
 }
 

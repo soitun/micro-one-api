@@ -126,15 +126,10 @@ CREATE TABLE IF NOT EXISTS `alert_rules` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Seed data: default admin user and test token
--- status=1 means enabled (matches biz.TokenStatusEnabled=1, biz.UserStatusEnabled=1)
-INSERT INTO `users` (`id`, `username`, `display_name`, `email`, `group`, `status`, `password_hash`, `quota`)
-VALUES (1, 'admin', 'Administrator', 'admin@example.com', 'default', 1, '$2a$10$mQbGwDjn.r1F21benveHEOAZWMoctZWkl.wjkV1x1xu3lI7IIW2NG', 1000000)
-ON DUPLICATE KEY UPDATE `username`=`username`;
-
-INSERT INTO `tokens` (`id`, `user_id`, `key`, `status`, `expired_time`, `remain_quota`, `unlimited_quota`)
-VALUES (1, 1, 'sk-test-token-001', 1, 0, 1000000, 1)
-ON DUPLICATE KEY UPDATE `key`=`key`;
+-- Default admin user is bootstrapped by identity-service at startup based on
+-- INITIAL_ADMIN_USERNAME / INITIAL_ADMIN_EMAIL / INITIAL_ADMIN_PASSWORD env
+-- vars. If INITIAL_ADMIN_PASSWORD is unset, a random one-time password is
+-- generated and printed to identity-service stdout once.
 
 -- Seed data: a test channel (OpenAI-compatible, status=1 means enabled)
 INSERT INTO `channels` (`id`, `type`, `key`, `status`, `name`, `base_url`, `models`, `group`, `priority`)

@@ -924,6 +924,10 @@ func TestIdentityHTTPAdminUserPaymentOrdersCanListAllUsers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	user.Role = biz.RoleAdminUser
+	if err := repo.UpdateUser(context.Background(), user); err != nil {
+		t.Fatal(err)
+	}
 	_, authToken, err := uc.Login(context.Background(), user.Username, "password123")
 	if err != nil {
 		t.Fatal(err)

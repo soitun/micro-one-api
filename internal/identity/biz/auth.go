@@ -19,6 +19,14 @@ const (
 	UserStatusEnabled  int32 = 1
 	UserStatusDisabled int32 = 2
 
+	// User role scale mirrors upstream one-api so existing semantics carry
+	// over: only admin-or-higher can manage the platform; root is the
+	// bootstrap account and cannot be demoted by other admins.
+	RoleGuestUser  int32 = 0
+	RoleCommonUser int32 = 1
+	RoleAdminUser  int32 = 10
+	RoleRootUser   int32 = 100
+
 	TokenStatusEnabled   int32 = 1
 	TokenStatusDisabled  int32 = 2
 	TokenStatusExpired   int32 = 3
@@ -46,12 +54,25 @@ type User struct {
 	Email         string
 	Group         string
 	Status        int32
+	Role          int32
 	PasswordHash  string
 	OAuthProvider string
 	OAuthID       string
 	Quota         int64
 	AffCode       string
 	InviterID     int64
+}
+
+// IsAdmin reports whether the user has admin-or-higher privileges. Use this
+// instead of comparing Username, so admins remain admins after renaming.
+func (u *User) IsAdmin() bool {
+	return u != nil && u.Role >= RoleAdminUser
+}
+
+// IsRoot reports whether the user is the bootstrap root account. Root is
+// effectively an admin that other admins cannot demote.
+func (u *User) IsRoot() bool {
+	return u != nil && u.Role >= RoleRootUser
 }
 
 type OAuthIdentity struct {
@@ -109,6 +130,7 @@ type IdentityRepo interface {
 	UpdateToken(ctx context.Context, token *Token) error
 	DeleteToken(ctx context.Context, userID, tokenID int64) error
 	ListUsers(ctx context.Context, page, pageSize int32, keyword, group string, status int32) ([]*User, int64, error)
+	CountUsers(ctx context.Context) (int64, error)
 }
 
 // loginAttempt tracks failed login attempts for rate limiting
@@ -529,6 +551,39 @@ func (uc *IdentityUsecase) UpdateUser(ctx context.Context, userID int64, display
 	}
 	user.Status = status
 	return uc.repo.UpdateUser(ctx, user)
+}
+
+var (
+	ErrInvalidRole          = errors.New("invalid role")
+	ErrCannotChangeRootRole = errors.New("cannot change root user role")
+)
+
+// SetRole updates a user's role. The new role must be one of the named
+// constants (Guest/Common/Admin); promoting to root via this path is not
+// allowed — the root account is only created by bootstrap. Demoting an
+// existing root user is also refused so an admin cannot accidentally lock
+// every operator out of the system.
+func (uc *IdentityUsecase) SetRole(ctx context.Context, userID int64, role int32) (*User, error) {
+	switch role {
+	case RoleGuestUser, RoleCommonUser, RoleAdminUser:
+	default:
+		return nil, ErrInvalidRole
+	}
+	user, err := uc.repo.FindUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user.IsRoot() {
+		return nil, ErrCannotChangeRootRole
+	}
+	if user.Role == role {
+		return user, nil
+	}
+	user.Role = role
+	if err := uc.repo.UpdateUser(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 func (uc *IdentityUsecase) UpdateSelf(ctx context.Context, userID int64, username, displayName, password string) error {
