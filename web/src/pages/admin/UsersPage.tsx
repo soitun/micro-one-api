@@ -28,9 +28,43 @@ interface User {
   email: string;
   group: string;
   status: number;
+  role: number;
   quota: string;
   usedQuota: string;
   createdAt: string;
+}
+
+const ROLE_GUEST = 0;
+const ROLE_COMMON = 1;
+const ROLE_ADMIN = 10;
+const ROLE_ROOT = 100;
+
+function roleLabel(role: number) {
+  switch (role) {
+    case ROLE_ROOT:
+      return 'Root';
+    case ROLE_ADMIN:
+      return 'Admin';
+    case ROLE_COMMON:
+      return 'User';
+    case ROLE_GUEST:
+      return 'Guest';
+    default:
+      return String(role);
+  }
+}
+
+function roleBadgeClass(role: number) {
+  if (role >= ROLE_ROOT) {
+    return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
+  }
+  if (role >= ROLE_ADMIN) {
+    return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+  }
+  if (role <= ROLE_GUEST) {
+    return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+  }
+  return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200';
 }
 
 export function AdminUsersPage() {
@@ -86,6 +120,23 @@ export function AdminUsersPage() {
     },
   });
 
+  const setRoleMutation = useMutation({
+    mutationFn: async ({ username, action }: { username: string; action: 'promote' | 'demote' }) => {
+      const res = await adminApiClient.post('/user/manage', { username, action });
+      if (res.data && res.data.success === false) {
+        throw new Error(res.data.message || 'Failed to update role');
+      }
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      toast.success(variables.action === 'promote' ? 'User promoted to admin' : 'Admin demoted to user');
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Failed to update role';
+      toast.error(message);
+    },
+  });
+
   function formatQuota(q: string) {
     return (parseInt(q || '0') / 500000).toFixed(2);
   }
@@ -116,6 +167,7 @@ export function AdminUsersPage() {
               { key: 'displayName', label: 'Display Name' },
               { key: 'email', label: 'Email' },
               { key: 'group', label: 'Group' },
+              { key: 'role', label: 'Role' },
               { key: 'quota', label: 'Quota' },
               { key: 'usedQuota', label: 'Used Quota' },
               { key: 'status', label: 'Status' },
@@ -146,7 +198,7 @@ export function AdminUsersPage() {
       </div>
 
       {isLoading ? (
-        <TableSkeleton columns={['ID', 'Username', 'Display Name', 'Email', 'Group', 'Quota', 'Used', 'Status', 'Actions']} />
+        <TableSkeleton columns={['ID', 'Username', 'Display Name', 'Email', 'Group', 'Role', 'Quota', 'Used', 'Status', 'Actions']} />
       ) : !users || users.length === 0 ? (
         <EmptyState title="No users found" description="Try clearing the search term or checking another page." />
       ) : visibleUsers.length === 0 ? (
@@ -168,6 +220,9 @@ export function AdminUsersPage() {
                   <SortableHeader<User> columnKey="group" sort={sort} onSortChange={setSort}>
                     Group
                   </SortableHeader>
+                  <SortableHeader<User> columnKey="role" sort={sort} onSortChange={setSort}>
+                    Role
+                  </SortableHeader>
                   <SortableHeader<User> columnKey="quota" sort={sort} onSortChange={setSort}>
                     Quota
                   </SortableHeader>
@@ -179,40 +234,66 @@ export function AdminUsersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visibleUsers.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-mono text-sm">{user.id}</TableCell>
-                    <TableCell className="font-medium">{user.username}</TableCell>
-                    <TableCell className="hidden lg:table-cell">{user.displayName || '—'}</TableCell>
-                    <TableCell className="max-w-56 truncate">{user.email || '—'}</TableCell>
-                    <TableCell>{user.group}</TableCell>
-                    <TableCell>{formatQuota(user.quota)}</TableCell>
-                    <TableCell>{formatQuota(user.usedQuota)}</TableCell>
-                    <TableCell>
-                      <span
-                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          user.status === 1
-                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                            : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                        }`}
-                      >
-                        {user.status === 1 ? 'Active' : 'Disabled'}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          toggleStatusMutation.mutate({ id: user.id, currentStatus: user.status })
-                        }
-                        disabled={toggleStatusMutation.isPending}
-                      >
-                        {user.status === 1 ? 'Disable' : 'Enable'}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {visibleUsers.map((user) => {
+                  const isRoot = user.role >= ROLE_ROOT;
+                  const isAdmin = user.role >= ROLE_ADMIN && user.role < ROLE_ROOT;
+                  const roleAction: 'promote' | 'demote' = isAdmin ? 'demote' : 'promote';
+                  const roleActionLabel = isAdmin ? 'Demote' : 'Promote';
+                  return (
+                    <TableRow key={user.id}>
+                      <TableCell className="font-mono text-sm">{user.id}</TableCell>
+                      <TableCell className="font-medium">{user.username}</TableCell>
+                      <TableCell className="hidden lg:table-cell">{user.displayName || '—'}</TableCell>
+                      <TableCell className="max-w-56 truncate">{user.email || '—'}</TableCell>
+                      <TableCell>{user.group}</TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${roleBadgeClass(user.role)}`}
+                        >
+                          {roleLabel(user.role)}
+                        </span>
+                      </TableCell>
+                      <TableCell>{formatQuota(user.quota)}</TableCell>
+                      <TableCell>{formatQuota(user.usedQuota)}</TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                            user.status === 1
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                              : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                          }`}
+                        >
+                          {user.status === 1 ? 'Active' : 'Disabled'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              setRoleMutation.mutate({ username: user.username, action: roleAction })
+                            }
+                            disabled={isRoot || setRoleMutation.isPending}
+                            title={isRoot ? 'Root role cannot be changed here' : undefined}
+                          >
+                            {roleActionLabel}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              toggleStatusMutation.mutate({ id: user.id, currentStatus: user.status })
+                            }
+                            disabled={toggleStatusMutation.isPending}
+                          >
+                            {user.status === 1 ? 'Disable' : 'Enable'}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

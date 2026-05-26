@@ -43,8 +43,10 @@ interface SecondaryNavItem {
 }
 
 interface UserSelf {
+  id?: number | string;
   username?: string;
   display_name?: string;
+  role?: number;
 }
 
 interface AccountDashboard {
@@ -211,7 +213,11 @@ export function AppNavigation() {
 
       const userResult = results[0];
       if (userResult.status === 'fulfilled') {
-        setUser(userResult.value.data?.data ?? null);
+        const self = (userResult.value.data?.data ?? null) as UserSelf | null;
+        setUser(self);
+        if (self?.id != null) {
+          localStorage.setItem('userId', String(self.id));
+        }
       }
 
       const dashboardResult = results[1];
@@ -265,6 +271,7 @@ export function AppNavigation() {
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('adminToken');
+    localStorage.removeItem('userId');
     navigate('/login', { replace: true });
   };
 

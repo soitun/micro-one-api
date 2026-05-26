@@ -1228,6 +1228,7 @@ func userToMap(user *biz.User) map[string]interface{} {
 		"email":        user.Email,
 		"group":        user.Group,
 		"status":       user.Status,
+		"role":         user.Role,
 	}
 }
 

@@ -28,6 +28,7 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
+      localStorage.removeItem('userId');
       toast.error('Session expired. Please sign in again.');
       window.location.href = '/login';
     }
@@ -48,6 +49,10 @@ adminApiClient.interceptors.request.use(
     const adminToken = localStorage.getItem('adminToken');
     if (adminToken) {
       config.headers.Authorization = `Bearer ${adminToken}`;
+    }
+    const operatorId = localStorage.getItem('userId');
+    if (operatorId && operatorId !== '0') {
+      config.headers['X-Operator-User-Id'] = operatorId;
     }
     return config;
   },
