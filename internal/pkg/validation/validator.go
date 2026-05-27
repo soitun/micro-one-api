@@ -135,12 +135,12 @@ func ValidateMessage(msg relayprovider.Message, index int) error {
 		return NewValidationError(field+".role", "role is required")
 	}
 
-	if !validRoles[msg.Role] {
+	if !validRoles[msg.Role] && msg.Role != "tool" {
 		return NewValidationError(field+".role",
-			fmt.Sprintf("invalid role '%s' (must be one of: system, user, assistant, function)", msg.Role))
+			fmt.Sprintf("invalid role '%s' (must be one of: system, user, assistant, function, tool)", msg.Role))
 	}
 
-	if msg.Content == "" {
+	if msg.Content == "" && len(msg.ToolCalls) == 0 {
 		return NewValidationError(field+".content", "content is required")
 	}
 

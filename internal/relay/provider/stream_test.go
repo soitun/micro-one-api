@@ -135,6 +135,60 @@ func TestOpenAIProvider_ChatCompletionsStreamParsesUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIProvider_ChatCompletionsStreamPassesToolCallDeltas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunks := []string{
+			`data: {"id":"chunk1","object":"chat.completion.chunk","created":1234567890,"model":"mimo-v2.5","choices":[{"index":0,"delta":{"reasoning_content":"Need weather.","tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"get_current_weather","arguments":"{\"location\":"}}]},"finish_reason":null}]}`,
+			`data: {"id":"chunk2","object":"chat.completion.chunk","created":1234567890,"model":"mimo-v2.5","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Beijing\"}"}}]},"finish_reason":null}]}`,
+			`data: [DONE]`,
+		}
+		for _, chunk := range chunks {
+			w.Write([]byte(chunk + "\n\n"))
+			w.(http.Flusher).Flush()
+		}
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenAIProvider(server.URL, "test-api-key", 30*time.Second)
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider() error = %v", err)
+	}
+
+	chunkChan, err := provider.ChatCompletionsStream(context.Background(), &ChatCompletionsRequest{
+		Model:    "mimo-v2.5",
+		Messages: []Message{{Role: "user", Content: "北京天气怎么样"}},
+		Stream:   true,
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletionsStream() error = %v", err)
+	}
+
+	var chunks []StreamChunk
+	for chunk := range chunkChan {
+		chunks = append(chunks, chunk)
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("chunk count = %d, want 2", len(chunks))
+	}
+	firstDelta := chunks[0].Choices[0].Delta
+	if firstDelta.ReasoningContent != "Need weather." {
+		t.Fatalf("reasoning_content mismatch: %#v", firstDelta.ReasoningContent)
+	}
+	if len(firstDelta.ToolCalls) != 1 {
+		t.Fatalf("tool_calls were not parsed: %#v", firstDelta.ToolCalls)
+	}
+	if firstDelta.ToolCalls[0].Index == nil || *firstDelta.ToolCalls[0].Index != 0 {
+		t.Fatalf("tool_call index mismatch: %#v", firstDelta.ToolCalls[0].Index)
+	}
+	if firstDelta.ToolCalls[0].ID != "call_weather" || firstDelta.ToolCalls[0].Function.Name != "get_current_weather" {
+		t.Fatalf("tool_call mismatch: %#v", firstDelta.ToolCalls[0])
+	}
+	if chunks[1].Choices[0].Delta.ToolCalls[0].Function.Arguments != `"Beijing"}` {
+		t.Fatalf("tool_call arguments delta mismatch: %#v", chunks[1].Choices[0].Delta.ToolCalls[0].Function.Arguments)
+	}
+}
+
 func TestOpenAIProvider_ChatCompletionsStream_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -221,6 +275,111 @@ func TestOpenAIProvider_ChatCompletions(t *testing.T) {
 	}
 	if resp.Usage.TotalTokens != 13 {
 		t.Fatalf("unexpected total tokens: %d", resp.Usage.TotalTokens)
+	}
+}
+
+func TestOpenAIProvider_ChatCompletionsPassesBackReasoningContentWithToolCalls(t *testing.T) {
+	var gotBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ChatCompletionsResponse{
+			ID:      "chatcmpl-test",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "mimo-v2.5",
+			Choices: []Choice{{
+				Index:        0,
+				Message:      Message{Role: "assistant", Content: "ok"},
+				FinishReason: "stop",
+			}},
+			Usage: Usage{TotalTokens: 13},
+		})
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenAIProvider(server.URL, "test-api-key", 30*time.Second)
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider() error = %v", err)
+	}
+
+	_, err = provider.ChatCompletions(context.Background(), &ChatCompletionsRequest{
+		Model: "mimo-v2.5",
+		Tools: []map[string]interface{}{
+			{
+				"type": "function",
+				"function": map[string]interface{}{
+					"name":        "get_current_weather",
+					"description": "Get current weather.",
+					"parameters": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"location": map[string]interface{}{"type": "string"},
+						},
+					},
+				},
+			},
+		},
+		ToolChoice: "auto",
+		Messages: []Message{
+			{Role: "user", Content: "北京天气怎么样"},
+			{
+				Role:             "assistant",
+				Content:          "",
+				ReasoningContent: "Need to call the weather tool for Beijing.",
+				ToolCalls: []ToolCall{{
+					ID:   "call_weather_beijing",
+					Type: "function",
+					Function: ToolCallFunction{
+						Name:      "get_current_weather",
+						Arguments: `{"location":"Beijing"}`,
+					},
+				}},
+			},
+			{Role: "tool", Content: "Sunny 25C", ToolCallID: "call_weather_beijing"},
+			{Role: "user", Content: "那上海呢？"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+
+	messages, ok := gotBody["messages"].([]interface{})
+	if !ok || len(messages) != 4 {
+		t.Fatalf("messages mismatch: %#v", gotBody["messages"])
+	}
+	tools, ok := gotBody["tools"].([]interface{})
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools were not passed through: %#v", gotBody["tools"])
+	}
+	if gotBody["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice was not passed through: %#v", gotBody["tool_choice"])
+	}
+	assistantMessage, ok := messages[1].(map[string]interface{})
+	if !ok {
+		t.Fatalf("assistant message mismatch: %#v", messages[1])
+	}
+	if assistantMessage["reasoning_content"] != "Need to call the weather tool for Beijing." {
+		t.Fatalf("reasoning_content was not passed back: %#v", assistantMessage)
+	}
+	toolCalls, ok := assistantMessage["tool_calls"].([]interface{})
+	if !ok || len(toolCalls) != 1 {
+		t.Fatalf("tool_calls were not passed back: %#v", assistantMessage["tool_calls"])
+	}
+	toolCall := toolCalls[0].(map[string]interface{})
+	if toolCall["id"] != "call_weather_beijing" || toolCall["type"] != "function" {
+		t.Fatalf("tool_call metadata mismatch: %#v", toolCall)
+	}
+	function := toolCall["function"].(map[string]interface{})
+	if function["name"] != "get_current_weather" || function["arguments"] != `{"location":"Beijing"}` {
+		t.Fatalf("tool_call function mismatch: %#v", function)
+	}
+	toolMessage := messages[2].(map[string]interface{})
+	if toolMessage["tool_call_id"] != "call_weather_beijing" {
+		t.Fatalf("tool message tool_call_id mismatch: %#v", toolMessage)
 	}
 }
 

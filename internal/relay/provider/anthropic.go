@@ -288,24 +288,10 @@ func (p *AnthropicProvider) ChatCompletionsStream(ctx context.Context, req *Chat
 					Object:  "chat.completion.chunk",
 					Created: time.Now().Unix(),
 					Model:   req.Model,
-					Choices: []struct {
-						Index int `json:"index"`
-						Delta struct {
-							Role             string `json:"role,omitempty"`
-							Content          string `json:"content,omitempty"`
-							ReasoningContent any    `json:"reasoning_content,omitempty"`
-						} `json:"delta"`
-						FinishReason *string `json:"finish_reason,omitempty"`
-					}{
+					Choices: []StreamChoice{
 						{
 							Index: 0,
-							Delta: struct {
-								Role             string `json:"role,omitempty"`
-								Content          string `json:"content,omitempty"`
-								ReasoningContent any    `json:"reasoning_content,omitempty"`
-							}{
-								Content: event.Delta.Text,
-							},
+							Delta: StreamDelta{Content: event.Delta.Text},
 						},
 					},
 				}

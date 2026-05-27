@@ -69,6 +69,8 @@ type ChatCompletionsRequest struct {
 	Stream      bool      `json:"stream"`
 	Temperature *float64  `json:"temperature,omitempty"`
 	MaxTokens   *int      `json:"max_tokens,omitempty"`
+	Tools       any       `json:"tools,omitempty"`
+	ToolChoice  any       `json:"tool_choice,omitempty"`
 }
 
 // Message represents a chat message.
@@ -77,9 +79,29 @@ type ChatCompletionsRequest struct {
 // (e.g. DeepSeek-R1, Xiaomi MiMo). The relay does not interpret it; clients that
 // receive it should echo it back on the next turn for upstreams that require it.
 type Message struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent any    `json:"reasoning_content,omitempty"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content"`
+	ReasoningContent any        `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string     `json:"tool_call_id,omitempty"`
+}
+
+type ToolCall struct {
+	ID       string           `json:"id,omitempty"`
+	Type     string           `json:"type,omitempty"`
+	Function ToolCallFunction `json:"function,omitempty"`
+}
+
+type ToolCallFunction struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+type ToolCallDelta struct {
+	Index    *int             `json:"index,omitempty"`
+	ID       string           `json:"id,omitempty"`
+	Type     string           `json:"type,omitempty"`
+	Function ToolCallFunction `json:"function,omitempty"`
 }
 
 // ChatCompletionsResponse represents a standardized chat completions response
@@ -108,20 +130,25 @@ type Usage struct {
 
 // StreamChunk represents a single SSE chunk from streaming response
 type StreamChunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index int `json:"index"`
-		Delta struct {
-			Role             string `json:"role,omitempty"`
-			Content          string `json:"content,omitempty"`
-			ReasoningContent any    `json:"reasoning_content,omitempty"`
-		} `json:"delta"`
-		FinishReason *string `json:"finish_reason,omitempty"`
-	} `json:"choices"`
-	Usage Usage `json:"usage,omitempty"`
+	ID      string         `json:"id"`
+	Object  string         `json:"object"`
+	Created int64          `json:"created"`
+	Model   string         `json:"model"`
+	Choices []StreamChoice `json:"choices"`
+	Usage   Usage          `json:"usage,omitempty"`
+}
+
+type StreamChoice struct {
+	Index        int         `json:"index"`
+	Delta        StreamDelta `json:"delta"`
+	FinishReason *string     `json:"finish_reason,omitempty"`
+}
+
+type StreamDelta struct {
+	Role             string          `json:"role,omitempty"`
+	Content          string          `json:"content,omitempty"`
+	ReasoningContent any             `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCallDelta `json:"tool_calls,omitempty"`
 }
 
 // OpenAIProvider implements the Provider interface for OpenAI-compatible APIs
