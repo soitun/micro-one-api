@@ -137,8 +137,11 @@ export function AdminChannelsPage() {
 
   const toggleStatusMutation = useMutation({
     mutationFn: async ({ id, currentStatus }: { id: string; currentStatus: number }) => {
-      const newStatus = currentStatus === 1 ? 2 : 1;
-      await adminApiClient.put(`/channel/${id}`, { status: newStatus });
+      if (currentStatus === 1) {
+        await adminApiClient.post(`/channel/disable/${id}`);
+      } else {
+        await adminApiClient.post(`/channel/enable/${id}`);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-channels'] });

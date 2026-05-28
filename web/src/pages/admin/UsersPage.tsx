@@ -111,8 +111,11 @@ export function AdminUsersPage() {
 
   const toggleStatusMutation = useMutation({
     mutationFn: async ({ id, currentStatus }: { id: string; currentStatus: number }) => {
-      const newStatus = currentStatus === 1 ? 2 : 1;
-      await adminApiClient.put(`/user/${id}`, { status: newStatus });
+      if (currentStatus === 1) {
+        await adminApiClient.post(`/user/disable/${id}`);
+      } else {
+        await adminApiClient.post(`/user/enable/${id}`);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-users'] });
