@@ -15,7 +15,15 @@ type PricingConfig struct {
 	GroupRatios      map[string]float64
 	ModelRatios      map[string]float64
 	CompletionRatios map[string]float64
+	ModelPrices      map[string]ModelPrice
+	QuotaPerUnit     float64
 	PricingStore     PricingConfigStore
+}
+
+type ModelPrice struct {
+	InputPrice     float64  `json:"input_price"`
+	OutputPrice    float64  `json:"output_price"`
+	CacheReadPrice *float64 `json:"cache_read_price,omitempty"`
 }
 
 type BillingUsecase struct {
@@ -27,6 +35,8 @@ type BillingUsecase struct {
 	groupRatios      map[string]float64
 	modelRatios      map[string]float64
 	completionRatios map[string]float64
+	modelPrices      map[string]ModelPrice
+	quotaPerUnit     float64
 }
 
 func NewBillingUsecase(
@@ -61,6 +71,8 @@ func NewBillingUsecaseWithPricing(
 		groupRatios:      groupRatios,
 		modelRatios:      normalizePositiveRatios(pricing.ModelRatios),
 		completionRatios: normalizePositiveRatios(pricing.CompletionRatios),
+		modelPrices:      normalizeModelPrices(pricing.ModelPrices),
+		quotaPerUnit:     normalizeQuotaPerUnit(pricing.QuotaPerUnit),
 	}
 }
 
@@ -80,7 +92,7 @@ func (uc *BillingUsecase) ReserveQuota(ctx context.Context, userID, requestID st
 		return nil, fmt.Errorf("get account snapshot: %w", err)
 	}
 
-	cost := uc.calculateCost(ctx, account.Group, model, estimatedTokens, 0)
+	cost := uc.calculateCost(ctx, account.Group, model, estimatedTokens, 0, 0)
 
 	if cost <= 0 {
 		cost = 1
@@ -131,6 +143,7 @@ type LedgerUsage struct {
 	Endpoint         string
 	PromptTokens     int64
 	CompletionTokens int64
+	CacheReadTokens  int64
 	ElapsedTime      int64
 	IsStream         bool
 }
@@ -495,10 +508,23 @@ func (uc *BillingUsecase) getCompletionRatio(pricing PricingConfig, model string
 	return 1.0
 }
 
-func (uc *BillingUsecase) calculateCost(ctx context.Context, group, model string, promptTokens, completionTokens int64) int64 {
+func (uc *BillingUsecase) calculateCost(ctx context.Context, group, model string, promptTokens, completionTokens, cacheReadTokens int64) int64 {
 	pricing := uc.pricingConfig(ctx)
 	prompt := float64(maxInt64(promptTokens, 0))
 	completion := float64(maxInt64(completionTokens, 0))
+	if price, ok := pricing.ModelPrices[model]; ok {
+		cacheRead := float64(minInt64(maxInt64(cacheReadTokens, 0), maxInt64(promptTokens, 0)))
+		input := prompt - cacheRead
+		cacheReadPrice := price.InputPrice
+		if price.CacheReadPrice != nil {
+			cacheReadPrice = *price.CacheReadPrice
+		}
+		cost := (input*price.InputPrice + cacheRead*cacheReadPrice + completion*price.OutputPrice) * normalizeQuotaPerUnit(pricing.QuotaPerUnit) * uc.getGroupRatio(pricing, group)
+		if cost <= 0 {
+			return 0
+		}
+		return int64(math.Ceil(cost))
+	}
 	cost := (prompt + completion*uc.getCompletionRatio(pricing, model)) * uc.getModelRatio(pricing, model) * uc.getGroupRatio(pricing, group)
 	if cost <= 0 {
 		return 0
@@ -507,10 +533,10 @@ func (uc *BillingUsecase) calculateCost(ctx context.Context, group, model string
 }
 
 func (uc *BillingUsecase) calculateCostWithUsage(ctx context.Context, group, model string, actualTokens int64, usage LedgerUsage) int64 {
-	if usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
-		return uc.calculateCost(ctx, group, model, usage.PromptTokens, usage.CompletionTokens)
+	if usage.PromptTokens > 0 || usage.CompletionTokens > 0 || usage.CacheReadTokens > 0 {
+		return uc.calculateCost(ctx, group, model, usage.PromptTokens, usage.CompletionTokens, usage.CacheReadTokens)
 	}
-	return uc.calculateCost(ctx, group, model, actualTokens, 0)
+	return uc.calculateCost(ctx, group, model, actualTokens, 0, 0)
 }
 
 func (uc *BillingUsecase) pricingConfig(ctx context.Context) PricingConfig {
@@ -518,6 +544,8 @@ func (uc *BillingUsecase) pricingConfig(ctx context.Context) PricingConfig {
 		GroupRatios:      uc.groupRatios,
 		ModelRatios:      uc.modelRatios,
 		CompletionRatios: uc.completionRatios,
+		ModelPrices:      uc.modelPrices,
+		QuotaPerUnit:     uc.quotaPerUnit,
 	}
 	if uc.pricingStore == nil {
 		return config
@@ -535,6 +563,12 @@ func (uc *BillingUsecase) pricingConfig(ctx context.Context) PricingConfig {
 	if len(dynamic.CompletionRatios) > 0 {
 		config.CompletionRatios = normalizePositiveRatios(dynamic.CompletionRatios)
 	}
+	if len(dynamic.ModelPrices) > 0 {
+		config.ModelPrices = normalizeModelPrices(dynamic.ModelPrices)
+	}
+	if dynamic.QuotaPerUnit > 0 {
+		config.QuotaPerUnit = normalizeQuotaPerUnit(dynamic.QuotaPerUnit)
+	}
 	return config
 }
 
@@ -551,8 +585,48 @@ func normalizePositiveRatios(input map[string]float64) map[string]float64 {
 	return out
 }
 
+func normalizeModelPrices(input map[string]ModelPrice) map[string]ModelPrice {
+	if len(input) == 0 {
+		return map[string]ModelPrice{}
+	}
+	out := make(map[string]ModelPrice, len(input))
+	for model, price := range input {
+		if model == "" {
+			continue
+		}
+		if price.InputPrice < 0 {
+			price.InputPrice = 0
+		}
+		if price.OutputPrice < 0 {
+			price.OutputPrice = 0
+		}
+		if price.CacheReadPrice != nil && *price.CacheReadPrice < 0 {
+			zero := 0.0
+			price.CacheReadPrice = &zero
+		}
+		if price.InputPrice > 0 || price.OutputPrice > 0 || price.CacheReadPrice != nil {
+			out[model] = price
+		}
+	}
+	return out
+}
+
+func normalizeQuotaPerUnit(value float64) float64 {
+	if value > 0 {
+		return value
+	}
+	return 500000
+}
+
 func maxInt64(a, b int64) int64 {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt64(a, b int64) int64 {
+	if a < b {
 		return a
 	}
 	return b

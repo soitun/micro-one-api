@@ -1135,6 +1135,7 @@ var oneAPIOptionDefaults = map[string]string{
 	"QuotaRemindThreshold":           "0",
 	"PreConsumedQuota":               "0",
 	"ModelRatio":                     "{}",
+	"ModelPrice":                     "{}",
 	"GroupRatio":                     "{}",
 	"CompletionRatio":                "{}",
 	"TopUpLink":                      "",

@@ -48,6 +48,7 @@ func (s *BillingService) CommitQuota(ctx context.Context, req *billingv1.CommitQ
 		Endpoint:         req.Endpoint,
 		PromptTokens:     req.PromptTokens,
 		CompletionTokens: req.CompletionTokens,
+		CacheReadTokens:  req.CacheReadTokens,
 		ElapsedTime:      req.ElapsedTime,
 		IsStream:         req.IsStream,
 	})

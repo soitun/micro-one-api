@@ -58,6 +58,7 @@ message CommitQuotaRequest {
   int64 completion_tokens = 8;
   int64 elapsed_time = 9;
   bool is_stream = 10;
+  int64 cache_read_tokens = 11;
 }
 
 message CommitQuotaResponse {

@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -89,6 +90,7 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 	srv.HandleFunc("/dashboard", handleAdminPage)
 	srv.HandleFunc("/tokens", handleAdminPage)
 	srv.HandleFunc("/usage", handleAdminPage)
+	srv.HandleFunc("/pricing", handleAdminPage)
 	srv.HandleFunc("/recharge", handleAdminPage)
 	srv.HandleFunc("/redeem", handleAdminPage)
 	srv.HandleFunc("/orders", handleAdminPage)
@@ -125,6 +127,9 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 				"display_in_currency":  false,
 			},
 		})
+	})
+	srv.HandleFunc("/api/pricing", func(w http.ResponseWriter, r *http.Request) {
+		handleReadonlyPricing(w, r, svc)
 	})
 	srv.HandleFunc("/api/notice", handleContentRoute(adminAuth, svc, "Notice"))
 	srv.HandleFunc("/api/about", handleContentRoute(adminAuth, svc, "About"))
@@ -422,7 +427,7 @@ func handleAdminSummary(w http.ResponseWriter, r *http.Request, svc *service.Adm
 		"payment_orders":  paymentOrders.GetOrders(),
 		"usage_stats":     stats,
 		"model_catalog":   oneAPIChannelModelCatalog(),
-		"pricing_options": optionsByKey(options, "ModelRatio", "CompletionRatio", "GroupRatio", "QuotaPerUnit"),
+		"pricing_options": optionsByKey(options, "ModelRatio", "CompletionRatio", "ModelPrice", "GroupRatio", "QuotaPerUnit"),
 		"payment_summary": paymentSummaryFromOrders(paymentOrders),
 	}))
 }
@@ -455,6 +460,163 @@ func optionsByKey(options []service.OneAPIOption, keys ...string) map[string]str
 		}
 	}
 	return result
+}
+
+type readonlyPricingRow struct {
+	Model          string   `json:"model"`
+	InputPrice     *float64 `json:"input_price,omitempty"`
+	OutputPrice    *float64 `json:"output_price,omitempty"`
+	CacheReadPrice *float64 `json:"cache_read_price,omitempty"`
+}
+
+type readonlyModelPrice struct {
+	InputPrice     *float64 `json:"input_price"`
+	OutputPrice    *float64 `json:"output_price"`
+	CacheReadPrice *float64 `json:"cache_read_price"`
+}
+
+const readonlyPricingMTok = 1000000
+
+func handleReadonlyPricing(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	if svc == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"message": "",
+			"data": map[string]interface{}{
+				"prices":         []readonlyPricingRow{},
+				"quota_per_unit": float64(500000),
+				"unit":           "1M tokens",
+			},
+		})
+		return
+	}
+	options, err := svc.ListOneAPIOptions(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	optionMap := optionsByKey(options, "ModelPrice", "ModelRatio", "CompletionRatio", "QuotaPerUnit")
+	quotaPerUnit := parseReadonlyFloatOption(optionMap["QuotaPerUnit"])
+	if quotaPerUnit <= 0 {
+		quotaPerUnit = 500000
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "",
+		"data": map[string]interface{}{
+			"prices":         readonlyPricingRows(optionMap, quotaPerUnit),
+			"quota_per_unit": quotaPerUnit,
+			"unit":           "1M tokens",
+		},
+	})
+}
+
+func readonlyPricingRows(options map[string]string, quotaPerUnit float64) []readonlyPricingRow {
+	modelPrices := parseReadonlyModelPrices(options["ModelPrice"])
+	modelRatios := parseReadonlyRatioMap(options["ModelRatio"])
+	completionRatios := parseReadonlyRatioMap(options["CompletionRatio"])
+	models := map[string]struct{}{}
+	for model := range modelPrices {
+		models[model] = struct{}{}
+	}
+	for model := range modelRatios {
+		models[model] = struct{}{}
+	}
+	for model := range completionRatios {
+		models[model] = struct{}{}
+	}
+	names := make([]string, 0, len(models))
+	for model := range models {
+		names = append(names, model)
+	}
+	sort.Strings(names)
+
+	rows := make([]readonlyPricingRow, 0, len(names))
+	for _, model := range names {
+		price := modelPrices[model]
+		row := readonlyPricingRow{Model: model}
+		if price.InputPrice != nil {
+			row.InputPrice = floatPtr(*price.InputPrice * readonlyPricingMTok)
+		} else if ratio, ok := modelRatios[model]; ok {
+			row.InputPrice = floatPtr((ratio / quotaPerUnit) * readonlyPricingMTok)
+		}
+		if price.OutputPrice != nil {
+			row.OutputPrice = floatPtr(*price.OutputPrice * readonlyPricingMTok)
+		} else if ratio, ok := modelRatios[model]; ok {
+			row.OutputPrice = floatPtr(((ratio * ratioOrDefault(completionRatios[model], 1)) / quotaPerUnit) * readonlyPricingMTok)
+		}
+		if price.CacheReadPrice != nil {
+			row.CacheReadPrice = floatPtr(*price.CacheReadPrice * readonlyPricingMTok)
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func parseReadonlyModelPrices(raw string) map[string]readonlyModelPrice {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]readonlyModelPrice{}
+	}
+	values := map[string]readonlyModelPrice{}
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return map[string]readonlyModelPrice{}
+	}
+	out := make(map[string]readonlyModelPrice, len(values))
+	for model, price := range values {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		out[model] = price
+	}
+	return out
+}
+
+func parseReadonlyRatioMap(raw string) map[string]float64 {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]float64{}
+	}
+	values := map[string]float64{}
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return map[string]float64{}
+	}
+	out := make(map[string]float64, len(values))
+	for model, ratio := range values {
+		model = strings.TrimSpace(model)
+		if model != "" && ratio >= 0 {
+			out[model] = ratio
+		}
+	}
+	return out
+}
+
+func parseReadonlyFloatOption(raw string) float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	var value float64
+	if err := json.Unmarshal([]byte(raw), &value); err == nil {
+		return value
+	}
+	value, _ = strconv.ParseFloat(raw, 64)
+	return value
+}
+
+func ratioOrDefault(value, fallback float64) float64 {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func floatPtr(value float64) *float64 {
+	return &value
 }
 
 func paymentSummaryFromOrders(resp *billingv1.ListPaymentOrdersResponse) map[string]interface{} {
