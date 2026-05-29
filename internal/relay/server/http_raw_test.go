@@ -536,12 +536,12 @@ func TestExtractRawUsageFindsNestedResponsesUsage(t *testing.T) {
 		"type":"response.completed",
 		"response":{
 			"id":"resp_test_123",
-			"usage":{"input_tokens":21,"output_tokens":9,"total_tokens":30}
+			"usage":{"input_tokens":21,"output_tokens":9,"total_tokens":30,"input_tokens_details":{"cached_tokens":8}}
 		}
 	}`), 100)
 
-	if usage.TotalTokens != 30 || usage.PromptTokens != 21 || usage.CompletionTokens != 9 {
-		t.Fatalf("usage = total:%d prompt:%d completion:%d", usage.TotalTokens, usage.PromptTokens, usage.CompletionTokens)
+	if usage.TotalTokens != 30 || usage.PromptTokens != 21 || usage.CompletionTokens != 9 || usage.CacheReadTokens != 8 {
+		t.Fatalf("usage = total:%d prompt:%d completion:%d cache:%d", usage.TotalTokens, usage.PromptTokens, usage.CompletionTokens, usage.CacheReadTokens)
 	}
 }
 

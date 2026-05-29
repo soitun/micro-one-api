@@ -471,7 +471,7 @@ func TestAdminHTTPPageIsServed(t *testing.T) {
 
 func TestAdminHTTPPageSPARouteFallback(t *testing.T) {
 	srv := NewHTTPServer(":0", nil)
-	for _, path := range []string{"/", "/login", "/register", "/dashboard", "/tokens", "/redeem", "/admin/options"} {
+	for _, path := range []string{"/", "/login", "/register", "/dashboard", "/tokens", "/pricing", "/redeem", "/admin/options"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -480,6 +480,37 @@ func TestAdminHTTPPageSPARouteFallback(t *testing.T) {
 		}
 		if !strings.Contains(rec.Body.String(), `<div id="root">`) {
 			t.Fatalf("path %s did not fall back to SPA shell: %s", path, rec.Body.String())
+		}
+	}
+}
+
+func TestReadonlyPricingReturnsModelPriceRows(t *testing.T) {
+	srv := newAdminHTTPOptionTestServer(&adminHTTPSystemOptionsStore{values: map[string]string{
+		"ModelPrice":      `{"gpt-5.5":{"input_price":0.00000065,"output_price":0.0000039,"cache_read_price":0.000001}}`,
+		"ModelRatio":      `{"legacy-model":0.5}`,
+		"CompletionRatio": `{"legacy-model":2}`,
+		"QuotaPerUnit":    `500000`,
+	}})
+	req := httptest.NewRequest(http.MethodGet, "/api/pricing", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`"model":"gpt-5.5"`,
+		`"input_price":0.65`,
+		`"output_price":3.9`,
+		`"cache_read_price":1`,
+		`"model":"legacy-model"`,
+		`"input_price":1`,
+		`"output_price":2`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("pricing response missing %q: %s", want, body)
 		}
 	}
 }

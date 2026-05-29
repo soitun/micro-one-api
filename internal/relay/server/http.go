@@ -353,6 +353,7 @@ func (s *HTTPServer) handleResponsesCreateLike(w http.ResponseWriter, r *http.Re
 							Quota:            actualUsage.TotalTokens,
 							PromptTokens:     actualUsage.PromptTokens,
 							CompletionTokens: actualUsage.CompletionTokens,
+							CacheReadTokens:  actualUsage.CacheReadTokens,
 							ChannelID:        ch.ID,
 							ElapsedTime:      time.Since(startedAt).Milliseconds(),
 							IsStream:         true,
@@ -386,6 +387,7 @@ func (s *HTTPServer) handleResponsesCreateLike(w http.ResponseWriter, r *http.Re
 				Quota:            actualUsage.TotalTokens,
 				PromptTokens:     actualUsage.PromptTokens,
 				CompletionTokens: actualUsage.CompletionTokens,
+				CacheReadTokens:  actualUsage.CacheReadTokens,
 				ChannelID:        ch.ID,
 				ElapsedTime:      time.Since(startedAt).Milliseconds(),
 				IsStream:         true,
@@ -422,6 +424,7 @@ func (s *HTTPServer) handleResponsesCreateLike(w http.ResponseWriter, r *http.Re
 						Quota:            usage.TotalTokens,
 						PromptTokens:     usage.PromptTokens,
 						CompletionTokens: usage.CompletionTokens,
+						CacheReadTokens:  usage.CacheReadTokens,
 						ChannelID:        ch.ID,
 						ElapsedTime:      time.Since(startedAt).Milliseconds(),
 						IsStream:         false,
@@ -450,6 +453,7 @@ func (s *HTTPServer) handleResponsesCreateLike(w http.ResponseWriter, r *http.Re
 			Quota:            usage.TotalTokens,
 			PromptTokens:     usage.PromptTokens,
 			CompletionTokens: usage.CompletionTokens,
+			CacheReadTokens:  usage.CacheReadTokens,
 			ChannelID:        ch.ID,
 			ElapsedTime:      time.Since(startedAt).Milliseconds(),
 			IsStream:         false,
@@ -572,6 +576,7 @@ func (s *HTTPServer) forwardResponsesToStoredRoute(w http.ResponseWriter, r *htt
 						Quota:            actualUsage.TotalTokens,
 						PromptTokens:     actualUsage.PromptTokens,
 						CompletionTokens: actualUsage.CompletionTokens,
+						CacheReadTokens:  actualUsage.CacheReadTokens,
 						ChannelID:        route.Channel.ID,
 						ElapsedTime:      time.Since(startedAt).Milliseconds(),
 						IsStream:         true,
@@ -606,6 +611,7 @@ func (s *HTTPServer) forwardResponsesToStoredRoute(w http.ResponseWriter, r *htt
 			Quota:            actualUsage.TotalTokens,
 			PromptTokens:     actualUsage.PromptTokens,
 			CompletionTokens: actualUsage.CompletionTokens,
+			CacheReadTokens:  actualUsage.CacheReadTokens,
 			ChannelID:        route.Channel.ID,
 			ElapsedTime:      time.Since(startedAt).Milliseconds(),
 			IsStream:         true,
@@ -641,6 +647,7 @@ func (s *HTTPServer) forwardResponsesToStoredRoute(w http.ResponseWriter, r *htt
 					Quota:            usage.TotalTokens,
 					PromptTokens:     usage.PromptTokens,
 					CompletionTokens: usage.CompletionTokens,
+					CacheReadTokens:  usage.CacheReadTokens,
 					ChannelID:        route.Channel.ID,
 					ElapsedTime:      time.Since(startedAt).Milliseconds(),
 					IsStream:         false,
@@ -675,6 +682,7 @@ func (s *HTTPServer) forwardResponsesToStoredRoute(w http.ResponseWriter, r *htt
 		Quota:            usage.TotalTokens,
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
+		CacheReadTokens:  usage.CacheReadTokens,
 		ChannelID:        route.Channel.ID,
 		ElapsedTime:      time.Since(startedAt).Milliseconds(),
 		IsStream:         false,
@@ -865,6 +873,7 @@ func (s *HTTPServer) handleOneAPIProxy(w http.ResponseWriter, r *http.Request) {
 		Quota:            totalTokens,
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
+		CacheReadTokens:  usage.CacheReadTokens,
 		ChannelID:        channelReply.Channel.Id,
 		ElapsedTime:      time.Since(startedAt).Milliseconds(),
 		IsStream:         false,
@@ -977,6 +986,7 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 			Quota:            actualTokens,
 			PromptTokens:     int64(resp.Usage.PromptTokens),
 			CompletionTokens: int64(resp.Usage.CompletionTokens),
+			CacheReadTokens:  cacheReadTokensFromProviderUsage(resp.Usage),
 			ChannelID:        ch.ID,
 			ElapsedTime:      time.Since(startedAt).Milliseconds(),
 			IsStream:         false,
@@ -1020,6 +1030,7 @@ func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Requ
 	totalTokens := int64(0)
 	promptTokens := int64(0)
 	completionTokens := int64(0)
+	cacheReadTokens := int64(0)
 	estimatedTokens := int64(0)
 	streamError := false
 
@@ -1028,6 +1039,7 @@ func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Requ
 			totalTokens = int64(chunk.Usage.TotalTokens)
 			promptTokens = int64(chunk.Usage.PromptTokens)
 			completionTokens = int64(chunk.Usage.CompletionTokens)
+			cacheReadTokens = cacheReadTokensFromProviderUsage(chunk.Usage)
 		}
 		for _, choice := range chunk.Choices {
 			estimatedTokens += int64(len(choice.Delta.Content) / 4)
@@ -1057,6 +1069,7 @@ func (s *HTTPServer) handleStreamingResponse(w http.ResponseWriter, r *http.Requ
 		logInput.Quota = totalTokens
 		logInput.PromptTokens = promptTokens
 		logInput.CompletionTokens = completionTokens
+		logInput.CacheReadTokens = cacheReadTokens
 		logInput.ElapsedTime = time.Since(startedAt).Milliseconds()
 		if logInput.Endpoint == "" {
 			logInput.Endpoint = "/v1/chat/completions"
@@ -1081,6 +1094,7 @@ type usageLogInput struct {
 	Quota            int64
 	PromptTokens     int64
 	CompletionTokens int64
+	CacheReadTokens  int64
 	ChannelID        int64
 	ElapsedTime      int64
 	IsStream         bool
@@ -1563,6 +1577,7 @@ func (s *HTTPServer) commitQuota(ctx context.Context, reservationID string, actu
 		req.Endpoint = detail.Endpoint
 		req.PromptTokens = detail.PromptTokens
 		req.CompletionTokens = detail.CompletionTokens
+		req.CacheReadTokens = detail.CacheReadTokens
 		req.ElapsedTime = detail.ElapsedTime
 		req.IsStream = detail.IsStream
 	}
@@ -1639,6 +1654,20 @@ func (s *HTTPServer) estimateTokens(req *relayprovider.ChatCompletionsRequest) i
 func (s *HTTPServer) calculateActualTokens(resp *relayprovider.ChatCompletionsResponse) int64 {
 	// resp.Usage 不是指针，是值类型
 	return int64(resp.Usage.TotalTokens)
+}
+
+func cacheReadTokensFromProviderUsage(usage relayprovider.Usage) int64 {
+	for _, value := range []int{
+		usage.PromptTokensDetails.CacheReadTokens,
+		usage.PromptTokensDetails.CachedTokens,
+		usage.InputTokensDetails.CacheReadTokens,
+		usage.InputTokensDetails.CachedTokens,
+	} {
+		if value > 0 {
+			return int64(value)
+		}
+	}
+	return 0
 }
 
 func extractRawModel(body []byte) string {
@@ -1733,6 +1762,7 @@ func extractResponseID(body []byte) string {
 type rawUsage struct {
 	PromptTokens     int64
 	CompletionTokens int64
+	CacheReadTokens  int64
 	TotalTokens      int64
 }
 
@@ -1754,21 +1784,22 @@ func extractRawUsageValue(value interface{}) rawUsage {
 		usage = mergeRawUsage(usage, rawUsage{
 			PromptTokens:     numberField(typed, "prompt_tokens", "input_tokens"),
 			CompletionTokens: numberField(typed, "completion_tokens", "output_tokens"),
+			CacheReadTokens:  cacheReadTokensFromUsageMap(typed),
 			TotalTokens:      numberField(typed, "total_tokens"),
 		})
-		if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+		if hasRawUsage(usage) {
 			return usage
 		}
 		for _, nested := range typed {
 			usage = extractRawUsageValue(nested)
-			if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+			if hasRawUsage(usage) {
 				return usage
 			}
 		}
 	case []interface{}:
 		for _, item := range typed {
 			usage := extractRawUsageValue(item)
-			if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+			if hasRawUsage(usage) {
 				return usage
 			}
 		}
@@ -1782,6 +1813,9 @@ func mergeRawUsage(primary, fallback rawUsage) rawUsage {
 	}
 	if primary.CompletionTokens == 0 {
 		primary.CompletionTokens = fallback.CompletionTokens
+	}
+	if primary.CacheReadTokens == 0 {
+		primary.CacheReadTokens = fallback.CacheReadTokens
 	}
 	if primary.TotalTokens == 0 {
 		primary.TotalTokens = fallback.TotalTokens
@@ -1807,6 +1841,26 @@ func normalizeRawUsageWithFallback(usage rawUsage, fallback rawUsage) rawUsage {
 		usage.CompletionTokens = fallback.CompletionTokens
 	}
 	return usage
+}
+
+func hasRawUsage(usage rawUsage) bool {
+	return usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 || usage.CacheReadTokens > 0
+}
+
+func cacheReadTokensFromUsageMap(m map[string]interface{}) int64 {
+	if value := numberField(m, "cache_read_tokens", "cached_tokens"); value != 0 {
+		return value
+	}
+	for _, key := range []string{"prompt_tokens_details", "input_tokens_details"} {
+		details, ok := m[key].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if value := numberField(details, "cache_read_tokens", "cached_tokens"); value != 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func numberField(m map[string]interface{}, keys ...string) int64 {
@@ -1931,7 +1985,7 @@ func (t *rawStreamUsageTracker) Observe(chunk []byte) {
 		t.responseID = extractRawStreamResponseID(chunk)
 	}
 	usage := extractRawUsage(chunk, 0)
-	if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+	if hasRawUsage(usage) {
 		t.usage = mergeRawUsage(usage, t.usage)
 	}
 }

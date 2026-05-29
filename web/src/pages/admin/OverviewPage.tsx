@@ -104,7 +104,7 @@ function formatInteger(value?: number): string {
 }
 
 function formatMoneyCents(value?: number | string) {
-  return `¥${(numberValue(value) / 100).toFixed(2)}`;
+  return `$${(numberValue(value) / 100).toFixed(2)}`;
 }
 
 function formatDate(value?: number | string) {
@@ -117,6 +117,16 @@ function parsePricingMap(value?: string) {
   if (!value) return {};
   try {
     const parsed = JSON.parse(value) as Record<string, number>;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseModelPriceMap(value?: string) {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     return {};
@@ -175,6 +185,7 @@ export function AdminOverviewPage() {
   const channels = data?.channels ?? [];
   const logs = data?.recent_logs ?? [];
   const users = data?.recent_users ?? [];
+  const modelPrice = parseModelPriceMap(data?.pricing_options?.ModelPrice);
   const modelRatio = parsePricingMap(data?.pricing_options?.ModelRatio);
   const completionRatio = parsePricingMap(data?.pricing_options?.CompletionRatio);
   const quotaPerUnit = quotaPerUnitFromOptions(data?.pricing_options);
@@ -248,7 +259,7 @@ export function AdminOverviewPage() {
             <div>
               <div className="text-sm font-semibold text-slate-500">可用模型</div>
               <div className="text-2xl font-black">{configuredModels}</div>
-              <div className="text-xs font-medium text-slate-400">{Object.keys(modelRatio).length} 个模型价格项</div>
+              <div className="text-xs font-medium text-slate-400">{Object.keys(modelPrice).length || Object.keys(modelRatio).length} 个模型价格项</div>
             </div>
           </CardContent>
         </Card>
@@ -258,7 +269,7 @@ export function AdminOverviewPage() {
             <div>
               <div className="text-sm font-semibold text-slate-500">配额消耗</div>
               <div className="text-2xl font-black">{formatQuota(totals.quota_used, quotaPerUnit)}</div>
-              <div className="text-xs font-medium text-slate-400">{Object.keys(completionRatio).length} 个输出倍率项</div>
+              <div className="text-xs font-medium text-slate-400">{Object.keys(completionRatio).length} 个兼容倍率项</div>
             </div>
           </CardContent>
         </Card>

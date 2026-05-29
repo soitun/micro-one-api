@@ -694,6 +694,39 @@ func TestCommitQuota_UsesModelAndCompletionRatios(t *testing.T) {
 	assert.Equal(t, int64(860), ledgerRepo.ledgers[0].BalanceAfter)
 }
 
+func TestCommitQuota_UsesModelPrices(t *testing.T) {
+	account := &Account{UserID: "user1", Quota: 1000, Group: "default"}
+	accountRepo := &mockAccountRepo{account: account}
+	reservationRepo := &mockReservationRepo{reservations: make(map[string]*Reservation)}
+	ledgerRepo := &mockLedgerRepo{}
+	redeemRepo := &mockRedeemRepo{}
+	cacheReadPrice := 0.10 / 1000000
+	uc := NewBillingUsecaseWithPricing(accountRepo, reservationRepo, ledgerRepo, redeemRepo, PricingConfig{
+		QuotaPerUnit: 500000,
+		ModelPrices: map[string]ModelPrice{
+			"gpt-5.5": {
+				InputPrice:     0.65 / 1000000,
+				OutputPrice:    3.90 / 1000000,
+				CacheReadPrice: &cacheReadPrice,
+			},
+		},
+	})
+
+	reservation, err := uc.ReserveQuota(context.Background(), "user1", "req-model-price", 100, "gpt-5.5", "channel1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(33), reservation.Amount)
+
+	committed, refund, err := uc.CommitQuotaWithUsage(context.Background(), reservation.ReservationID, 100, true, LedgerUsage{
+		PromptTokens:     10,
+		CompletionTokens: 20,
+		CacheReadTokens:  4,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(42), committed)
+	assert.Equal(t, int64(0), refund)
+	assert.Equal(t, int64(958), account.Quota)
+}
+
 func TestReserveQuota_UsesDynamicPricingStore(t *testing.T) {
 	account := &Account{UserID: "user1", Quota: 1000, Group: "vip"}
 	accountRepo := &mockAccountRepo{account: account}
