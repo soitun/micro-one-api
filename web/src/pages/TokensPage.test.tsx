@@ -7,7 +7,35 @@ import { renderWithQuery } from '@/test/render';
 import { server } from '@/test/msw/server';
 
 describe('TokensPage', () => {
-  it('shows the full API key returned by token creation', async () => {
+  it('does not show unnamed session tokens as API keys', async () => {
+    server.use(
+      http.get('/api/token', () =>
+        HttpResponse.json({
+          success: true,
+          data: {
+            items: [
+              {
+                id: 1,
+                name: '',
+                masked_key: 'sess********oken',
+                status: 1,
+                remain_quota: 1000,
+                created_time: 1760000000,
+              },
+            ],
+            total: 1,
+          },
+        }),
+      ),
+    );
+
+    renderWithQuery(<TokensPage />);
+
+    expect(await screen.findByText('No tokens yet')).toBeInTheDocument();
+    expect(screen.queryByText('sess********oken')).not.toBeInTheDocument();
+  });
+
+  it('shows the full API key only in the creation dialog', async () => {
     const user = userEvent.setup();
     const fullKey = 'sk-full-token-value-created-once';
     const maskedKey = 'sk-f************************once';
@@ -57,11 +85,20 @@ describe('TokensPage', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByDisplayValue('test key')).toBeInTheDocument();
     expect(within(dialog).getByDisplayValue(fullKey)).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText(fullKey)).toBeInTheDocument();
+      expect(screen.getByText(maskedKey)).toBeInTheDocument();
     });
-    expect(screen.queryByText(maskedKey)).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue(fullKey)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
+
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue(fullKey)).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText(fullKey)).not.toBeInTheDocument();
+    expect(screen.getByText(maskedKey)).toBeInTheDocument();
   });
 });
