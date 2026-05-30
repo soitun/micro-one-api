@@ -192,15 +192,8 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 			}
 		}
 
-		// If no models from channels, use fallback catalog
-		if len(modelSet) == 0 {
-			for _, m := range oneAPIChannelModelCatalog() {
-				if id, ok := m["id"].(string); ok {
-					ownedBy, _ := m["owned_by"].(string)
-					modelSet[id] = ownedBy
-				}
-			}
-		}
+		// If no models from channels, return empty list
+		// (don't use fallback catalog as it may show unavailable models)
 
 		// Build response
 		type modelItem struct {
@@ -792,55 +785,34 @@ func providerNameFromType(channelType int32) string {
 	}
 }
 
-type userBillingData struct {
-	Quota     int64
-	UsedQuota int64
-}
-
 func enrichUsersWithBilling(ctx context.Context, svc *service.AdminService, users []*commonv1.UserInfo) []map[string]interface{} {
 	result := make([]map[string]interface{}, 0, len(users))
 
-	// Parallel fetch billing data for all users
-	billingData := make(map[int64]userBillingData)
-	if svc != nil && len(users) > 0 {
-		type billingResult struct {
-			UserID    int64
-			Quota     int64
-			UsedQuota int64
-		}
-		ch := make(chan billingResult, len(users))
-		
-		// Launch goroutines to fetch billing data in parallel
-		for _, u := range users {
-			go func(userID int64) {
-				snap, err := svc.GetAccountSnapshot(ctx, &adminv1.GetAccountSnapshotRequest{
-					UserId: strconv.FormatInt(userID, 10),
-				})
-				if err == nil && snap.GetAccount() != nil {
-					ch <- billingResult{
-						UserID:    userID,
-						Quota:     snap.GetAccount().GetQuota(),
-						UsedQuota: snap.GetAccount().GetUsedQuota(),
-					}
-				} else {
-					ch <- billingResult{UserID: userID}
-				}
-			}(u.GetId())
-		}
-		
-		// Collect results
-		for range users {
-			r := <-ch
-			billingData[r.UserID] = userBillingData{Quota: r.Quota, UsedQuota: r.UsedQuota}
+	// Collect user IDs for batch query
+	userIDs := make([]string, 0, len(users))
+	for _, u := range users {
+		userIDs = append(userIDs, strconv.FormatInt(u.GetId(), 10))
+	}
+
+	// Batch fetch account snapshots
+	var accounts map[string]*commonv1.AccountInfo
+	if svc != nil && len(userIDs) > 0 {
+		var err error
+		accounts, err = svc.BatchGetAccountSnapshots(ctx, userIDs)
+		if err != nil {
+			accounts = map[string]*commonv1.AccountInfo{}
 		}
 	}
 
 	// Build result with enriched data
 	for _, u := range users {
 		var quota, usedQuota int64
-		if data, ok := billingData[u.GetId()]; ok {
-			quota = data.Quota
-			usedQuota = data.UsedQuota
+		if accounts != nil {
+			userID := strconv.FormatInt(u.GetId(), 10)
+			if acc, ok := accounts[userID]; ok {
+				quota = acc.GetQuota()
+				usedQuota = acc.GetUsedQuota()
+			}
 		}
 		result = append(result, userInfoToMap(u, quota, usedQuota))
 	}

@@ -99,6 +99,32 @@ func (s *BillingService) GetAccountSnapshot(ctx context.Context, req *billingv1.
 	}, nil
 }
 
+func (s *BillingService) BatchGetAccountSnapshots(ctx context.Context, req *billingv1.BatchGetAccountSnapshotsRequest) (*billingv1.BatchGetAccountSnapshotsResponse, error) {
+	accounts, err := s.uc.BatchGetAccountSnapshots(ctx, req.GetUserIds())
+	if err != nil {
+		return nil, err
+	}
+
+	snapshots := make(map[string]*billingv1.GetAccountSnapshotResponse, len(accounts))
+	for userID, account := range accounts {
+		snapshots[userID] = &billingv1.GetAccountSnapshotResponse{
+			Snapshot: &commonv1.AccountSnapshot{
+				UserId:       account.UserID,
+				Quota:        account.Quota,
+				UsedQuota:    account.UsedQuota,
+				RequestCount: account.RequestCount,
+				Group:        account.Group,
+				GroupRatio:   account.GroupRatio(),
+				FrozenQuota:  account.FrozenQuota,
+			},
+		}
+	}
+
+	return &billingv1.BatchGetAccountSnapshotsResponse{
+		Snapshots: snapshots,
+	}, nil
+}
+
 func (s *BillingService) TopUpQuota(ctx context.Context, req *billingv1.TopUpQuotaRequest) (*billingv1.TopUpQuotaResponse, error) {
 	newQuota, err := s.uc.TopUpQuota(ctx, req.UserId, req.OperatorId, req.Amount, req.Remark)
 	if err != nil {

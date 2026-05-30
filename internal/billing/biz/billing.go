@@ -302,6 +302,10 @@ func (uc *BillingUsecase) GetAccountSnapshot(ctx context.Context, userID string)
 	return uc.accountRepo.GetAccountSnapshot(ctx, userID)
 }
 
+func (uc *BillingUsecase) BatchGetAccountSnapshots(ctx context.Context, userIDs []string) (map[string]*Account, error) {
+	return uc.accountRepo.BatchGetAccountSnapshots(ctx, userIDs)
+}
+
 func (uc *BillingUsecase) TopUpQuota(ctx context.Context, userID, operatorID string, amount int64, remark string) (int64, error) {
 	_, err := uc.accountRepo.GetAccountSnapshot(ctx, userID)
 	if err != nil {

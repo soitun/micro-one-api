@@ -20,6 +20,14 @@ func (m *mockAccountRepo) GetAccountSnapshot(ctx context.Context, userID string)
 	return m.account, nil
 }
 
+func (m *mockAccountRepo) BatchGetAccountSnapshots(ctx context.Context, userIDs []string) (map[string]*Account, error) {
+	result := make(map[string]*Account, len(userIDs))
+	for _, userID := range userIDs {
+		result[userID] = m.account
+	}
+	return result, nil
+}
+
 func (m *mockAccountRepo) UpdateQuota(ctx context.Context, userID string, delta int64, operationType string) (int64, error) {
 	if delta < 0 && m.account.Quota+delta < 0 {
 		return 0, ErrInsufficientQuota

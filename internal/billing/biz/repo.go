@@ -7,6 +7,7 @@ import (
 
 type AccountRepo interface {
 	GetAccountSnapshot(ctx context.Context, userID string) (*Account, error)
+	BatchGetAccountSnapshots(ctx context.Context, userIDs []string) (map[string]*Account, error)
 	UpdateQuota(ctx context.Context, userID string, delta int64, operationType string) (int64, error)
 	UpdateUsage(ctx context.Context, userID string, usedQuotaDelta, requestCountDelta int64) error
 	UpdateFrozenQuota(ctx context.Context, userID string, delta int64) error
