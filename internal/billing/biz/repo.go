@@ -1,6 +1,9 @@
 package biz
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type AccountRepo interface {
 	GetAccountSnapshot(ctx context.Context, userID string) (*Account, error)
@@ -20,6 +23,7 @@ type ReservationRepo interface {
 type LedgerRepo interface {
 	CreateLedger(ctx context.Context, ledger *Ledger) error
 	ListLedgers(ctx context.Context, userID string, page, pageSize int32) ([]*Ledger, int64, error)
+	ListLedgersWithTimeRange(ctx context.Context, userID string, page, pageSize int32, startTime, endTime time.Time) ([]*Ledger, int64, error)
 }
 
 type RedeemRepo interface {

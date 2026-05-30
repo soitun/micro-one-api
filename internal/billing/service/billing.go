@@ -270,7 +270,23 @@ func (s *BillingService) ListLedger(ctx context.Context, req *billingv1.ListLedg
 		pageSize = 20
 	}
 
-	ledgers, total, err := s.uc.ListLedgers(ctx, req.UserId, page, pageSize)
+	var ledgers []*biz.Ledger
+	var total int64
+	var err error
+
+	// Use time range filtering if StartTime or EndTime is provided
+	if req.GetStartTime().IsValid() || req.GetEndTime().IsValid() {
+		var startTime, endTime time.Time
+		if req.GetStartTime().IsValid() {
+			startTime = req.GetStartTime().AsTime()
+		}
+		if req.GetEndTime().IsValid() {
+			endTime = req.GetEndTime().AsTime()
+		}
+		ledgers, total, err = s.uc.ListLedgersWithTimeRange(ctx, req.UserId, page, pageSize, startTime, endTime)
+	} else {
+		ledgers, total, err = s.uc.ListLedgers(ctx, req.UserId, page, pageSize)
+	}
 	if err != nil {
 		return nil, err
 	}

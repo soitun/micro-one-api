@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"os"
@@ -94,6 +95,7 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 	srv.HandleFunc("/recharge", handleAdminPage)
 	srv.HandleFunc("/redeem", handleAdminPage)
 	srv.HandleFunc("/orders", handleAdminPage)
+	srv.HandleFunc("/profile", handleAdminPage)
 	srv.HandleFunc("/admin/users", handleAdminPage)
 	srv.HandleFunc("/admin/channels", handleAdminPage)
 	srv.HandleFunc("/admin/pricing", handleAdminPage)
@@ -127,6 +129,45 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 				"display_in_currency":  false,
 			},
 		})
+	})
+
+	srv.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		// Try to get models from identity proxy
+		if identityProxy != nil {
+			// Create a new request to get available models
+			modelReq, _ := http.NewRequestWithContext(r.Context(), "GET", "/api/user/available_models", nil)
+			modelReq.Header = r.Header.Clone()
+			// Use a response recorder to capture the response
+			rec := httptest.NewRecorder()
+			identityProxy.ServeHTTP(rec, modelReq)
+			if rec.Code == http.StatusOK {
+				var apiResp struct {
+					Success bool     `json:"success"`
+					Data    []string `json:"data"`
+				}
+				if json.NewDecoder(rec.Body).Decode(&apiResp) == nil && apiResp.Success {
+					// Convert to OpenAI format
+					type modelItem struct {
+						ID      string `json:"id"`
+						Object  string `json:"object"`
+						Created int64  `json:"created"`
+						OwnedBy string `json:"owned_by"`
+					}
+					data := make([]modelItem, 0, len(apiResp.Data))
+					for _, m := range apiResp.Data {
+						data = append(data, modelItem{ID: m, Object: "model", Created: 0, OwnedBy: "organization"})
+					}
+					writeJSON(w, http.StatusOK, map[string]interface{}{"object": "list", "data": data})
+					return
+				}
+			}
+		}
+		// Fallback: return empty list
+		writeJSON(w, http.StatusOK, map[string]interface{}{"object": "list", "data": []interface{}{}})
 	})
 	srv.HandleFunc("/api/pricing", func(w http.ResponseWriter, r *http.Request) {
 		handleReadonlyPricing(w, r, svc)
@@ -644,6 +685,40 @@ func paymentSummaryFromOrders(resp *billingv1.ListPaymentOrdersResponse) map[str
 	}
 }
 
+
+func userInfoToMap(u *commonv1.UserInfo, quota, usedQuota int64) map[string]interface{} {
+	return map[string]interface{}{
+		"id":           u.GetId(),
+		"username":     u.GetUsername(),
+		"displayName":  u.GetDisplayName(),
+		"email":        u.GetEmail(),
+		"group":        u.GetGroup(),
+		"status":       u.GetStatus(),
+		"role":         u.GetRole(),
+		"quota":        strconv.FormatInt(quota, 10),
+		"usedQuota":    strconv.FormatInt(usedQuota, 10),
+		"createdAt":    strconv.FormatInt(u.GetCreatedAt(), 10),
+	}
+}
+
+func enrichUsersWithBilling(ctx context.Context, svc *service.AdminService, users []*commonv1.UserInfo) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(users))
+	for _, u := range users {
+		var quota, usedQuota int64
+		if svc != nil {
+			snap, err := svc.GetAccountSnapshot(ctx, &adminv1.GetAccountSnapshotRequest{
+				UserId: strconv.FormatInt(u.GetId(), 10),
+			})
+			if err == nil && snap.GetAccount() != nil {
+				quota = snap.GetAccount().GetQuota()
+				usedQuota = snap.GetAccount().GetUsedQuota()
+			}
+		}
+		result = append(result, userInfoToMap(u, quota, usedQuota))
+	}
+	return result
+}
+
 func handleAdminPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -1110,7 +1185,7 @@ func handleOneAPIListUsers(w http.ResponseWriter, r *http.Request, svc *service.
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, apiResponse(true, "", resp.GetUsers()))
+	writeJSON(w, http.StatusOK, apiResponse(true, "", enrichUsersWithBilling(r.Context(), svc, resp.GetUsers())))
 }
 
 func handleOneAPIExportUsers(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
@@ -1156,7 +1231,7 @@ func handleOneAPISearchUsers(w http.ResponseWriter, r *http.Request, svc *servic
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, apiResponse(true, "", resp.GetUsers()))
+	writeJSON(w, http.StatusOK, apiResponse(true, "", enrichUsersWithBilling(r.Context(), svc, resp.GetUsers())))
 }
 
 func handleUserByID(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {

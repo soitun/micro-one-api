@@ -21,6 +21,7 @@ import (
 	"micro-one-api/internal/pkg/oauth"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const paymentQuotaPerCNY = int64(5000000)
@@ -436,14 +437,70 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 		writeJSON(w, http.StatusServiceUnavailable, apiResponse{Success: false, Message: "billing service unavailable"})
 		return
 	}
+	userID := strconv.FormatInt(snapshot.UserID, 10)
 	resp, err := billingClient.GetAccountSnapshot(r.Context(), &billingv1.GetAccountSnapshotRequest{
-		UserId: strconv.FormatInt(snapshot.UserID, 10),
+		UserId: userID,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
 		return
 	}
 	account := resp.GetSnapshot()
+
+	// Fetch recent ledger entries for usage trend (last 7 days, up to 1000 entries)
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	sevenDaysAgo := startOfDay.AddDate(0, 0, -6)
+	ledgerResp, ledgerErr := billingClient.ListLedger(r.Context(), &billingv1.ListLedgerRequest{
+		UserId:    userID,
+		Page:      1,
+		PageSize:  1000,
+		StartTime: timestamppb.New(sevenDaysAgo),
+		EndTime:   timestamppb.New(now),
+	})
+
+	type dailyUsage struct {
+		Date              string
+		Count             int64
+		Quota             int64
+		PromptTokens      int64
+		CompletionTokens  int64
+	}
+	dayMap := map[string]*dailyUsage{}
+	// Initialize all 7 days
+	for d := sevenDaysAgo; !d.After(startOfDay); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		dayMap[key] = &dailyUsage{Date: key}
+	}
+	if ledgerErr == nil && ledgerResp != nil {
+		for _, entry := range ledgerResp.GetEntries() {
+			var ts time.Time
+			if entry.GetCreatedAt() != nil {
+				ts = entry.GetCreatedAt().AsTime()
+			}
+			key := ts.Format("2006-01-02")
+			if day, ok := dayMap[key]; ok {
+				day.Count++
+				day.Quota += entry.GetAmount()
+				day.PromptTokens += entry.GetPromptTokens()
+				day.CompletionTokens += entry.GetCompletionTokens()
+			}
+		}
+	}
+	// Build sorted usage array
+	var usageArr []map[string]interface{}
+	for d := sevenDaysAgo; !d.After(startOfDay); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		day := dayMap[key]
+		usageArr = append(usageArr, map[string]interface{}{
+			"date":              day.Date,
+			"count":             day.Count,
+			"quota":             day.Quota,
+			"prompt_tokens":     day.PromptTokens,
+			"completion_tokens": day.CompletionTokens,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{
 		"quota":         account.GetQuota(),
 		"used_quota":    account.GetUsedQuota(),
@@ -451,6 +508,7 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 		"group":         account.GetGroup(),
 		"group_ratio":   account.GetGroupRatio(),
 		"frozen_quota":  account.GetFrozenQuota(),
+		"usage":         usageArr,
 	}})
 }
 

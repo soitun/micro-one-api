@@ -1431,7 +1431,7 @@ func (s *AdminService) ListLogs(ctx context.Context, req *adminv1.ListLogsReques
 			createdAt = entry.CreatedAt.AsTime().Unix()
 		}
 		logs = append(logs, &adminv1.LogEntry{
-			Id:           0, // LedgerEntry.Id is string, LogEntry.Id is int64
+			Id:           parseInt64(entry.Id),
 			UserId:       entry.UserId,
 			Type:         entry.Type,
 			Amount:       entry.Amount,
@@ -1495,4 +1495,9 @@ func fromUnixTimestamp(ts int64) time.Time {
 // 辅助函数：创建错误响应
 func errorResponse(message string) error {
 	return status.Error(codes.Internal, fmt.Sprintf("internal error: %s", message))
+}
+
+func parseInt64(s string) int64 {
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return n
 }

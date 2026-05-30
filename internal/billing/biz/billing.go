@@ -487,6 +487,10 @@ func (uc *BillingUsecase) ListLedgers(ctx context.Context, userID string, page, 
 	return uc.ledgerRepo.ListLedgers(ctx, userID, page, pageSize)
 }
 
+func (uc *BillingUsecase) ListLedgersWithTimeRange(ctx context.Context, userID string, page, pageSize int32, startTime, endTime time.Time) ([]*Ledger, int64, error) {
+	return uc.ledgerRepo.ListLedgersWithTimeRange(ctx, userID, page, pageSize, startTime, endTime)
+}
+
 func (uc *BillingUsecase) getGroupRatio(pricing PricingConfig, group string) float64 {
 	if ratio, ok := pricing.GroupRatios[group]; ok {
 		return ratio
