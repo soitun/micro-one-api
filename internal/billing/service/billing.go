@@ -274,16 +274,19 @@ func (s *BillingService) ListLedger(ctx context.Context, req *billingv1.ListLedg
 	var total int64
 	var err error
 
-	// Use time range filtering if StartTime or EndTime is provided
-	if req.GetStartTime().IsValid() || req.GetEndTime().IsValid() {
-		var startTime, endTime time.Time
-		if req.GetStartTime().IsValid() {
-			startTime = req.GetStartTime().AsTime()
-		}
-		if req.GetEndTime().IsValid() {
-			endTime = req.GetEndTime().AsTime()
-		}
-		ledgers, total, err = s.uc.ListLedgersWithTimeRange(ctx, req.UserId, page, pageSize, startTime, endTime)
+	// Parse time range
+	var startTime, endTime time.Time
+	if req.GetStartTime().IsValid() {
+		startTime = req.GetStartTime().AsTime()
+	}
+	if req.GetEndTime().IsValid() {
+		endTime = req.GetEndTime().AsTime()
+	}
+
+	// Use filtered query if type or time range is specified
+	ledgerType := req.GetType()
+	if ledgerType != "" || !startTime.IsZero() || !endTime.IsZero() {
+		ledgers, total, err = s.uc.ListLedgersWithFilters(ctx, req.UserId, page, pageSize, ledgerType, startTime, endTime)
 	} else {
 		ledgers, total, err = s.uc.ListLedgers(ctx, req.UserId, page, pageSize)
 	}

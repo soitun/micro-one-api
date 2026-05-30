@@ -1401,71 +1401,12 @@ func (s *AdminService) ListLogs(ctx context.Context, req *adminv1.ListLogsReques
 		pageSize = 20
 	}
 
-	// When no type filter, use server-side pagination directly
-	if req.Type == "" {
-		billingReq := &billingv1.ListLedgerRequest{
-			UserId:   req.UserId,
-			Page:     page,
-			PageSize: pageSize,
-		}
-
-		// Pass time range filters to billing service
-		if req.StartTime > 0 {
-			ts := timestamppb.New(time.Unix(req.StartTime, 0))
-			billingReq.StartTime = ts
-		}
-		if req.EndTime > 0 {
-			ts := timestamppb.New(time.Unix(req.EndTime, 0))
-			billingReq.EndTime = ts
-		}
-
-		billingResp, err := s.billingClient.ListLedger(ctx, billingReq)
-		if err != nil {
-			st, ok := status.FromError(err)
-			if ok {
-				return &adminv1.ListLogsResponse{
-					Logs:  []*adminv1.LogEntry{},
-					Total: 0,
-				}, fmt.Errorf("failed to list ledger: %s", st.Message())
-			}
-			return &adminv1.ListLogsResponse{
-				Logs:  []*adminv1.LogEntry{},
-				Total: 0,
-			}, fmt.Errorf("failed to list ledger: %w", err)
-		}
-
-		logs := make([]*adminv1.LogEntry, 0, len(billingResp.Entries))
-		for _, entry := range billingResp.Entries {
-			var createdAt int64
-			if entry.CreatedAt != nil {
-				createdAt = entry.CreatedAt.AsTime().Unix()
-			}
-			logs = append(logs, &adminv1.LogEntry{
-				Id:           parseInt64(entry.Id),
-				UserId:       entry.UserId,
-				Type:         entry.Type,
-				Amount:       entry.Amount,
-				BalanceAfter: entry.BalanceAfter,
-				ReferenceId:  entry.ReferenceId,
-				Remark:       entry.Remark,
-				CreatedAt:    createdAt,
-			})
-		}
-
-		return &adminv1.ListLogsResponse{
-			Logs:  logs,
-			Total: billingResp.Total,
-		}, nil
-	}
-
-	// When filtering by type, we need to fetch entries and filter client-side
-	// because the billing service doesn't support type filtering
-	// Fetch a reasonable batch size to ensure we have enough filtered results
-	fetchSize := int32(1000)
+	// Build billing request with all filters
 	billingReq := &billingv1.ListLedgerRequest{
 		UserId:   req.UserId,
-		Page:     1,
-		PageSize: fetchSize,
+		Page:     page,
+		PageSize: pageSize,
+		Type:     req.Type,
 	}
 
 	// Pass time range filters to billing service
@@ -1478,6 +1419,7 @@ func (s *AdminService) ListLogs(ctx context.Context, req *adminv1.ListLogsReques
 		billingReq.EndTime = ts
 	}
 
+	// Billing service now supports type filtering server-side
 	billingResp, err := s.billingClient.ListLedger(ctx, billingReq)
 	if err != nil {
 		st, ok := status.FromError(err)
@@ -1493,17 +1435,13 @@ func (s *AdminService) ListLogs(ctx context.Context, req *adminv1.ListLogsReques
 		}, fmt.Errorf("failed to list ledger: %w", err)
 	}
 
-	// Convert and filter entries by type
-	filteredLogs := make([]*adminv1.LogEntry, 0, len(billingResp.Entries))
+	logs := make([]*adminv1.LogEntry, 0, len(billingResp.Entries))
 	for _, entry := range billingResp.Entries {
-		if entry.Type != req.Type {
-			continue
-		}
 		var createdAt int64
 		if entry.CreatedAt != nil {
 			createdAt = entry.CreatedAt.AsTime().Unix()
 		}
-		filteredLogs = append(filteredLogs, &adminv1.LogEntry{
+		logs = append(logs, &adminv1.LogEntry{
 			Id:           parseInt64(entry.Id),
 			UserId:       entry.UserId,
 			Type:         entry.Type,
@@ -1515,21 +1453,9 @@ func (s *AdminService) ListLogs(ctx context.Context, req *adminv1.ListLogsReques
 		})
 	}
 
-	// Apply pagination to filtered results
-	total := int64(len(filteredLogs))
-	start := int((page - 1) * pageSize)
-	if start > len(filteredLogs) {
-		start = len(filteredLogs)
-	}
-	end := start + int(pageSize)
-	if end > len(filteredLogs) {
-		end = len(filteredLogs)
-	}
-	pagedLogs := filteredLogs[start:end]
-
 	return &adminv1.ListLogsResponse{
-		Logs:  pagedLogs,
-		Total: total,
+		Logs:  logs,
+		Total: billingResp.Total,
 	}, nil
 }
 

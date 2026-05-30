@@ -101,6 +101,10 @@ func (m *mockLedgerRepo) ListLedgersWithTimeRange(ctx context.Context, userID st
 	return m.ledgers, int64(len(m.ledgers)), nil
 }
 
+func (m *mockLedgerRepo) ListLedgersWithFilters(ctx context.Context, userID string, page, pageSize int32, ledgerType string, startTime, endTime time.Time) ([]*Ledger, int64, error) {
+	return m.ledgers, int64(len(m.ledgers)), nil
+}
+
 type mockPricingStore struct {
 	config PricingConfig
 }

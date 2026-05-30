@@ -792,18 +792,55 @@ func providerNameFromType(channelType int32) string {
 	}
 }
 
+type userBillingData struct {
+	Quota     int64
+	UsedQuota int64
+}
+
 func enrichUsersWithBilling(ctx context.Context, svc *service.AdminService, users []*commonv1.UserInfo) []map[string]interface{} {
 	result := make([]map[string]interface{}, 0, len(users))
+
+	// Parallel fetch billing data for all users
+	billingData := make(map[int64]userBillingData)
+	if svc != nil && len(users) > 0 {
+		type billingResult struct {
+			UserID    int64
+			Quota     int64
+			UsedQuota int64
+		}
+		ch := make(chan billingResult, len(users))
+		
+		// Launch goroutines to fetch billing data in parallel
+		for _, u := range users {
+			go func(userID int64) {
+				snap, err := svc.GetAccountSnapshot(ctx, &adminv1.GetAccountSnapshotRequest{
+					UserId: strconv.FormatInt(userID, 10),
+				})
+				if err == nil && snap.GetAccount() != nil {
+					ch <- billingResult{
+						UserID:    userID,
+						Quota:     snap.GetAccount().GetQuota(),
+						UsedQuota: snap.GetAccount().GetUsedQuota(),
+					}
+				} else {
+					ch <- billingResult{UserID: userID}
+				}
+			}(u.GetId())
+		}
+		
+		// Collect results
+		for range users {
+			r := <-ch
+			billingData[r.UserID] = userBillingData{Quota: r.Quota, UsedQuota: r.UsedQuota}
+		}
+	}
+
+	// Build result with enriched data
 	for _, u := range users {
 		var quota, usedQuota int64
-		if svc != nil {
-			snap, err := svc.GetAccountSnapshot(ctx, &adminv1.GetAccountSnapshotRequest{
-				UserId: strconv.FormatInt(u.GetId(), 10),
-			})
-			if err == nil && snap.GetAccount() != nil {
-				quota = snap.GetAccount().GetQuota()
-				usedQuota = snap.GetAccount().GetUsedQuota()
-			}
+		if data, ok := billingData[u.GetId()]; ok {
+			quota = data.Quota
+			usedQuota = data.UsedQuota
 		}
 		result = append(result, userInfoToMap(u, quota, usedQuota))
 	}
