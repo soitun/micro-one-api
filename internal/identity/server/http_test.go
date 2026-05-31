@@ -600,6 +600,79 @@ func TestIdentityHTTPDashboardReturnsAccountSnapshot(t *testing.T) {
 	}
 }
 
+// TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota verifies that the dashboard
+// sums |ledger.amount| (actual quota cost) rather than ledger.quota (raw token count)
+// for today_quota and the 7-day usage chart. This is a regression test for the bug
+// where models with per-token pricing (ModelPrices) showed inflated "today consumption"
+// because raw token counts were displayed as dollar amounts.
+func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+
+	// Simulate mimo-v2.5-pro pricing: 1M tokens at $0.435/1M input + $0.87/1M output
+	// quota = 1000000 (raw token count), amount = -217500 (actual cost in quota units)
+	// The dashboard must show today_quota = 217500, NOT 1000000.
+	quotaRawTokens := int64(1000000)
+	amountQuotaCost := int64(-217500)
+
+	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
+		snapshot: &commonv1.AccountSnapshot{
+			Quota:        5000000,
+			UsedQuota:    217500,
+			RequestCount: 1,
+			Group:        "default",
+			GroupRatio:   1,
+		},
+		ledgerEntries: []*commonv1.LedgerEntry{
+			{
+				Id:               "1",
+				UserId:           "1",
+				Type:             "consume",
+				Amount:           amountQuotaCost,
+				BalanceAfter:     4782500,
+				ReferenceId:      "res-1",
+				Remark:           "model=mimo-v2.5-pro, tokens=1000000",
+				CreatedAt:        timestamppb.Now(),
+				ModelName:        "mimo-v2.5-pro",
+				Quota:            quotaRawTokens,
+				PromptTokens:     600000,
+				CompletionTokens: 400000,
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+
+	// today_quota must be |amount| (217500), NOT quota (1000000)
+	if !strings.Contains(body, `"today_quota":217500`) {
+		t.Fatalf("today_quota should be 217500 (|amount|), got body=%s", body)
+	}
+	// Must NOT contain the raw token count as today_quota
+	if strings.Contains(body, `"today_quota":1000000`) {
+		t.Fatalf("today_quota should NOT be 1000000 (raw token count), got body=%s", body)
+	}
+	// used_quota from account snapshot should still be correct
+	if !strings.Contains(body, `"used_quota":217500`) {
+		t.Fatalf("used_quota should be 217500, got body=%s", body)
+	}
+	// Token counts should still reflect raw values
+	if !strings.Contains(body, `"today_prompt_tokens":600000`) {
+		t.Fatalf("today_prompt_tokens should be 600000, got body=%s", body)
+	}
+	if !strings.Contains(body, `"today_completion_tokens":400000`) {
+		t.Fatalf("today_completion_tokens should be 400000, got body=%s", body)
+	}
+}
+
 func TestIdentityHTTPUserReadOnlyCompatibilityAliases(t *testing.T) {
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)
@@ -1450,6 +1523,7 @@ type identityHTTPBillingClient struct {
 	lastPaymentListReq  *billingv1.ListPaymentOrdersRequest
 	lastPaymentGetReq   *billingv1.GetPaymentOrderByTradeNoRequest
 	paymentGetResponse  *billingv1.PaymentOrderResponse
+	ledgerEntries       []*commonv1.LedgerEntry // custom entries; nil = use default
 }
 
 type capturedTopUp struct {
@@ -1574,6 +1648,12 @@ func (c *identityHTTPBillingClient) TopUpQuota(ctx context.Context, req *billing
 
 func (c *identityHTTPBillingClient) ListLedger(ctx context.Context, req *billingv1.ListLedgerRequest, opts ...grpc.CallOption) (*billingv1.ListLedgerResponse, error) {
 	c.lastLedgerRequest = req
+	if c.ledgerEntries != nil {
+		return &billingv1.ListLedgerResponse{
+			Entries: c.ledgerEntries,
+			Total:   int64(len(c.ledgerEntries)),
+		}, nil
+	}
 	return &billingv1.ListLedgerResponse{
 		Entries: []*commonv1.LedgerEntry{
 			{
