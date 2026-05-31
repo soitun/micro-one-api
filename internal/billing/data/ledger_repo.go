@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"micro-one-api/internal/billing/biz"
@@ -229,4 +230,101 @@ func (r *ledgerRepo) ListLedgersWithFilters(ctx context.Context, userID string, 
 	}
 
 	return ledgers, total, nil
+}
+
+func (r *ledgerRepo) AggregateLedgerByDate(ctx context.Context, userID string, ledgerType string, startTime, endTime time.Time) ([]*biz.DailyAggregate, []*biz.ModelAggregate, error) {
+	// Fetch raw rows, aggregate in Go (database-agnostic, avoids MySQL-specific SQL)
+	type rawRow struct {
+		CreatedAt        time.Time
+		Amount           int64
+		PromptTokens     int64
+		CompletionTokens int64
+		ElapsedTime      int64
+		ModelName        string
+	}
+	var rows []rawRow
+	err := r.data.db.WithContext(ctx).Raw(`
+		SELECT created_at, amount, prompt_tokens, completion_tokens, elapsed_time, model_name
+		FROM billing_ledgers
+		WHERE user_id = ? AND type = ? AND created_at >= ? AND created_at <= ?
+	`, userID, ledgerType, startTime, endTime).Scan(&rows).Error
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Aggregate by date
+	type dailyAcc struct {
+		quota            int64
+		promptTokens     int64
+		completionTokens int64
+		count            int64
+		elapsedTime      int64
+	}
+	dailyMap := map[string]*dailyAcc{}
+	modelMap := map[string]int64{}
+
+	for _, row := range rows {
+		date := row.CreatedAt.Format("2006-01-02")
+		acc, ok := dailyMap[date]
+		if !ok {
+			acc = &dailyAcc{}
+			dailyMap[date] = acc
+		}
+		amount := row.Amount
+		if amount < 0 {
+			amount = -amount
+		}
+		acc.quota += amount
+		acc.promptTokens += row.PromptTokens
+		acc.completionTokens += row.CompletionTokens
+		acc.count++
+		acc.elapsedTime += row.ElapsedTime
+
+		if row.ModelName != "" {
+			modelMap[row.ModelName] += row.PromptTokens + row.CompletionTokens
+		}
+	}
+
+	// Build sorted daily results
+	dates := make([]string, 0, len(dailyMap))
+	for d := range dailyMap {
+		dates = append(dates, d)
+	}
+	sort.Strings(dates)
+
+	daily := make([]*biz.DailyAggregate, len(dates))
+	for i, d := range dates {
+		acc := dailyMap[d]
+		daily[i] = &biz.DailyAggregate{
+			Date:             d,
+			Quota:            acc.quota,
+			PromptTokens:     acc.promptTokens,
+			CompletionTokens: acc.completionTokens,
+			Count:            acc.count,
+			ElapsedTime:      acc.elapsedTime,
+		}
+	}
+
+	// Build sorted model results (by tokens desc)
+	type modelKV struct {
+		Model  string
+		Tokens int64
+	}
+	modelList := make([]modelKV, 0, len(modelMap))
+	for m, t := range modelMap {
+		modelList = append(modelList, modelKV{Model: m, Tokens: t})
+	}
+	sort.Slice(modelList, func(i, j int) bool {
+		return modelList[i].Tokens > modelList[j].Tokens
+	})
+
+	models := make([]*biz.ModelAggregate, len(modelList))
+	for i, m := range modelList {
+		models[i] = &biz.ModelAggregate{
+			Model:  m.Model,
+			Tokens: m.Tokens,
+		}
+	}
+
+	return daily, models, nil
 }
