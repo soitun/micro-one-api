@@ -169,3 +169,84 @@ func TestLedgerRepo_ListLedgers_Empty(t *testing.T) {
 	assert.Len(t, ledgers, 0)
 	assert.Equal(t, int64(0), total)
 }
+
+func TestLedgerRepo_AggregateLedgerByDate(t *testing.T) {
+	db := setupLedgerTestDB(t)
+	defer func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	}()
+
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
+	yesterday := today.AddDate(0, 0, -1)
+
+	// Insert test data: two days, two models, quota != |amount| (simulates ModelPrice billing)
+	err := db.Exec(`
+		INSERT INTO billing_ledgers (user_id, amount, balance_after, type, model_name, quota, prompt_tokens, completion_tokens, elapsed_time, created_at)
+		VALUES
+			('u1', -217500, 782500, 'consume', 'mimo-v2.5-pro', 1000000, 600000, 400000, 500, ?),
+			('u1', -100, 782400, 'consume', 'gpt-4o', 200, 100, 100, 200, ?),
+			('u1', -300, 782100, 'consume', 'mimo-v2.5-pro', 500, 300, 200, 300, ?),
+			('u1', 500000, 1282100, 'recharge', '', 0, 0, 0, 0, ?),
+			('u2', -999, 0, 'consume', 'other-model', 999, 500, 499, 100, ?)
+	`, today, today, yesterday, yesterday, today).Error
+	require.NoError(t, err)
+
+	data := &Data{db: db}
+	repo := NewLedgerRepo(data)
+
+	ctx := context.Background()
+	startTime := yesterday.Add(-time.Hour)
+	endTime := today.Add(time.Hour)
+
+	daily, models, err := repo.AggregateLedgerByDate(ctx, "u1", "consume", startTime, endTime)
+	require.NoError(t, err)
+
+	// Should have 2 days
+	require.Len(t, daily, 2)
+
+	// Yesterday: 1 entry, amount=-300, quota=300
+	assert.Equal(t, yesterday.Format("2006-01-02"), daily[0].Date)
+	assert.Equal(t, int64(300), daily[0].Quota) // |amount|, NOT quota(500)
+	assert.Equal(t, int64(300), daily[0].PromptTokens)
+	assert.Equal(t, int64(200), daily[0].CompletionTokens)
+	assert.Equal(t, int64(1), daily[0].Count)
+
+	// Today: 2 entries, amount=(-217500)+(-100), quota=217600
+	assert.Equal(t, today.Format("2006-01-02"), daily[1].Date)
+	assert.Equal(t, int64(217600), daily[1].Quota) // 217500 + 100
+	assert.Equal(t, int64(600100), daily[1].PromptTokens)
+	assert.Equal(t, int64(400100), daily[1].CompletionTokens)
+	assert.Equal(t, int64(2), daily[1].Count)
+
+	// Models: mimo-v2.5-pro (1M+500 tokens) > gpt-4o (200 tokens)
+	require.Len(t, models, 2)
+	assert.Equal(t, "mimo-v2.5-pro", models[0].Model)
+	assert.Equal(t, int64(1000500), models[0].Tokens)
+	assert.Equal(t, "gpt-4o", models[1].Model)
+	assert.Equal(t, int64(200), models[1].Tokens)
+
+	// Verify: recharge entry is excluded (type != consume)
+	// Verify: u2 entry is excluded (different user)
+	for _, d := range daily {
+		assert.NotEqual(t, int64(500000), d.Quota, "recharge should be excluded")
+	}
+}
+
+func TestLedgerRepo_AggregateLedgerByDate_Empty(t *testing.T) {
+	db := setupLedgerTestDB(t)
+	defer func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	}()
+
+	data := &Data{db: db}
+	repo := NewLedgerRepo(data)
+
+	ctx := context.Background()
+	daily, models, err := repo.AggregateLedgerByDate(ctx, "nobody", "consume", time.Now().AddDate(0, 0, -7), time.Now())
+	require.NoError(t, err)
+	assert.Empty(t, daily)
+	assert.Empty(t, models)
+}

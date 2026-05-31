@@ -458,6 +458,10 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 		EndTime:   timestamppb.New(now),
 		Type:      "consume",
 	})
+	if aggErr != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "failed to aggregate usage: " + aggErr.Error()})
+		return
+	}
 
 	// Build lookup from aggregated daily data
 	type dailyUsage struct {
@@ -475,7 +479,7 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 	var todayQuota, todayPromptTokens, todayCompletionTokens int64
 	var totalElapsedTime, consumeCount int64
 
-	if aggErr == nil && aggResp != nil {
+	if aggResp != nil {
 		for _, d := range aggResp.GetDaily() {
 			if day, ok := dayMap[d.GetDate()]; ok {
 				day.Quota = d.GetQuota()
@@ -516,9 +520,12 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 
 	// Model distribution (top 10, from server-side aggregation)
 	var modelDistribution []map[string]interface{}
-	if aggErr == nil && aggResp != nil {
-		for i, m := range aggResp.GetModels() {
-			if i >= 10 {
+	if aggResp != nil {
+		for _, m := range aggResp.GetModels() {
+			if m.GetModel() == "" {
+				continue
+			}
+			if len(modelDistribution) >= 10 {
 				break
 			}
 			modelDistribution = append(modelDistribution, map[string]interface{}{
