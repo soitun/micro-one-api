@@ -34,6 +34,9 @@ const AdminRedemptionsPage = lazy(() =>
 const AdminOptionsPage = lazy(() =>
   import('@/pages/admin/OptionsPage').then((m) => ({ default: m.AdminOptionsPage }))
 );
+const AdminReconciliationPage = lazy(() =>
+  import('@/pages/admin/ReconciliationPage').then((m) => ({ default: m.AdminReconciliationPage }))
+);
 
 function withSuspense(element: React.ReactNode) {
   return <Suspense fallback={<PageLoading />}>{element}</Suspense>;
@@ -119,6 +122,10 @@ export const router = createBrowserRouter([
           {
             path: 'redemptions',
             element: withSuspense(<AdminRedemptionsPage />),
+          },
+          {
+            path: 'reconciliation',
+            element: withSuspense(<AdminReconciliationPage />),
           },
           {
             path: 'options',

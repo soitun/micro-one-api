@@ -217,6 +217,19 @@ var verificationStore = struct {
 	items: make(map[string]verificationRecord),
 }
 
+type oauthBindRecord struct {
+	Token    string
+	At       time.Time
+	Provider string
+}
+
+var oauthBindStore = struct {
+	sync.Mutex
+	items map[string]oauthBindRecord
+}{
+	items: make(map[string]oauthBindRecord),
+}
+
 func handleRegister(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, policy RegistrationPolicy, billingClient billingv1.BillingServiceClient) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
@@ -1170,6 +1183,10 @@ func handleOneAPIOAuthAlias(w http.ResponseWriter, r *http.Request, registry *oa
 }
 
 func handleOneAPIOAuthBind(w http.ResponseWriter, r *http.Request, registry *oauth.ProviderRegistry, uc *biz.IdentityUsecase, providerName string) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, apiResponse{Success: false, Message: "method not allowed"})
+		return
+	}
 	if registry == nil {
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: providerName + " oauth disabled"})
 		return
@@ -1179,14 +1196,29 @@ func handleOneAPIOAuthBind(w http.ResponseWriter, r *http.Request, registry *oau
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: providerName + " oauth disabled"})
 		return
 	}
-	snapshot, err := authSnapshotFromRequest(r, uc)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "invalid token"})
-		return
-	}
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		handleOAuthAuthorize(w, r, provider)
+		token, ok := bearerTokenFromRequest(r)
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "invalid token"})
+			return
+		}
+		if _, err := uc.GetSessionSnapshot(r.Context(), token); err != nil {
+			writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "invalid token"})
+			return
+		}
+		state := generateState()
+		oauthBindStore.Lock()
+		oauthBindStore.items[state] = oauthBindRecord{Token: token, At: time.Now(), Provider: providerName}
+		oauthBindStore.Unlock()
+		setOAuthStateCookie(w, state)
+		writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{"auth_url": provider.AuthURL(state)}})
+		return
+	}
+	state := r.URL.Query().Get("state")
+	snapshot, redirectOnSuccess, err := oauthBindSnapshotFromRequest(r, uc, providerName, state)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, apiResponse{Success: false, Message: "invalid token"})
 		return
 	}
 	userInfo, err := provider.Exchange(r.Context(), code)
@@ -1199,10 +1231,40 @@ func handleOneAPIOAuthBind(w http.ResponseWriter, r *http.Request, registry *oau
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
 		return
 	}
+	if redirectOnSuccess {
+		http.Redirect(w, r, "/profile?oauth_bind=success&provider="+url.QueryEscape(providerName), http.StatusFound)
+		return
+	}
 	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{
 		"user_id":        user.ID,
 		"oauth_provider": user.OAuthProvider,
 	}})
+}
+
+func oauthBindSnapshotFromRequest(r *http.Request, uc *biz.IdentityUsecase, providerName, state string) (*biz.AuthSnapshot, bool, error) {
+	token, ok := bearerTokenFromRequest(r)
+	if ok {
+		snapshot, err := uc.GetSessionSnapshot(r.Context(), token)
+		return snapshot, false, err
+	}
+	if state == "" {
+		return nil, false, biz.ErrInvalidToken
+	}
+	cookie, _ := r.Cookie("oauth_state")
+	if cookie == nil || cookie.Value != state {
+		return nil, false, biz.ErrInvalidToken
+	}
+	oauthBindStore.Lock()
+	record, ok := oauthBindStore.items[state]
+	if ok {
+		delete(oauthBindStore.items, state)
+	}
+	oauthBindStore.Unlock()
+	if !ok || record.Provider != providerName || time.Since(record.At) > 5*time.Minute {
+		return nil, false, biz.ErrInvalidToken
+	}
+	snapshot, err := uc.GetSessionSnapshot(r.Context(), record.Token)
+	return snapshot, true, err
 }
 
 func handleCreateUserToken(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase) {
@@ -1342,15 +1404,23 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst interface{}) bool {
 }
 
 func authSnapshotFromRequest(r *http.Request, uc *biz.IdentityUsecase) (*biz.AuthSnapshot, error) {
-	authHeader := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		return nil, biz.ErrInvalidToken
-	}
-	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-	if token == "" {
+	token, ok := bearerTokenFromRequest(r)
+	if !ok {
 		return nil, biz.ErrInvalidToken
 	}
 	return uc.GetSessionSnapshot(r.Context(), token)
+}
+
+func bearerTokenFromRequest(r *http.Request) (string, bool) {
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return "", false
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if token == "" {
+		return "", false
+	}
+	return token, true
 }
 
 func parseTokenID(path string) (int64, bool) {

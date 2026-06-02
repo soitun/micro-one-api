@@ -2,7 +2,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api-error';
 import { unwrapApiData } from '@/lib/api-response';
+import { bindableOAuthProviders, redirectToURL } from '@/lib/oauth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -115,6 +117,19 @@ export function ProfilePage() {
   }
 
   const roleLabel = ROLE_LABELS[user.role] || `角色 ${user.role}`;
+
+  const startOAuthBind = async (path: string) => {
+    try {
+      const res = await apiClient.get(path);
+      const data = unwrapApiData<{ auth_url?: string }>(res.data, '发起绑定失败');
+      if (!data.auth_url) {
+        throw new Error('发起绑定失败');
+      }
+      redirectToURL(data.auth_url);
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, '发起绑定失败'));
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -281,6 +296,28 @@ export function ProfilePage() {
         </Card>
 
         <div className="space-y-6">
+          <Card className="rounded-lg border-0 bg-white shadow-sm ring-1 ring-slate-200 dark:bg-card dark:ring-white/10">
+            <CardHeader className="border-b border-slate-100 p-6 dark:border-white/10">
+              <CardTitle className="text-xl font-black tracking-normal text-slate-950 dark:text-white">
+                第三方账号
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="grid grid-cols-2 gap-2">
+                {bindableOAuthProviders.map((provider) => (
+                  <Button
+                    key={provider.id}
+                    type="button"
+                    variant="outline"
+                    onClick={() => provider.bindPath && void startOAuthBind(provider.bindPath)}
+                  >
+                    绑定{provider.label}
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
           <Card className="rounded-lg border-0 bg-white shadow-sm ring-1 ring-slate-200 dark:bg-card dark:ring-white/10">
             <CardHeader className="border-b border-slate-100 p-6 dark:border-white/10">
               <CardTitle className="text-xl font-black tracking-normal text-slate-950 dark:text-white">

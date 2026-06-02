@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { apiClient } from '@/lib/api';
 import { getApiErrorMessage } from '@/lib/api-error';
 import { unwrapApiData } from '@/lib/api-response';
+import { oauthProviders, redirectToApiPath } from '@/lib/oauth';
 
 export function LoginPage() {
   const location = useLocation();
@@ -126,6 +127,28 @@ export function LoginPage() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? (mode === 'login' ? 'Signing in...' : 'Creating account...') : mode === 'login' ? 'Sign in' : 'Create account'}
             </Button>
+            {mode === 'login' && (
+              <>
+                <div className="flex items-center gap-3 py-1">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-xs font-semibold text-muted-foreground">或使用第三方账号</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {oauthProviders.map((provider) => (
+                    <Button
+                      key={provider.id}
+                      type="button"
+                      variant="outline"
+                      disabled={loading}
+                      onClick={() => redirectToApiPath(provider.loginPath)}
+                    >
+                      {provider.label}
+                    </Button>
+                  ))}
+                </div>
+              </>
+            )}
             <Button
               type="button"
               variant="ghost"

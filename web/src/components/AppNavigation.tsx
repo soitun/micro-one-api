@@ -13,6 +13,7 @@ import {
   LogOut,
   MonitorCog,
   ReceiptText,
+  Scale,
   ScrollText,
   Settings2,
   Ticket,
@@ -77,6 +78,7 @@ const adminLinks: NavItem[] = [
   { to: '/admin/pricing', label: '模型价格', ariaLabel: 'Model Pricing', icon: ReceiptText },
   { to: '/admin/logs', label: '日志', ariaLabel: 'Logs', icon: ScrollText },
   { to: '/admin/payment-orders', label: '订单', ariaLabel: 'Payment Orders', icon: CreditCard },
+  { to: '/admin/reconciliation', label: '对账', ariaLabel: 'Reconciliation', icon: Scale },
   { to: '/admin/redemptions', label: '兑换码', ariaLabel: 'Redemptions', icon: Ticket },
   { to: '/admin/options', label: '设置', ariaLabel: 'Options', icon: Settings2 },
 ];
@@ -96,6 +98,7 @@ const routeTitles: Record<string, string> = {
   '/admin/pricing': '模型价格',
   '/admin/logs': '系统日志',
   '/admin/payment-orders': '支付订单',
+  '/admin/reconciliation': '账务对账',
   '/admin/redemptions': '兑换码',
   '/admin/options': '系统设置',
 };

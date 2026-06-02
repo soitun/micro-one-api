@@ -637,10 +637,10 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 			Models: []*billingv1.ModelUsage{
 				{Model: "mimo-v2.5-pro", Tokens: 1000000},
 			},
-			TotalQuota:           217500,
-			TotalPromptTokens:    1000000,
+			TotalQuota:            217500,
+			TotalPromptTokens:     1000000,
 			TotalCompletionTokens: 0,
-			TotalCount:           1,
+			TotalCount:            1,
 		},
 	})
 
@@ -660,10 +660,10 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 			TodayPromptTokens     int64 `json:"today_prompt_tokens"`
 			TodayCompletionTokens int64 `json:"today_completion_tokens"`
 			Usage                 []struct {
-				Date              string `json:"date"`
-				Quota             int64  `json:"quota"`
-				PromptTokens      int64  `json:"prompt_tokens"`
-				CompletionTokens  int64  `json:"completion_tokens"`
+				Date             string `json:"date"`
+				Quota            int64  `json:"quota"`
+				PromptTokens     int64  `json:"prompt_tokens"`
+				CompletionTokens int64  `json:"completion_tokens"`
 			} `json:"usage"`
 		} `json:"data"`
 	}
@@ -1475,6 +1475,48 @@ func TestIdentityHTTPOAuthBindRequiresAuthenticatedUser(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestIdentityHTTPOAuthBindBrowserRedirectFlow(t *testing.T) {
+	registry := oauth.NewProviderRegistry()
+	registry.Register(&fakeOAuthProvider{name: "wechat", providerID: "openid-1"})
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	srv := NewHTTPServer(":0", uc, registry)
+
+	startReq := httptest.NewRequest(http.MethodGet, "/api/oauth/wechat/bind", nil)
+	startReq.Header.Set("Authorization", "Bearer "+authToken)
+	startRec := httptest.NewRecorder()
+	srv.ServeHTTP(startRec, startReq)
+
+	if startRec.Code != http.StatusOK {
+		t.Fatalf("start status = %d, want 200, body=%s", startRec.Code, startRec.Body.String())
+	}
+	authURL := extractJSONField(startRec.Body.String(), "auth_url")
+	if !strings.Contains(authURL, "https://oauth.example.com/authorize?") {
+		t.Fatalf("auth_url missing or invalid: %s", startRec.Body.String())
+	}
+	cookies := startRec.Result().Cookies()
+	if len(cookies) == 0 || cookies[0].Name != "oauth_state" || cookies[0].Value == "" {
+		t.Fatalf("oauth state cookie was not set: %+v", cookies)
+	}
+	state := cookies[0].Value
+
+	callbackReq := httptest.NewRequest(http.MethodGet, "/api/oauth/wechat/bind?code=oauth-code&state="+state, nil)
+	callbackReq.AddCookie(cookies[0])
+	callbackRec := httptest.NewRecorder()
+	srv.ServeHTTP(callbackRec, callbackReq)
+
+	if callbackRec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, want 302, body=%s", callbackRec.Code, callbackRec.Body.String())
+	}
+	if location := callbackRec.Header().Get("Location"); location != "/profile?oauth_bind=success&provider=wechat" {
+		t.Fatalf("unexpected redirect location: %s", location)
+	}
+	if _, err := repo.FindOAuthIdentity(context.Background(), "wechat", "openid-1"); err != nil {
+		t.Fatalf("bound identity was not persisted: %v", err)
 	}
 }
 
