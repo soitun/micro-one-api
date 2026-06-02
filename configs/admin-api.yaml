@@ -1,6 +1,7 @@
 server:
   http:
     addr: 0.0.0.0:8000
+    web_root: ${ADMIN_WEB_ROOT:-}
   grpc:
     addr: 0.0.0.0:9000
 registry:

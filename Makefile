@@ -65,10 +65,14 @@ proto: api config
 build: proto web-build
 	go build ./...
 
-.PHONY: web-build
-# build web frontend
-web-build:
+.PHONY: web-dist
+# build web frontend into web/dist for external ADMIN_WEB_ROOT deployments
+web-dist:
 	cd web && npm ci && npm run build
+
+.PHONY: web-build
+# build web frontend and copy it into the embedded admin-api asset directory
+web-build: web-dist
 	rm -rf internal/admin/server/static/web
 	mkdir -p internal/admin/server/static/web
 	cp -r web/dist/* internal/admin/server/static/web/

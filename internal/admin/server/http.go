@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,10 @@ import (
 
 //go:embed all:static/web
 var webFS embed.FS
+
+type adminWebAssets struct {
+	root fs.FS
+}
 
 // adminRoleContextKey carries the resolved role of an authorised admin
 // request so downstream handlers (e.g. /api/admin/access) can report it.
@@ -73,38 +78,44 @@ func newAdminGuard(svc *service.AdminService) func(http.HandlerFunc) http.Handle
 }
 
 // NewHTTPServer wires HTTP transport for admin-api.
-func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint ...string) *khttp.Server {
+//
+// Optional arguments are kept for backwards-compatible tests and older wire
+// call sites: first is identity HTTP endpoint, second is external web root.
+func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *khttp.Server {
 	srv := khttp.NewServer(
 		khttp.Address(addr),
 	)
-	identityProxy := newServiceReverseProxy(firstString(identityHTTPEndpoint))
+	identityProxy := newServiceReverseProxy(optionString(options, 0))
+	webAssets := newAdminWebAssets(optionString(options, 1))
+	handlePage := webAssets.handlePage
 	adminAuth := newAdminGuard(svc)
 
 	// Health and metrics (unauthenticated)
-	srv.HandleFunc("/", handleAdminPage)
-	srv.HandleFunc("/admin", handleAdminPage)
-	srv.HandleFunc("/admin/", handleAdminPage)
+	srv.HandleFunc("/", handlePage)
+	srv.HandleFunc("/admin", handlePage)
+	srv.HandleFunc("/admin/", handlePage)
 	// SPA client-side routes — must mirror entries in web/src/router.tsx
-	srv.HandleFunc("/login", handleAdminPage)
-	srv.HandleFunc("/register", handleAdminPage)
-	srv.HandleFunc("/dashboard", handleAdminPage)
-	srv.HandleFunc("/tokens", handleAdminPage)
-	srv.HandleFunc("/usage", handleAdminPage)
-	srv.HandleFunc("/pricing", handleAdminPage)
-	srv.HandleFunc("/recharge", handleAdminPage)
-	srv.HandleFunc("/redeem", handleAdminPage)
-	srv.HandleFunc("/orders", handleAdminPage)
-	srv.HandleFunc("/profile", handleAdminPage)
-	srv.HandleFunc("/admin/users", handleAdminPage)
-	srv.HandleFunc("/admin/channels", handleAdminPage)
-	srv.HandleFunc("/admin/pricing", handleAdminPage)
-	srv.HandleFunc("/admin/logs", handleAdminPage)
-	srv.HandleFunc("/admin/payment-orders", handleAdminPage)
-	srv.HandleFunc("/admin/redemptions", handleAdminPage)
-	srv.HandleFunc("/admin/options", handleAdminPage)
+	srv.HandleFunc("/login", handlePage)
+	srv.HandleFunc("/register", handlePage)
+	srv.HandleFunc("/dashboard", handlePage)
+	srv.HandleFunc("/tokens", handlePage)
+	srv.HandleFunc("/usage", handlePage)
+	srv.HandleFunc("/pricing", handlePage)
+	srv.HandleFunc("/recharge", handlePage)
+	srv.HandleFunc("/redeem", handlePage)
+	srv.HandleFunc("/orders", handlePage)
+	srv.HandleFunc("/profile", handlePage)
+	srv.HandleFunc("/admin/users", handlePage)
+	srv.HandleFunc("/admin/channels", handlePage)
+	srv.HandleFunc("/admin/pricing", handlePage)
+	srv.HandleFunc("/admin/logs", handlePage)
+	srv.HandleFunc("/admin/payment-orders", handlePage)
+	srv.HandleFunc("/admin/reconciliation", handlePage)
+	srv.HandleFunc("/admin/redemptions", handlePage)
+	srv.HandleFunc("/admin/options", handlePage)
 	// Static assets bundled by Vite
-	srv.HandlePrefix("/assets/", http.HandlerFunc(handleAdminPage))
-	srv.HandleFunc("/favicon.svg", handleAdminPage)
+	srv.HandlePrefix("/assets/", http.HandlerFunc(handlePage))
+	srv.HandleFunc("/favicon.svg", handlePage)
 	srv.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		metrics.Handler().ServeHTTP(w, r)
 	})
@@ -147,7 +158,7 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 			return
 		}
 		token := strings.TrimPrefix(authHeader, "Bearer ")
-		
+
 		// Validate token with identity service
 		validated, err := svc.ValidateToken(r.Context(), token)
 		if err != nil || !validated {
@@ -380,11 +391,11 @@ func NewHTTPServer(addr string, svc *service.AdminService, identityHTTPEndpoint 
 	return srv
 }
 
-func firstString(values []string) string {
-	if len(values) == 0 {
+func optionString(values []string, index int) string {
+	if index < 0 || index >= len(values) {
 		return ""
 	}
-	return values[0]
+	return values[index]
 }
 
 func newServiceReverseProxy(endpoint string) *httputil.ReverseProxy {
@@ -734,22 +745,20 @@ func paymentSummaryFromOrders(resp *billingv1.ListPaymentOrdersResponse) map[str
 	}
 }
 
-
 func userInfoToMap(u *commonv1.UserInfo, quota, usedQuota int64) map[string]interface{} {
 	return map[string]interface{}{
-		"id":           u.GetId(),
-		"username":     u.GetUsername(),
-		"displayName":  u.GetDisplayName(),
-		"email":        u.GetEmail(),
-		"group":        u.GetGroup(),
-		"status":       u.GetStatus(),
-		"role":         u.GetRole(),
-		"quota":        strconv.FormatInt(quota, 10),
-		"usedQuota":    strconv.FormatInt(usedQuota, 10),
-		"createdAt":    strconv.FormatInt(u.GetCreatedAt(), 10),
+		"id":          u.GetId(),
+		"username":    u.GetUsername(),
+		"displayName": u.GetDisplayName(),
+		"email":       u.GetEmail(),
+		"group":       u.GetGroup(),
+		"status":      u.GetStatus(),
+		"role":        u.GetRole(),
+		"quota":       strconv.FormatInt(quota, 10),
+		"usedQuota":   strconv.FormatInt(usedQuota, 10),
+		"createdAt":   strconv.FormatInt(u.GetCreatedAt(), 10),
 	}
 }
-
 
 func providerNameFromType(channelType int32) string {
 	switch channelType {
@@ -820,14 +829,38 @@ func enrichUsersWithBilling(ctx context.Context, svc *service.AdminService, user
 	return result
 }
 
-func handleAdminPage(w http.ResponseWriter, r *http.Request) {
+func newAdminWebAssets(webRoot string) adminWebAssets {
+	webRoot = strings.TrimSpace(webRoot)
+	if webRoot == "" {
+		webRoot = strings.TrimSpace(os.Getenv("ADMIN_WEB_ROOT"))
+	}
+	if webRoot != "" && isUsableWebRoot(webRoot) {
+		return adminWebAssets{root: os.DirFS(webRoot)}
+	}
+
+	distFS, err := fs.Sub(webFS, "static/web")
+	if err != nil {
+		return adminWebAssets{}
+	}
+	return adminWebAssets{root: distFS}
+}
+
+func isUsableWebRoot(webRoot string) bool {
+	info, err := os.Stat(webRoot)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	indexInfo, err := os.Stat(filepath.Join(webRoot, "index.html"))
+	return err == nil && !indexInfo.IsDir()
+}
+
+func (a adminWebAssets) handlePage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 
-	distFS, err := fs.Sub(webFS, "static/web")
-	if err != nil {
+	if a.root == nil {
 		http.Error(w, "frontend not available", http.StatusInternalServerError)
 		return
 	}
@@ -838,11 +871,11 @@ func handleAdminPage(w http.ResponseWriter, r *http.Request) {
 	if path == "" || !strings.Contains(path, ".") {
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/"
-		http.FileServer(http.FS(distFS)).ServeHTTP(w, r2)
+		http.FileServer(http.FS(a.root)).ServeHTTP(w, r2)
 		return
 	}
 
-	http.FileServer(http.FS(distFS)).ServeHTTP(w, r)
+	http.FileServer(http.FS(a.root)).ServeHTTP(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
@@ -910,14 +943,14 @@ func apiResponse(success bool, message string, data interface{}) map[string]inte
 // logEntryToJSON converts a proto LogEntry to a camelCase JSON map for frontend compatibility.
 func logEntryToJSON(entry *adminv1.LogEntry) map[string]interface{} {
 	return map[string]interface{}{
-		"id":            entry.GetId(),
-		"userId":        entry.GetUserId(),
-		"type":          entry.GetType(),
-		"amount":        entry.GetAmount(),
-		"balanceAfter":  entry.GetBalanceAfter(),
-		"referenceId":   entry.GetReferenceId(),
-		"remark":        entry.GetRemark(),
-		"createdAt":     entry.GetCreatedAt(),
+		"id":           entry.GetId(),
+		"userId":       entry.GetUserId(),
+		"type":         entry.GetType(),
+		"amount":       entry.GetAmount(),
+		"balanceAfter": entry.GetBalanceAfter(),
+		"referenceId":  entry.GetReferenceId(),
+		"remark":       entry.GetRemark(),
+		"createdAt":    entry.GetCreatedAt(),
 	}
 }
 

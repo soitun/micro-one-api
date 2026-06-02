@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -483,7 +485,7 @@ func TestAdminHTTPPageIsServed(t *testing.T) {
 
 func TestAdminHTTPPageSPARouteFallback(t *testing.T) {
 	srv := NewHTTPServer(":0", nil)
-	for _, path := range []string{"/", "/login", "/register", "/dashboard", "/tokens", "/pricing", "/redeem", "/admin/options"} {
+	for _, path := range []string{"/", "/login", "/register", "/dashboard", "/tokens", "/pricing", "/redeem", "/admin/reconciliation", "/admin/options"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -493,6 +495,41 @@ func TestAdminHTTPPageSPARouteFallback(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), `<div id="root">`) {
 			t.Fatalf("path %s did not fall back to SPA shell: %s", path, rec.Body.String())
 		}
+	}
+}
+
+func TestAdminHTTPPageUsesExternalWebRoot(t *testing.T) {
+	webRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(webRoot, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webRoot, "index.html"), []byte(`<!doctype html><div id="root">external</div>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webRoot, "assets", "app.js"), []byte(`console.log("external asset")`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewHTTPServer(":0", nil, "", webRoot)
+
+	if body := adminHTTPGetBody(t, srv, "/admin/reconciliation"); !strings.Contains(body, `external`) {
+		t.Fatalf("expected external SPA shell, got: %s", body)
+	}
+	if body := adminHTTPGetBody(t, srv, "/assets/app.js"); !strings.Contains(body, `external asset`) {
+		t.Fatalf("expected external asset, got: %s", body)
+	}
+}
+
+func TestAdminHTTPPageFallsBackToEmbedWhenExternalWebRootInvalid(t *testing.T) {
+	webRoot := t.TempDir()
+	srv := NewHTTPServer(":0", nil, "", webRoot)
+	body := adminHTTPGetBody(t, srv, "/admin")
+
+	if strings.Contains(body, `external`) {
+		t.Fatalf("unexpected external shell from invalid web root: %s", body)
+	}
+	if !strings.Contains(body, `<div id="root">`) {
+		t.Fatalf("embedded SPA shell missing root: %s", body)
 	}
 }
 

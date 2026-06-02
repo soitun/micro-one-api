@@ -167,6 +167,7 @@ services:
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       - SERVICE_TOKEN=${SERVICE_TOKEN:?SERVICE_TOKEN is required}
+      - ADMIN_WEB_ROOT=/web
       - LOG_LEVEL=info
       - LOG_FORMAT=json
     ports:
@@ -181,6 +182,8 @@ services:
     security_opt:
       - no-new-privileges:true
     read_only: true
+    volumes:
+      - ../../web/dist:/web:ro
     tmpfs:
       - /tmp
     cap_drop:

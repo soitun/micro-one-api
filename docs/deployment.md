@@ -177,6 +177,30 @@ kubectl logs -f deployment/relay-gateway -n one-api
 | `CHANNEL_GRPC_ENDPOINT` | channel-service gRPC 地址 | - |
 | `BILLING_GRPC_ENDPOINT` | billing-service gRPC 地址 | - |
 | `LOG_HTTP_ENDPOINT` | log-service HTTP 地址；未配置时 `/api/log/` 删除保持禁用兼容响应 | - |
+| `ADMIN_WEB_ROOT` | 管理前端静态文件目录；目录内必须有 `index.html`，未配置或不可用时使用二进制内嵌资源 | - |
+
+#### 管理前端静态资源
+
+`admin-api` 默认继续使用编译进二进制的前端资源，适合单二进制或镜像内置前端的部署方式。
+
+如果需要前端独立更新，可将 `ADMIN_WEB_ROOT` 指向外部构建目录，例如：
+
+```bash
+make web-dist
+ADMIN_WEB_ROOT=/srv/micro-one-api/web/dist ./admin-api
+```
+
+运行中的 `admin-api` 会直接从该目录读取 `index.html`、`assets/*`、`favicon.svg` 等文件。替换目录内的前端构建产物后，无需重新编译 Go 后端；浏览器刷新即可加载新的 Vite hash 资源。若目录不存在或缺少 `index.html`，服务会自动回退到内嵌资源。
+
+Docker Compose 部署已将宿主机 `web/dist` 挂载到容器 `/web`，并设置 `ADMIN_WEB_ROOT=/web`。使用该模式时先执行：
+
+```bash
+make web-dist
+cd deployments/docker-compose
+docker-compose up -d admin-api
+```
+
+后续只更新前端时，重新执行 `make web-dist` 并刷新浏览器即可；必要时可 `docker-compose restart admin-api`。
 
 #### 日志删除前置条件
 

@@ -26,7 +26,8 @@ type ServerConfig struct {
 }
 
 type HTTPConfig struct {
-	Addr string `json:"addr"`
+	Addr    string `json:"addr"`
+	WebRoot string `json:"web_root"`
 }
 
 type GRPCConfig struct {
