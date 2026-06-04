@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/fs"
 	"net/http"
@@ -835,8 +836,11 @@ func newAdminWebAssets(webRoot string) adminWebAssets {
 	if webRoot == "" {
 		webRoot = strings.TrimSpace(os.Getenv("ADMIN_WEB_ROOT"))
 	}
-	if webRoot != "" && isUsableWebRoot(webRoot) {
-		return adminWebAssets{root: os.DirFS(webRoot)}
+	if webRoot != "" {
+		cleanRoot, err := usableWebRoot(webRoot)
+		if err == nil {
+			return adminWebAssets{root: os.DirFS(cleanRoot)}
+		}
 	}
 
 	distFS, err := fs.Sub(webFS, "static/web")
@@ -847,12 +851,24 @@ func newAdminWebAssets(webRoot string) adminWebAssets {
 }
 
 func isUsableWebRoot(webRoot string) bool {
-	info, err := os.Stat(webRoot)
-	if err != nil || !info.IsDir() {
-		return false
+	_, err := usableWebRoot(webRoot)
+	return err == nil
+}
+
+func usableWebRoot(webRoot string) (string, error) {
+	cleanRoot, err := filepath.Abs(filepath.Clean(webRoot))
+	if err != nil {
+		return "", err
 	}
-	indexInfo, err := os.Stat(filepath.Join(webRoot, "index.html"))
-	return err == nil && !indexInfo.IsDir()
+	info, err := os.Stat(cleanRoot)
+	if err != nil || !info.IsDir() {
+		return "", errors.New("web root is not a directory")
+	}
+	indexInfo, err := os.Stat(filepath.Join(cleanRoot, "index.html"))
+	if err != nil || indexInfo.IsDir() {
+		return "", errors.New("web root index.html is not a file")
+	}
+	return cleanRoot, nil
 }
 
 func (a adminWebAssets) handlePage(w http.ResponseWriter, r *http.Request) {
@@ -2167,15 +2183,10 @@ func handleOneAPIDeleteLogs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, apiResponse(false, "end_time is required", nil))
 		return
 	}
-	logEndpoint := strings.TrimRight(os.Getenv("LOG_HTTP_ENDPOINT"), "/")
 	serviceToken := os.Getenv("SERVICE_TOKEN")
-	if logEndpoint == "" || serviceToken == "" {
+	targetURL, err := logDeleteURLFromEnv()
+	if err != nil || serviceToken == "" {
 		writeJSON(w, http.StatusNotImplemented, apiResponse(false, "log delete is not configured", nil))
-		return
-	}
-	targetURL, err := url.Parse(logEndpoint + "/v1/logs")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, apiResponse(false, "invalid log service endpoint", nil))
 		return
 	}
 	targetURL.RawQuery = r.URL.RawQuery
@@ -2206,6 +2217,30 @@ func handleOneAPIDeleteLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, apiResponse(true, "", payload))
+}
+
+func logDeleteURLFromEnv() (*url.URL, error) {
+	return logDeleteURL(strings.TrimSpace(os.Getenv("LOG_HTTP_ENDPOINT")))
+}
+
+func logDeleteURL(endpoint string) (*url.URL, error) {
+	if endpoint == "" {
+		return nil, errors.New("missing log endpoint")
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, errors.New("log endpoint scheme must be http or https")
+	}
+	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("log endpoint must be an origin URL")
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/v1/logs"
+	u.RawPath = ""
+	u.ForceQuery = false
+	return u, nil
 }
 
 func handleOneAPIListLogs(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
