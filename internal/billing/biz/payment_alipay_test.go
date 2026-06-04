@@ -48,6 +48,13 @@ func TestAlipayProviderReadsKeyFiles(t *testing.T) {
 	}
 }
 
+func TestReadPaymentSecretFileRejectsDirectory(t *testing.T) {
+	_, err := ReadPaymentSecretFile("@"+t.TempDir(), "private key")
+	if err == nil {
+		t.Fatal("expected directory read to fail")
+	}
+}
+
 func TestAlipayProviderQueryOrderPaid(t *testing.T) {
 	privateKeyPEM, _ := testAlipayKeyPairPEM(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

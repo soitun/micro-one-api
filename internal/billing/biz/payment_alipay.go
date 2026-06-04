@@ -18,10 +18,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"time"
+
+	"micro-one-api/internal/pkg/safefile"
 )
 
 type PaymentConfig struct {
@@ -189,7 +190,7 @@ func firstNonEmptyStringOrFile(value, path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := safefile.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -418,7 +419,7 @@ func verifyRSA2(content, signature, publicKeyPEM string) error {
 }
 
 func getAlipayCertSN(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := safefile.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -434,7 +435,7 @@ func getAlipayCertSN(path string) (string, error) {
 }
 
 func getAlipayRootCertSN(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := safefile.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -530,7 +531,7 @@ func ReadPaymentSecretFile(value, label string) (string, error) {
 		return value, nil
 	}
 	path := strings.TrimSpace(strings.TrimPrefix(value, "@"))
-	data, err := os.ReadFile(path)
+	data, err := safefile.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", label, err)
 	}

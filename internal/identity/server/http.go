@@ -1527,8 +1527,21 @@ func handleOAuth(w http.ResponseWriter, r *http.Request, registry *oauth.Provide
 
 func handleOAuthAuthorize(w http.ResponseWriter, r *http.Request, provider oauth.Provider) {
 	state := generateState()
+	authURL := provider.AuthURL(state)
+	if !isSafeOAuthAuthorizeURL(authURL) {
+		writeJSON(w, http.StatusInternalServerError, apiResponse{Success: false, Message: "invalid oauth authorize URL"})
+		return
+	}
 	setOAuthStateCookie(w, state)
-	http.Redirect(w, r, provider.AuthURL(state), http.StatusFound)
+	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+func isSafeOAuthAuthorizeURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" && u.User == nil
 }
 
 func setOAuthStateCookie(w http.ResponseWriter, state string) {

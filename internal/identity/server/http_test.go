@@ -1396,6 +1396,40 @@ func TestIdentityHTTPOAuthLegacyAliasRedirects(t *testing.T) {
 	}
 }
 
+func TestIdentityHTTPOAuthAuthorizeRejectsUnsafeRedirectURL(t *testing.T) {
+	registry := oauth.NewProviderRegistry()
+	registry.Register(&fakeOAuthProvider{name: "unsafe", authURL: "javascript:alert(1)"})
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/oauth/unsafe/authorize", nil)
+	rec := httptest.NewRecorder()
+	handleOAuth(rec, req, registry, uc)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rec.Code, rec.Body.String())
+	}
+	if location := rec.Header().Get("Location"); location != "" {
+		t.Fatalf("unsafe redirect location was set: %s", location)
+	}
+	if cookies := rec.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("oauth state cookie should not be set on unsafe redirect: %+v", cookies)
+	}
+}
+
+func TestSafeOAuthAuthorizeURL(t *testing.T) {
+	for _, rawURL := range []string{"https://oauth.example.com/authorize", "http://localhost/oauth"} {
+		if !isSafeOAuthAuthorizeURL(rawURL) {
+			t.Fatalf("isSafeOAuthAuthorizeURL(%q) = false", rawURL)
+		}
+	}
+	for _, rawURL := range []string{"javascript:alert(1)", "/relative/path", "https://user:pass@oauth.example.com/authorize"} {
+		if isSafeOAuthAuthorizeURL(rawURL) {
+			t.Fatalf("isSafeOAuthAuthorizeURL(%q) = true", rawURL)
+		}
+	}
+}
+
 func TestIdentityHTTPOAuthStateReturnsStateAndCookie(t *testing.T) {
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)
@@ -1612,11 +1646,15 @@ type fakeTurnstileVerifier struct {
 type fakeOAuthProvider struct {
 	name       string
 	providerID string
+	authURL    string
 }
 
 func (p *fakeOAuthProvider) Name() string { return p.name }
 
 func (p *fakeOAuthProvider) AuthURL(state string) string {
+	if p.authURL != "" {
+		return p.authURL
+	}
 	return "https://oauth.example.com/authorize?state=" + state
 }
 

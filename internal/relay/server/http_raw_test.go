@@ -395,6 +395,28 @@ func TestHTTPServerRawRelayForwardsResponseAndCommitsBilling(t *testing.T) {
 	}
 }
 
+func TestSafeRawContentType(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		fallback    string
+		want        string
+	}{
+		{name: "json", contentType: "application/json; charset=utf-8", fallback: "application/json", want: "application/json; charset=utf-8"},
+		{name: "event stream", contentType: "text/event-stream", fallback: "text/event-stream", want: "text/event-stream"},
+		{name: "json suffix", contentType: "application/problem+json", fallback: "application/json", want: "application/problem+json"},
+		{name: "html", contentType: "text/html", fallback: "application/json", want: "application/octet-stream"},
+		{name: "empty", contentType: "", fallback: "application/json", want: "application/json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := safeRawContentType(tt.contentType, tt.fallback); got != tt.want {
+				t.Fatalf("safeRawContentType(%q) = %q, want %q", tt.contentType, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHTTPServerResponsesCreateForwardsAndCommitsResponsesUsage(t *testing.T) {
 	t.Setenv("PROVIDER_DISABLE_SSRF_CHECK", "true")
 
