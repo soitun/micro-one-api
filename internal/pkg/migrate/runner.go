@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"micro-one-api/internal/pkg/safefile"
 )
 
 // Runner applies SQL migration files against a database.
@@ -243,7 +245,7 @@ func (r *Runner) markApplied(ctx context.Context, version string) error {
 // the file may be ;-separated; we split conservatively and execute each
 // non-empty statement.
 func (r *Runner) applyOne(ctx context.Context, path, version string) error {
-	body, err := os.ReadFile(path)
+	body, err := safefile.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read: %w", err)
 	}

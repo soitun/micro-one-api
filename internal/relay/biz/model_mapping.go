@@ -2,8 +2,9 @@ package biz
 
 import (
 	"fmt"
-	"os"
 	"strings"
+
+	"micro-one-api/internal/pkg/safefile"
 
 	"github.com/bytedance/sonic"
 	"gopkg.in/yaml.v3"
@@ -41,7 +42,7 @@ func NewModelMapper(path string) (*ModelMapper, error) {
 		return &ModelMapper{models: make(map[string]*ModelEntry)}, nil
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := safefile.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read models config %s: %w", path, err)
 	}

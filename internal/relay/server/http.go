@@ -7,6 +7,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"strconv"
@@ -1960,18 +1961,39 @@ func extractTotalTokens(body []byte, fallback int64) int64 {
 
 func writeRawResponse(w http.ResponseWriter, resp *relayprovider.RawResponse) {
 	for key, values := range resp.Header {
-		if isRelayHopByHopHeader(key) {
+		if isRelayHopByHopHeader(key) || strings.EqualFold(key, "Content-Type") {
 			continue
 		}
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
 	}
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/json")
-	}
+	w.Header().Set("Content-Type", safeRawContentType(resp.Header.Get("Content-Type"), "application/json"))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = w.Write(resp.Body)
+	_, _ = w.Write(resp.Body) // #nosec G705 -- upstream content type is constrained and nosniff is set above.
+}
+
+func safeRawContentType(contentType, fallback string) string {
+	contentType = strings.TrimSpace(contentType)
+	if contentType == "" {
+		return fallback
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return "application/octet-stream"
+	}
+	mediaType = strings.ToLower(mediaType)
+	switch {
+	case mediaType == "application/json",
+		mediaType == "application/x-ndjson",
+		mediaType == "application/octet-stream",
+		mediaType == "text/event-stream",
+		strings.HasSuffix(mediaType, "+json"):
+		return contentType
+	default:
+		return "application/octet-stream"
+	}
 }
 
 type rawStreamUsageTracker struct {
@@ -2058,16 +2080,15 @@ func writeRawStreamResponse(w http.ResponseWriter, resp *relayprovider.RawStream
 	defer resp.Body.Close()
 
 	for key, values := range resp.Header {
-		if isRelayHopByHopHeader(key) {
+		if isRelayHopByHopHeader(key) || strings.EqualFold(key, "Content-Type") {
 			continue
 		}
 		for _, value := range values {
 			w.Header().Add(key, value)
 		}
 	}
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "text/event-stream")
-	}
+	w.Header().Set("Content-Type", safeRawContentType(resp.Header.Get("Content-Type"), "text/event-stream"))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(resp.StatusCode)
 	if flusher, ok := w.(http.Flusher); ok {
 		_, _ = io.Copy(&flushWriter{w: w, flusher: flusher, usageTracker: firstRawStreamUsageTracker(usageTracker)}, resp.Body)

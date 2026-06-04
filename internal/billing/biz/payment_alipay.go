@@ -3,7 +3,7 @@ package biz
 import (
 	"context"
 	"crypto"
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- Alipay certificate SN calculation requires MD5 by protocol.
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -18,10 +18,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"time"
+
+	"micro-one-api/internal/pkg/safefile"
 )
 
 type PaymentConfig struct {
@@ -189,7 +190,7 @@ func firstNonEmptyStringOrFile(value, path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := safefile.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -418,7 +419,7 @@ func verifyRSA2(content, signature, publicKeyPEM string) error {
 }
 
 func getAlipayCertSN(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := safefile.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -434,7 +435,7 @@ func getAlipayCertSN(path string) (string, error) {
 }
 
 func getAlipayRootCertSN(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := safefile.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -458,7 +459,7 @@ func getAlipayRootCertSN(path string) (string, error) {
 }
 
 func alipayCertSN(cert *x509.Certificate) string {
-	h := md5.New()
+	h := md5.New() // #nosec G401 -- Alipay certificate SN calculation requires MD5 by protocol.
 	h.Write([]byte(cert.Issuer.String()))
 	h.Write([]byte(cert.SerialNumber.String()))
 	return hex.EncodeToString(h.Sum(nil))
@@ -530,7 +531,7 @@ func ReadPaymentSecretFile(value, label string) (string, error) {
 		return value, nil
 	}
 	path := strings.TrimSpace(strings.TrimPrefix(value, "@"))
-	data, err := os.ReadFile(path)
+	data, err := safefile.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", label, err)
 	}

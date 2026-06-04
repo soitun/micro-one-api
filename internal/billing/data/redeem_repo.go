@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"micro-one-api/internal/billing/biz"
+	"micro-one-api/internal/pkg/safecast"
 
 	"gorm.io/gorm"
 )
@@ -20,15 +21,9 @@ func NewRedeemRepo(data *Data) biz.RedeemRepo {
 }
 
 func (r *redeemRepo) CreateRedeemCode(ctx context.Context, code *biz.RedeemCode) error {
-	model := &redeemCodeModel{
-		Code:      code.Code,
-		Name:      stringPtr(code.Name),
-		Amount:    code.Amount,
-		Count:     int(code.Count),
-		Status:    int8(code.Status),
-		CreatedBy: stringPtr(code.CreatedBy),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	model, err := redeemCodeModelFromBiz(code, time.Now())
+	if err != nil {
+		return err
 	}
 
 	return r.data.db.WithContext(ctx).Create(model).Error
@@ -42,16 +37,11 @@ func (r *redeemRepo) CreateRedeemCodesBatch(ctx context.Context, codes []*biz.Re
 	models := make([]redeemCodeModel, len(codes))
 	now := time.Now()
 	for i, code := range codes {
-		models[i] = redeemCodeModel{
-			Code:      code.Code,
-			Name:      stringPtr(code.Name),
-			Amount:    code.Amount,
-			Count:     int(code.Count),
-			Status:    int8(code.Status),
-			CreatedBy: stringPtr(code.CreatedBy),
-			CreatedAt: now,
-			UpdatedAt: now,
+		model, err := redeemCodeModelFromBiz(code, now)
+		if err != nil {
+			return err
 		}
+		models[i] = *model
 	}
 
 	return r.data.db.WithContext(ctx).Create(&models).Error
@@ -66,16 +56,7 @@ func (r *redeemRepo) GetRedeemCode(ctx context.Context, code string) (*biz.Redee
 		return nil, err
 	}
 
-	return &biz.RedeemCode{
-		Code:      model.Code,
-		Name:      stringFromPtr(model.Name),
-		Amount:    model.Amount,
-		Count:     int32(model.Count),
-		Status:    int32(model.Status),
-		CreatedBy: stringFromPtr(model.CreatedBy),
-		CreatedAt: model.CreatedAt,
-		UpdatedAt: model.UpdatedAt,
-	}, nil
+	return redeemCodeToBiz(&model)
 }
 
 func (r *redeemRepo) ListRedeemCodes(ctx context.Context, page, pageSize int32) ([]*biz.RedeemCode, int64, error) {
@@ -100,16 +81,11 @@ func (r *redeemRepo) ListRedeemCodes(ctx context.Context, page, pageSize int32) 
 
 	codes := make([]*biz.RedeemCode, len(models))
 	for i, model := range models {
-		codes[i] = &biz.RedeemCode{
-			Code:      model.Code,
-			Name:      stringFromPtr(model.Name),
-			Amount:    model.Amount,
-			Count:     int32(model.Count),
-			Status:    int32(model.Status),
-			CreatedBy: stringFromPtr(model.CreatedBy),
-			CreatedAt: model.CreatedAt,
-			UpdatedAt: model.UpdatedAt,
+		code, err := redeemCodeToBiz(&model)
+		if err != nil {
+			return nil, 0, err
 		}
+		codes[i] = code
 	}
 
 	return codes, total, nil
@@ -129,16 +105,11 @@ func (r *redeemRepo) SearchRedeemCodes(ctx context.Context, keyword string) ([]*
 
 	codes := make([]*biz.RedeemCode, len(models))
 	for i, model := range models {
-		codes[i] = &biz.RedeemCode{
-			Code:      model.Code,
-			Name:      stringFromPtr(model.Name),
-			Amount:    model.Amount,
-			Count:     int32(model.Count),
-			Status:    int32(model.Status),
-			CreatedBy: stringFromPtr(model.CreatedBy),
-			CreatedAt: model.CreatedAt,
-			UpdatedAt: model.UpdatedAt,
+		code, err := redeemCodeToBiz(&model)
+		if err != nil {
+			return nil, err
 		}
+		codes[i] = code
 	}
 
 	return codes, nil
@@ -200,6 +171,40 @@ func (r *redeemRepo) CreateRedeemRecord(ctx context.Context, record *biz.RedeemR
 	}
 
 	return r.data.db.WithContext(ctx).Create(model).Error
+}
+
+func redeemCodeModelFromBiz(code *biz.RedeemCode, now time.Time) (*redeemCodeModel, error) {
+	status, err := safecast.Int32ToInt8(code.Status)
+	if err != nil {
+		return nil, err
+	}
+	return &redeemCodeModel{
+		Code:      code.Code,
+		Name:      stringPtr(code.Name),
+		Amount:    code.Amount,
+		Count:     int(code.Count),
+		Status:    status,
+		CreatedBy: stringPtr(code.CreatedBy),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
+}
+
+func redeemCodeToBiz(model *redeemCodeModel) (*biz.RedeemCode, error) {
+	count, err := safecast.IntToInt32(model.Count)
+	if err != nil {
+		return nil, err
+	}
+	return &biz.RedeemCode{
+		Code:      model.Code,
+		Name:      stringFromPtr(model.Name),
+		Amount:    model.Amount,
+		Count:     count,
+		Status:    int32(model.Status),
+		CreatedBy: stringFromPtr(model.CreatedBy),
+		CreatedAt: model.CreatedAt,
+		UpdatedAt: model.UpdatedAt,
+	}, nil
 }
 
 func escapeLike(s string) string {

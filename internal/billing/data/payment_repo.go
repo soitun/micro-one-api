@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"micro-one-api/internal/billing/biz"
+	"micro-one-api/internal/pkg/safecast"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -42,11 +43,14 @@ func NewPaymentRepo(data *Data) biz.PaymentRepo {
 }
 
 func (r *paymentRepo) CreateOrder(ctx context.Context, order *biz.PaymentOrder) (*biz.PaymentOrder, error) {
-	po := toPOPaymentOrder(order)
+	po, err := toPOPaymentOrder(order)
+	if err != nil {
+		return nil, err
+	}
 	if err := r.data.db.WithContext(ctx).Create(po).Error; err != nil {
 		return nil, fmt.Errorf("failed to create payment order: %w", err)
 	}
-	return toBizPaymentOrder(po), nil
+	return toBizPaymentOrder(po)
 }
 
 func (r *paymentRepo) GetOrderByTradeNo(ctx context.Context, tradeNo string) (*biz.PaymentOrder, error) {
@@ -58,7 +62,7 @@ func (r *paymentRepo) GetOrderByTradeNo(ctx context.Context, tradeNo string) (*b
 	if err != nil {
 		return nil, fmt.Errorf("failed to get payment order: %w", err)
 	}
-	return toBizPaymentOrder(&po), nil
+	return toBizPaymentOrder(&po)
 }
 
 func (r *paymentRepo) ListOrders(ctx context.Context, req biz.ListPaymentOrdersRequest) ([]*biz.PaymentOrder, int64, error) {
@@ -103,7 +107,11 @@ func (r *paymentRepo) ListOrders(ctx context.Context, req biz.ListPaymentOrdersR
 	}
 	orders := make([]*biz.PaymentOrder, len(rows))
 	for i := range rows {
-		orders[i] = toBizPaymentOrder(&rows[i])
+		order, err := toBizPaymentOrder(&rows[i])
+		if err != nil {
+			return nil, 0, err
+		}
+		orders[i] = order
 	}
 	return orders, total, nil
 }
@@ -123,7 +131,10 @@ func (r *paymentRepo) MarkOrderPaid(ctx context.Context, tradeNo, providerTradeN
 			return err
 		}
 
-		order := toBizPaymentOrder(&po)
+		order, err := toBizPaymentOrder(&po)
+		if err != nil {
+			return err
+		}
 		if po.Status == biz.PaymentOrderStatusPaid {
 			result = order
 			return nil
@@ -153,7 +164,10 @@ func (r *paymentRepo) MarkOrderPaid(ctx context.Context, tradeNo, providerTradeN
 		po.AssetIssueStatus = biz.PaymentAssetIssueStatusIssued
 		po.PaidAt = &now
 		po.UpdatedAt = now
-		result = toBizPaymentOrder(&po)
+		result, err = toBizPaymentOrder(&po)
+		if err != nil {
+			return err
+		}
 		changed = true
 		return nil
 	})
@@ -178,7 +192,10 @@ func (r *paymentRepo) MarkOrderClosed(ctx context.Context, tradeNo, providerTrad
 			return err
 		}
 
-		order := toBizPaymentOrder(&po)
+		order, err := toBizPaymentOrder(&po)
+		if err != nil {
+			return err
+		}
 		if po.Status == biz.PaymentOrderStatusClosed || po.Status == biz.PaymentOrderStatusPaid {
 			result = order
 			return nil
@@ -198,7 +215,10 @@ func (r *paymentRepo) MarkOrderClosed(ctx context.Context, tradeNo, providerTrad
 		po.Status = biz.PaymentOrderStatusClosed
 		po.ProviderTradeNo = providerTradeNo
 		po.UpdatedAt = now
-		result = toBizPaymentOrder(&po)
+		result, err = toBizPaymentOrder(&po)
+		if err != nil {
+			return err
+		}
 		changed = true
 		return nil
 	})
@@ -208,9 +228,13 @@ func (r *paymentRepo) MarkOrderClosed(ctx context.Context, tradeNo, providerTrad
 	return result, changed, nil
 }
 
-func toPOPaymentOrder(order *biz.PaymentOrder) *PaymentOrder {
+func toPOPaymentOrder(order *biz.PaymentOrder) (*PaymentOrder, error) {
+	id, err := safecast.Int64ToUint(order.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &PaymentOrder{
-		ID:               uint(order.ID),
+		ID:               id,
 		UserID:           order.UserID,
 		TradeNo:          order.TradeNo,
 		Channel:          order.Channel,
@@ -226,12 +250,16 @@ func toPOPaymentOrder(order *biz.PaymentOrder) *PaymentOrder {
 		PaidAt:           order.PaidAt,
 		CreatedAt:        order.CreatedAt,
 		UpdatedAt:        order.UpdatedAt,
-	}
+	}, nil
 }
 
-func toBizPaymentOrder(po *PaymentOrder) *biz.PaymentOrder {
+func toBizPaymentOrder(po *PaymentOrder) (*biz.PaymentOrder, error) {
+	id, err := safecast.UintToInt64(po.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &biz.PaymentOrder{
-		ID:               int64(po.ID),
+		ID:               id,
 		UserID:           po.UserID,
 		TradeNo:          po.TradeNo,
 		Channel:          po.Channel,
@@ -247,5 +275,5 @@ func toBizPaymentOrder(po *PaymentOrder) *biz.PaymentOrder {
 		PaidAt:           po.PaidAt,
 		CreatedAt:        po.CreatedAt,
 		UpdatedAt:        po.UpdatedAt,
-	}
+	}, nil
 }

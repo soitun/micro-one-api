@@ -583,6 +583,24 @@ func TestAdminHTTPEmbeddedLoginBundleIncludesRegistration(t *testing.T) {
 	}
 }
 
+func TestUsableWebRootCleansToAbsoluteIndexDir(t *testing.T) {
+	webRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(webRoot, "index.html"), []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := usableWebRoot(filepath.Join(webRoot, "."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(got) {
+		t.Fatalf("usableWebRoot returned non-absolute path %q", got)
+	}
+	if filepath.Clean(got) != got {
+		t.Fatalf("usableWebRoot returned unclean path %q", got)
+	}
+}
+
 func adminHTTPGetBody(t *testing.T, srv http.Handler, path string) string {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -1747,6 +1765,29 @@ func TestAdminHTTPOneAPILogDeleteRequiresEndTime(t *testing.T) {
 	}
 	if called {
 		t.Fatal("log-service should not be called without end_time")
+	}
+}
+
+func TestLogDeleteURLUsesConfiguredOriginAndFixedPath(t *testing.T) {
+	got, err := logDeleteURL("https://logs.example.com/base/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "https://logs.example.com/base/v1/logs" {
+		t.Fatalf("logDeleteURL = %q", got.String())
+	}
+}
+
+func TestLogDeleteURLRejectsUnsafeEndpointShapes(t *testing.T) {
+	for _, endpoint := range []string{
+		"file:///tmp/logs",
+		"https://user:pass@logs.example.com",
+		"https://logs.example.com?target=http://metadata",
+		"https://logs.example.com/#fragment",
+	} {
+		if _, err := logDeleteURL(endpoint); err == nil {
+			t.Fatalf("logDeleteURL accepted %q", endpoint)
+		}
 	}
 }
 

@@ -37,13 +37,14 @@ func (s *EnvFileSource) Load() ([]*config.KeyValue, error) {
 }
 
 func (s *EnvFileSource) Watch() (config.Watcher, error) {
-	return &noopWatcher{ctx: s.ctx}, nil
+	return &noopWatcher{ctx: s.ctx, cancel: s.cancel}, nil
 }
 
 // noopWatcher blocks on Next() until the context is cancelled.
 // Config file changes are not watched in Docker deployments.
 type noopWatcher struct {
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func (w *noopWatcher) Next() ([]*config.KeyValue, error) {
@@ -52,6 +53,7 @@ func (w *noopWatcher) Next() ([]*config.KeyValue, error) {
 }
 
 func (w *noopWatcher) Stop() error {
+	w.cancel()
 	return nil
 }
 

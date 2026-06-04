@@ -13,11 +13,11 @@ import (
 
 // TLSConfig holds TLS configuration
 type TLSConfig struct {
-	Enabled       bool
-	CertFile      string
-	KeyFile       string
-	CAFile        string
-	ServerName    string
+	Enabled            bool
+	CertFile           string
+	KeyFile            string
+	CAFile             string
+	ServerName         string
 	InsecureSkipVerify bool
 }
 
@@ -26,15 +26,19 @@ func LoadTLSConfig() *TLSConfig {
 	enabled := os.Getenv("TLS_ENABLED") == "true"
 
 	config := &TLSConfig{
-		Enabled:           enabled,
-		CertFile:         os.Getenv("TLS_CERT_FILE"),
-		KeyFile:          os.Getenv("TLS_KEY_FILE"),
-		CAFile:           os.Getenv("TLS_CA_FILE"),
-		ServerName:       os.Getenv("TLS_SERVER_NAME"),
-		InsecureSkipVerify: os.Getenv("TLS_INSECURE_SKIP_VERIFY") == "true",
+		Enabled:            enabled,
+		CertFile:           os.Getenv("TLS_CERT_FILE"),
+		KeyFile:            os.Getenv("TLS_KEY_FILE"),
+		CAFile:             os.Getenv("TLS_CA_FILE"),
+		ServerName:         os.Getenv("TLS_SERVER_NAME"),
+		InsecureSkipVerify: allowInsecureSkipVerifyFromEnv(),
 	}
 
 	return config
+}
+
+func allowInsecureSkipVerifyFromEnv() bool {
+	return os.Getenv("TLS_INSECURE_SKIP_VERIFY") == "true" && os.Getenv("TLS_ALLOW_INSECURE_SKIP_VERIFY") == "true"
 }
 
 // CreateClientCredentials creates gRPC client credentials with TLS
@@ -61,10 +65,10 @@ func CreateClientCredentials(config *TLSConfig) (credentials.TransportCredential
 	// Create TLS config
 	tlsConfig := &tls.Config{
 		Certificates:       []tls.Certificate{cert},
-		RootCAs:          caCertPool,
-		InsecureSkipVerify: config.InsecureSkipVerify,
-		MinVersion:        tls.VersionTLS12,
-		MaxVersion:        tls.VersionTLS13,
+		RootCAs:            caCertPool,
+		InsecureSkipVerify: config.InsecureSkipVerify, // #nosec G402 -- disabled by default and gated by TLS_ALLOW_INSECURE_SKIP_VERIFY.
+		MinVersion:         tls.VersionTLS12,
+		MaxVersion:         tls.VersionTLS13,
 	}
 
 	if config.ServerName != "" {
@@ -132,10 +136,10 @@ func CreateHTTPClientConfig(config *TLSConfig) (*tls.Config, error) {
 
 	return &tls.Config{
 		Certificates:       []tls.Certificate{cert},
-		RootCAs:          caCertPool,
-		InsecureSkipVerify: config.InsecureSkipVerify,
-		MinVersion:        tls.VersionTLS12,
-		MaxVersion:        tls.VersionTLS13,
+		RootCAs:            caCertPool,
+		InsecureSkipVerify: config.InsecureSkipVerify, // #nosec G402 -- disabled by default and gated by TLS_ALLOW_INSECURE_SKIP_VERIFY.
+		MinVersion:         tls.VersionTLS12,
+		MaxVersion:         tls.VersionTLS13,
 	}, nil
 }
 

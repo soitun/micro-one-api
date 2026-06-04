@@ -3,7 +3,6 @@ package registry
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"sync"
 
 	"github.com/go-kratos/kratos/v2/registry"
@@ -12,9 +11,10 @@ import (
 // Resolver resolves service endpoints. It supports static endpoints and
 // dynamic discovery via a registry.Discovery.
 type Resolver struct {
-	mu       sync.RWMutex
-	static   map[string]string // serviceName -> endpoint
+	mu        sync.RWMutex
+	static    map[string]string // serviceName -> endpoint
 	discovery registry.Discovery
+	next      map[string]int
 }
 
 // NewResolver creates a Resolver. If discovery is nil, only static endpoints are used.
@@ -22,6 +22,7 @@ func NewResolver(discovery registry.Discovery) *Resolver {
 	return &Resolver{
 		static:    make(map[string]string),
 		discovery: discovery,
+		next:      make(map[string]int),
 	}
 }
 
@@ -38,8 +39,7 @@ func (r *Resolver) Resolve(ctx context.Context, serviceName string) (string, err
 	if r.discovery != nil {
 		instances, err := r.discovery.GetService(ctx, serviceName)
 		if err == nil && len(instances) > 0 {
-			// Pick a random instance for basic load balancing
-			inst := instances[rand.Intn(len(instances))]
+			inst := r.nextInstance(serviceName, instances)
 			if len(inst.Endpoints) > 0 {
 				return inst.Endpoints[0], nil
 			}
@@ -52,6 +52,14 @@ func (r *Resolver) Resolve(ctx context.Context, serviceName string) (string, err
 		return ep, nil
 	}
 	return "", fmt.Errorf("service %s: no endpoint available", serviceName)
+}
+
+func (r *Resolver) nextInstance(serviceName string, instances []*registry.ServiceInstance) *registry.ServiceInstance {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	idx := r.next[serviceName] % len(instances)
+	r.next[serviceName] = (idx + 1) % len(instances)
+	return instances[idx]
 }
 
 // ResolveGRPC returns a gRPC-compatible endpoint (strips scheme prefix).

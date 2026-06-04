@@ -10,6 +10,7 @@ import (
 
 	notifyv1 "micro-one-api/api/notify/v1"
 	"micro-one-api/internal/notify/biz"
+	"micro-one-api/internal/pkg/safecast"
 )
 
 // NotifyService is the transport layer entry for notify-worker.
@@ -29,9 +30,11 @@ func (s *NotifyService) CreateNotification(ctx context.Context, req *notifyv1.Cr
 	if err != nil {
 		return nil, err
 	}
-	return &notifyv1.CreateNotificationResponse{
-		Notification: notificationToProto(n),
-	}, nil
+	notification, err := notificationToProto(n)
+	if err != nil {
+		return nil, err
+	}
+	return &notifyv1.CreateNotificationResponse{Notification: notification}, nil
 }
 
 func (s *NotifyService) GetNotification(ctx context.Context, req *notifyv1.GetNotificationRequest) (*notifyv1.GetNotificationResponse, error) {
@@ -39,9 +42,11 @@ func (s *NotifyService) GetNotification(ctx context.Context, req *notifyv1.GetNo
 	if err != nil {
 		return nil, err
 	}
-	return &notifyv1.GetNotificationResponse{
-		Notification: notificationToProto(n),
-	}, nil
+	notification, err := notificationToProto(n)
+	if err != nil {
+		return nil, err
+	}
+	return &notifyv1.GetNotificationResponse{Notification: notification}, nil
 }
 
 func (s *NotifyService) ListNotifications(ctx context.Context, req *notifyv1.ListNotificationsRequest) (*notifyv1.ListNotificationsResponse, error) {
@@ -51,7 +56,11 @@ func (s *NotifyService) ListNotifications(ctx context.Context, req *notifyv1.Lis
 	}
 	items := make([]*notifyv1.NotificationItem, len(notifications))
 	for i, n := range notifications {
-		items[i] = notificationToProto(n)
+		item, err := notificationToProto(n)
+		if err != nil {
+			return nil, err
+		}
+		items[i] = item
 	}
 	return &notifyv1.ListNotificationsResponse{Items: items, Total: total}, nil
 }
@@ -72,7 +81,11 @@ func (s *NotifyService) UpdateNotificationStatus(ctx context.Context, req *notif
 	return &notifyv1.UpdateNotificationStatusResponse{Success: true}, nil
 }
 
-func notificationToProto(n *biz.Notification) *notifyv1.NotificationItem {
+func notificationToProto(n *biz.Notification) (*notifyv1.NotificationItem, error) {
+	retryCount, err := safecast.IntToInt32(n.RetryCount)
+	if err != nil {
+		return nil, err
+	}
 	return &notifyv1.NotificationItem{
 		Id:         n.ID,
 		Type:       n.Type,
@@ -80,10 +93,10 @@ func notificationToProto(n *biz.Notification) *notifyv1.NotificationItem {
 		Subject:    n.Subject,
 		Content:    n.Content,
 		Status:     n.Status,
-		RetryCount: int32(n.RetryCount),
+		RetryCount: retryCount,
 		CreatedAt:  n.CreatedAt.Unix(),
 		SentAt:     n.SentAt.Unix(),
-	}
+	}, nil
 }
 
 // HTTP handler implementations

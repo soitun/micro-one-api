@@ -93,6 +93,28 @@ func TestResolver_DiscoveryPreferred(t *testing.T) {
 	}
 }
 
+func TestResolver_DiscoveryRoundRobin(t *testing.T) {
+	discovery := &mockDiscovery{
+		services: map[string][]*registry.ServiceInstance{
+			"identity-service": {
+				{ID: "1", Name: "identity-service", Endpoints: []string{"grpc://10.0.0.5:9001"}},
+				{ID: "2", Name: "identity-service", Endpoints: []string{"grpc://10.0.0.6:9001"}},
+			},
+		},
+	}
+
+	r := NewResolver(discovery)
+	for _, want := range []string{"grpc://10.0.0.5:9001", "grpc://10.0.0.6:9001", "grpc://10.0.0.5:9001"} {
+		got, err := r.Resolve(context.Background(), "identity-service")
+		if err != nil {
+			t.Fatalf("Resolve returned error: %v", err)
+		}
+		if got != want {
+			t.Fatalf("Resolve = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestResolver_DiscoveryFallbackToStatic(t *testing.T) {
 	discovery := &mockDiscovery{
 		services: map[string][]*registry.ServiceInstance{},

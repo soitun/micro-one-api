@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	relayprovider "micro-one-api/internal/relay/provider"
 	applogger "micro-one-api/internal/pkg/logger"
+	relayprovider "micro-one-api/internal/relay/provider"
 )
 
 var log *zap.SugaredLogger
@@ -30,7 +30,15 @@ func main() {
 	mux.HandleFunc("/health", handleHealth)
 
 	log.Infof("Mock Upstream server listening on port %s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	server := &http.Server{
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
 }
