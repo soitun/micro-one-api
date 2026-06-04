@@ -10,6 +10,7 @@ import (
 
 	"micro-one-api/internal/channel/biz"
 	appcrypto "micro-one-api/internal/pkg/crypto"
+	"micro-one-api/internal/pkg/safecast"
 	"micro-one-api/internal/pkg/xdb"
 
 	"github.com/redis/go-redis/v9"
@@ -199,7 +200,7 @@ func (r *Repository) findByIDDB(ctx context.Context, channelID int64) (*biz.Chan
 		priority = *model.Priority
 	}
 	return &biz.Channel{
-		ID:                 model.ID,
+		ID:                                model.ID,
 		Type:                              model.Type,
 		Name:                              model.Name,
 		Status:                            model.Status,
@@ -482,7 +483,7 @@ func (r *Repository) modelToChannel(m *channelModel) *biz.Channel {
 		priority = *m.Priority
 	}
 	return &biz.Channel{
-		ID:                 m.ID,
+		ID:                                m.ID,
 		Type:                              m.Type,
 		Name:                              m.Name,
 		Status:                            m.Status,
@@ -551,7 +552,11 @@ func derefUint(u *uint) uint32 {
 	if u == nil {
 		return 0
 	}
-	return uint32(*u)
+	v, err := safecast.UintToUint32(*u)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 func escapeLike(s string) string {

@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	relayv1 "micro-one-api/api/relay/v1"
+	"micro-one-api/internal/pkg/safecast"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relayprovider "micro-one-api/internal/relay/provider"
 
@@ -126,7 +127,7 @@ func (s *RelayGrpcService) ChatCompletion(ctx context.Context, req *relayv1.Chat
 		return nil, result.Err
 	}
 
-	return convertToGRPCResponse(resp), nil
+	return convertToGRPCResponse(resp)
 }
 
 // ListModels lists available models via gRPC.
@@ -199,7 +200,7 @@ func extractTokenFromMetadata(ctx context.Context) (string, error) {
 	return token, nil
 }
 
-func convertToGRPCResponse(resp *relayprovider.ChatCompletionsResponse) *relayv1.ChatCompletionResponse {
+func convertToGRPCResponse(resp *relayprovider.ChatCompletionsResponse) (*relayv1.ChatCompletionResponse, error) {
 	result := &relayv1.ChatCompletionResponse{
 		Id:      resp.ID,
 		Object:  resp.Object,
@@ -207,15 +208,31 @@ func convertToGRPCResponse(resp *relayprovider.ChatCompletionsResponse) *relayv1
 		Model:   resp.Model,
 	}
 	if resp.Usage.TotalTokens > 0 {
+		promptTokens, err := safecast.IntToInt32(resp.Usage.PromptTokens)
+		if err != nil {
+			return nil, err
+		}
+		completionTokens, err := safecast.IntToInt32(resp.Usage.CompletionTokens)
+		if err != nil {
+			return nil, err
+		}
+		totalTokens, err := safecast.IntToInt32(resp.Usage.TotalTokens)
+		if err != nil {
+			return nil, err
+		}
 		result.Usage = &relayv1.Usage{
-			PromptTokens:     int32(resp.Usage.PromptTokens),
-			CompletionTokens: int32(resp.Usage.CompletionTokens),
-			TotalTokens:      int32(resp.Usage.TotalTokens),
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      totalTokens,
 		}
 	}
 	for _, c := range resp.Choices {
+		index, err := safecast.IntToInt32(c.Index)
+		if err != nil {
+			return nil, err
+		}
 		result.Choices = append(result.Choices, &relayv1.Choice{
-			Index: int32(c.Index),
+			Index: index,
 			Message: &relayv1.Message{
 				Role:    c.Message.Role,
 				Content: c.Message.Content,
@@ -223,7 +240,7 @@ func convertToGRPCResponse(resp *relayprovider.ChatCompletionsResponse) *relayv1
 			FinishReason: c.FinishReason,
 		})
 	}
-	return result
+	return result, nil
 }
 
 func estimateTokensForGRPC(req *relayprovider.ChatCompletionsRequest) int64 {

@@ -23,6 +23,7 @@ import (
 	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/internal/admin/service"
 	"micro-one-api/internal/pkg/metrics"
+	"micro-one-api/internal/pkg/safecast"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
@@ -914,7 +915,11 @@ func oneAPIPage(r *http.Request) int32 {
 		if err != nil || p < 0 {
 			return 1
 		}
-		return int32(p + 1)
+		page, err := safecast.Int64ToInt32(p + 1)
+		if err != nil {
+			return 1
+		}
+		return page
 	}
 	return getQueryInt32(r, "page", 1)
 }

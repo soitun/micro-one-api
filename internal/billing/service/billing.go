@@ -10,6 +10,7 @@ import (
 	billingv1 "micro-one-api/api/billing/v1"
 	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/internal/billing/biz"
+	"micro-one-api/internal/pkg/safecast"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -396,12 +397,12 @@ func (s *BillingService) AggregateLedgerByDate(ctx context.Context, req *billing
 	}
 
 	return &billingv1.AggregateLedgerByDateResponse{
-		Daily:                dailyProto,
-		Models:               modelsProto,
-		TotalQuota:           totalQuota,
-		TotalPromptTokens:    totalPrompt,
+		Daily:                 dailyProto,
+		Models:                modelsProto,
+		TotalQuota:            totalQuota,
+		TotalPromptTokens:     totalPrompt,
 		TotalCompletionTokens: totalCompletion,
-		TotalCount:           totalCount,
+		TotalCount:            totalCount,
 	}, nil
 }
 
@@ -531,7 +532,7 @@ func toProtoTimestamp(t time.Time) *timestamppb.Timestamp {
 	}
 	return &timestamppb.Timestamp{
 		Seconds: t.Unix(),
-		Nanos:   int32(t.Nanosecond()),
+		Nanos:   int32(t.Nanosecond()), // #nosec G115 -- Nanosecond returns [0, 999999999].
 	}
 }
 
@@ -606,7 +607,11 @@ func (s *BillingService) ListReconciliationRuns(ctx context.Context, req *billin
 	}
 	resp := &billingv1.ListReconciliationRunsResponse{Total: total}
 	for _, run := range runs {
-		resp.Runs = append(resp.Runs, reconciliationRunToProto(run))
+		item, err := reconciliationRunToProto(run)
+		if err != nil {
+			return nil, err
+		}
+		resp.Runs = append(resp.Runs, item)
 	}
 	return resp, nil
 }
@@ -619,20 +624,40 @@ func (s *BillingService) GetReconciliationRun(ctx context.Context, req *billingv
 	if run == nil {
 		return &billingv1.GetReconciliationRunResponse{}, nil
 	}
-	return &billingv1.GetReconciliationRunResponse{Run: reconciliationRunToProto(run)}, nil
+	item, err := reconciliationRunToProto(run)
+	if err != nil {
+		return nil, err
+	}
+	return &billingv1.GetReconciliationRunResponse{Run: item}, nil
 }
 
-func reconciliationRunToProto(run *biz.ReconciliationResult) *billingv1.ReconciliationRun {
+func reconciliationRunToProto(run *biz.ReconciliationResult) (*billingv1.ReconciliationRun, error) {
 	if run == nil {
-		return nil
+		return nil, nil
+	}
+	expiredCleaned, err := safecast.IntToInt32(run.ExpiredCleaned)
+	if err != nil {
+		return nil, err
+	}
+	totalAccounts, err := safecast.IntToInt32(run.TotalAccounts)
+	if err != nil {
+		return nil, err
+	}
+	totalReservations, err := safecast.IntToInt32(run.TotalReservations)
+	if err != nil {
+		return nil, err
+	}
+	discrepancyCount, err := safecast.IntToInt32(len(run.AccountInconsistencies))
+	if err != nil {
+		return nil, err
 	}
 	out := &billingv1.ReconciliationRun{
 		RunId:             run.RunID,
 		RunAt:             run.RunAt.Unix(),
-		ExpiredCleaned:    int32(run.ExpiredCleaned),
-		TotalAccounts:     int32(run.TotalAccounts),
-		TotalReservations: int32(run.TotalReservations),
-		DiscrepancyCount:  int32(len(run.AccountInconsistencies)),
+		ExpiredCleaned:    expiredCleaned,
+		TotalAccounts:     totalAccounts,
+		TotalReservations: totalReservations,
+		DiscrepancyCount:  discrepancyCount,
 	}
 	for _, d := range run.AccountInconsistencies {
 		out.Discrepancies = append(out.Discrepancies, &billingv1.ReconciliationDiscrepancy{
@@ -643,5 +668,5 @@ func reconciliationRunToProto(run *biz.ReconciliationResult) *billingv1.Reconcil
 			FrozenQuota:     d.FrozenQuota,
 		})
 	}
-	return out
+	return out, nil
 }

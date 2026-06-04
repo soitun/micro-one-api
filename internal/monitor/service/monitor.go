@@ -10,6 +10,7 @@ import (
 
 	monitorv1 "micro-one-api/api/monitor/v1"
 	"micro-one-api/internal/monitor/biz"
+	"micro-one-api/internal/pkg/safecast"
 )
 
 // MonitorService is the transport layer entry for monitor-worker.
@@ -78,19 +79,11 @@ func (s *MonitorService) CreateAlertRule(ctx context.Context, req *monitorv1.Cre
 	if err := s.uc.CreateAlertRule(ctx, rule); err != nil {
 		return nil, err
 	}
-	return &monitorv1.CreateAlertRuleResponse{
-		Rule: &monitorv1.AlertRuleItem{
-			Id:          rule.ID,
-			Name:        rule.Name,
-			ServiceName: rule.ServiceName,
-			Metric:      rule.Metric,
-			Threshold:   rule.Threshold,
-			Operator:    rule.Operator,
-			Duration:    int32(rule.Duration),
-			Enabled:     rule.Enabled,
-			CreatedAt:   rule.CreatedAt.Unix(),
-		},
-	}, nil
+	item, err := alertRuleToProto(rule)
+	if err != nil {
+		return nil, err
+	}
+	return &monitorv1.CreateAlertRuleResponse{Rule: item}, nil
 }
 
 func (s *MonitorService) GetAlertRule(ctx context.Context, req *monitorv1.GetAlertRuleRequest) (*monitorv1.GetAlertRuleResponse, error) {
@@ -98,19 +91,11 @@ func (s *MonitorService) GetAlertRule(ctx context.Context, req *monitorv1.GetAle
 	if err != nil {
 		return nil, err
 	}
-	return &monitorv1.GetAlertRuleResponse{
-		Rule: &monitorv1.AlertRuleItem{
-			Id:          rule.ID,
-			Name:        rule.Name,
-			ServiceName: rule.ServiceName,
-			Metric:      rule.Metric,
-			Threshold:   rule.Threshold,
-			Operator:    rule.Operator,
-			Duration:    int32(rule.Duration),
-			Enabled:     rule.Enabled,
-			CreatedAt:   rule.CreatedAt.Unix(),
-		},
-	}, nil
+	item, err := alertRuleToProto(rule)
+	if err != nil {
+		return nil, err
+	}
+	return &monitorv1.GetAlertRuleResponse{Rule: item}, nil
 }
 
 func (s *MonitorService) UpdateAlertRule(ctx context.Context, req *monitorv1.UpdateAlertRuleRequest) (*monitorv1.UpdateAlertRuleResponse, error) {
@@ -144,19 +129,31 @@ func (s *MonitorService) ListAlertRules(ctx context.Context, req *monitorv1.List
 	}
 	items := make([]*monitorv1.AlertRuleItem, len(rules))
 	for i, r := range rules {
-		items[i] = &monitorv1.AlertRuleItem{
-			Id:          r.ID,
-			Name:        r.Name,
-			ServiceName: r.ServiceName,
-			Metric:      r.Metric,
-			Threshold:   r.Threshold,
-			Operator:    r.Operator,
-			Duration:    int32(r.Duration),
-			Enabled:     r.Enabled,
-			CreatedAt:   r.CreatedAt.Unix(),
+		item, err := alertRuleToProto(r)
+		if err != nil {
+			return nil, err
 		}
+		items[i] = item
 	}
 	return &monitorv1.ListAlertRulesResponse{Items: items, Total: total}, nil
+}
+
+func alertRuleToProto(rule *biz.AlertRule) (*monitorv1.AlertRuleItem, error) {
+	duration, err := safecast.IntToInt32(rule.Duration)
+	if err != nil {
+		return nil, err
+	}
+	return &monitorv1.AlertRuleItem{
+		Id:          rule.ID,
+		Name:        rule.Name,
+		ServiceName: rule.ServiceName,
+		Metric:      rule.Metric,
+		Threshold:   rule.Threshold,
+		Operator:    rule.Operator,
+		Duration:    duration,
+		Enabled:     rule.Enabled,
+		CreatedAt:   rule.CreatedAt.Unix(),
+	}, nil
 }
 
 // HTTP handler implementations
