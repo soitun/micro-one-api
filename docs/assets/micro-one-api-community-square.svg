@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Micro-One-API square community artwork</title>
+  <desc id="desc">Square promotional artwork for Micro-One-API, showing client apps routed through a central AI API gateway to multiple providers with microservice support.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7fbff"/>
+      <stop offset="0.5" stop-color="#eef8f2"/>
+      <stop offset="1" stop-color="#fff7ea"/>
+    </linearGradient>
+    <linearGradient id="gateway" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#145f73"/>
+      <stop offset="1" stop-color="#2f8f68"/>
+    </linearGradient>
+    <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1f6feb"/>
+      <stop offset="1" stop-color="#28a06b"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#24445a" flood-opacity="0.16"/>
+    </filter>
+    <style>
+      .sans { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+      .title { font-size: 74px; font-weight: 850; fill: #173042; letter-spacing: 0; }
+      .subtitle { font-size: 28px; font-weight: 650; fill: #3c5968; letter-spacing: 0; }
+      .label { font-size: 25px; font-weight: 820; fill: #1f3342; letter-spacing: 0; }
+      .small { font-size: 18px; font-weight: 650; fill: #536878; letter-spacing: 0; }
+      .chip { font-size: 18px; font-weight: 800; fill: #244253; letter-spacing: 0; }
+      .white { fill: #ffffff; }
+      .flow { stroke: url(#flow); stroke-width: 7; stroke-linecap: round; fill: none; }
+      .dash { stroke: #8ab4c5; stroke-width: 4; stroke-linecap: round; stroke-dasharray: 10 12; fill: none; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="1200" fill="url(#bg)"/>
+  <rect x="56" y="54" width="1088" height="1092" rx="42" fill="#ffffff" opacity="0.66"/>
+
+  <text x="100" y="146" class="sans title">Micro-One-API</text>
+  <text x="104" y="194" class="sans subtitle">AI API Gateway for multi-provider routing</text>
+  <text x="104" y="232" class="sans subtitle">quota, billing, logs and admin operations</text>
+
+  <g transform="translate(104 316)" filter="url(#shadow)">
+    <rect width="252" height="246" rx="26" fill="#ffffff"/>
+    <text x="30" y="52" class="sans label">Client Apps</text>
+    <rect x="30" y="82" width="192" height="44" rx="13" fill="#eff6ff" stroke="#bfd7ff"/>
+    <circle cx="54" cy="104" r="9" fill="#1f6feb"/>
+    <text x="76" y="111" class="sans small">Chat products</text>
+    <rect x="30" y="140" width="192" height="44" rx="13" fill="#f0fbf4" stroke="#bde7ca"/>
+    <circle cx="54" cy="162" r="9" fill="#28a06b"/>
+    <text x="76" y="169" class="sans small">Internal tools</text>
+    <rect x="30" y="198" width="192" height="36" rx="12" fill="#fff7ea" stroke="#f2d39a"/>
+    <text x="52" y="222" class="mono" style="font-size:15px;font-weight:700;fill:#5d6670">Bearer token</text>
+  </g>
+
+  <path d="M366 438 C408 438 426 438 468 438" class="flow"/>
+  <path d="M732 438 C774 438 792 438 834 438" class="flow"/>
+
+  <g transform="translate(468 282)" filter="url(#shadow)">
+    <rect width="264" height="312" rx="34" fill="url(#gateway)"/>
+    <rect x="28" y="30" width="208" height="64" rx="18" fill="#ffffff" opacity="0.16"/>
+    <text x="42" y="70" class="sans white" style="font-size:30px;font-weight:850;letter-spacing:0">relay-gateway</text>
+    <text x="44" y="116" class="mono white" style="font-size:17px;opacity:.9">OpenAI-compatible</text>
+    <rect x="34" y="146" width="196" height="48" rx="15" fill="#ffffff" opacity="0.94"/>
+    <text x="58" y="177" class="sans chip">Auth &amp; model rules</text>
+    <rect x="34" y="210" width="196" height="48" rx="15" fill="#ffffff" opacity="0.94"/>
+    <text x="58" y="241" class="sans chip">Route + quota</text>
+    <circle cx="48" cy="284" r="10" fill="#a6f3d4"/>
+    <text x="66" y="290" class="mono white" style="font-size:16px;opacity:.92">stream relay</text>
+  </g>
+
+  <g transform="translate(844 316)" filter="url(#shadow)">
+    <rect width="252" height="246" rx="26" fill="#ffffff"/>
+    <text x="30" y="52" class="sans label">Providers</text>
+    <rect x="30" y="78" width="86" height="36" rx="12" fill="#eff6ff"/>
+    <text x="48" y="102" class="sans small">OpenAI</text>
+    <rect x="130" y="78" width="92" height="36" rx="12" fill="#f6f0ff"/>
+    <text x="148" y="102" class="sans small">Claude</text>
+    <rect x="30" y="126" width="86" height="36" rx="12" fill="#eefcf8"/>
+    <text x="48" y="150" class="sans small">Gemini</text>
+    <rect x="130" y="126" width="92" height="36" rx="12" fill="#fff7ea"/>
+    <text x="148" y="150" class="sans small">Azure</text>
+    <rect x="30" y="174" width="192" height="36" rx="12" fill="#f0f7f8"/>
+    <text x="55" y="198" class="sans small">OpenAI-compatible</text>
+  </g>
+
+  <g transform="translate(126 672)">
+    <text x="0" y="0" class="sans label">Microservice foundation</text>
+    <path d="M474 -70 V-28 C474 -14 462 0 448 0 H224" class="dash"/>
+    <path d="M600 -70 V-28 C600 -14 612 0 626 0 H850" class="dash"/>
+    <g class="sans" filter="url(#shadow)">
+      <rect x="0" y="40" width="286" height="86" rx="20" fill="#ffffff"/>
+      <text x="28" y="78" class="label" style="font-size:22px">Identity</text>
+      <text x="28" y="104" class="small">users · roles · tokens</text>
+      <rect x="326" y="40" width="286" height="86" rx="20" fill="#ffffff"/>
+      <text x="354" y="78" class="label" style="font-size:22px">Channel</text>
+      <text x="354" y="104" class="small">models · groups · routing</text>
+      <rect x="652" y="40" width="286" height="86" rx="20" fill="#ffffff"/>
+      <text x="680" y="78" class="label" style="font-size:22px">Billing</text>
+      <text x="680" y="104" class="small">quota · ledger · orders</text>
+      <rect x="0" y="154" width="286" height="86" rx="20" fill="#ffffff"/>
+      <text x="28" y="192" class="label" style="font-size:22px">Logs</text>
+      <text x="28" y="218" class="small">usage · audit · search</text>
+      <rect x="326" y="154" width="286" height="86" rx="20" fill="#ffffff"/>
+      <text x="354" y="192" class="label" style="font-size:22px">Monitor</text>
+      <text x="354" y="218" class="small">health · metrics · alerts</text>
+      <rect x="652" y="154" width="286" height="86" rx="20" fill="#ffffff"/>
+      <text x="680" y="192" class="label" style="font-size:22px">Admin</text>
+      <text x="680" y="218" class="small">console · config · ops</text>
+    </g>
+  </g>
+
+  <rect x="104" y="1058" width="992" height="52" rx="18" fill="#173042"/>
+  <text x="132" y="1093" class="sans white" style="font-size:20px;font-weight:750;letter-spacing:0">Unified API entry · token and quota control · observable operations · Go Kratos microservices</text>
+</svg>
