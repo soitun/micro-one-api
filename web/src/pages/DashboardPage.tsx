@@ -275,8 +275,8 @@ export function DashboardPage() {
                   </defs>
                   <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
-                  <Tooltip />
+                  <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} tickLine={false} axisLine={false} width={48} tickFormatter={compactNumber} />
+                  <Tooltip formatter={(value) => compactNumber(Number(value))} />
                   <Area
                     type="monotone"
                     dataKey="input_tokens"
@@ -319,7 +319,7 @@ export function DashboardPage() {
                         <Cell key={entry.name} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip formatter={(value) => compactNumber(Number(value))} />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="-mt-40 text-center">
