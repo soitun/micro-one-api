@@ -16,6 +16,7 @@ type reconciliationRunModel struct {
 	RunAt             int64  `gorm:"column:run_at"`
 	ExpiredCleaned    int    `gorm:"column:expired_cleaned"`
 	TotalAccounts     int    `gorm:"column:total_accounts"`
+	TotalChannels     int    `gorm:"column:total_channels"`
 	TotalReservations int    `gorm:"column:total_reservations"`
 	DiscrepancyCount  int    `gorm:"column:discrepancy_count"`
 	Discrepancies     string `gorm:"column:discrepancies"`
@@ -23,6 +24,26 @@ type reconciliationRunModel struct {
 }
 
 func (reconciliationRunModel) TableName() string { return "reconciliation_runs" }
+
+type reconciliationDiscrepancyRecord struct {
+	Type              string `json:"type,omitempty"`
+	UserID            string `json:"user_id,omitempty"`
+	ExpectedQuota     int64  `json:"expected_quota,omitempty"`
+	ActualQuota       int64  `json:"actual_quota,omitempty"`
+	LedgerNetAmount   int64  `json:"ledger_net_amount,omitempty"`
+	FrozenQuota       int64  `json:"frozen_quota,omitempty"`
+	ChannelID         int64  `json:"channel_id,omitempty"`
+	ExpectedUsedQuota int64  `json:"expected_used_quota,omitempty"`
+	ActualUsedQuota   int64  `json:"actual_used_quota,omitempty"`
+	LedgerQuota       int64  `json:"ledger_quota,omitempty"`
+	UpstreamCost      int64  `json:"upstream_cost,omitempty"`
+	Difference        int64  `json:"difference,omitempty"`
+	LedgerCount       int64  `json:"ledger_count,omitempty"`
+	LogCount          int64  `json:"log_count,omitempty"`
+	LogQuota          int64  `json:"log_quota,omitempty"`
+	CountDiff         int64  `json:"count_diff,omitempty"`
+	QuotaDiff         int64  `json:"quota_diff,omitempty"`
+}
 
 type reconciliationRunRepo struct {
 	data *Data
@@ -42,8 +63,9 @@ func (r *reconciliationRunRepo) SaveRun(ctx context.Context, result *biz.Reconci
 		return 0, errors.New("nil reconciliation result")
 	}
 	discrepancyJSON := "[]"
-	if len(result.AccountInconsistencies) > 0 {
-		buf, err := json.Marshal(result.AccountInconsistencies)
+	records := reconciliationRecordsFromResult(result)
+	if len(records) > 0 {
+		buf, err := json.Marshal(records)
 		if err != nil {
 			return 0, err
 		}
@@ -54,8 +76,9 @@ func (r *reconciliationRunRepo) SaveRun(ctx context.Context, result *biz.Reconci
 		RunAt:             result.RunAt.Unix(),
 		ExpiredCleaned:    result.ExpiredCleaned,
 		TotalAccounts:     result.TotalAccounts,
+		TotalChannels:     result.TotalChannels,
 		TotalReservations: result.TotalReservations,
-		DiscrepancyCount:  len(result.AccountInconsistencies),
+		DiscrepancyCount:  result.DiscrepancyCount(),
 		Discrepancies:     discrepancyJSON,
 		CreatedAt:         now,
 	}
@@ -108,13 +131,87 @@ func modelToReconciliationResult(m *reconciliationRunModel) *biz.ReconciliationR
 		RunAt:             time.Unix(m.RunAt, 0),
 		ExpiredCleaned:    m.ExpiredCleaned,
 		TotalAccounts:     m.TotalAccounts,
+		TotalChannels:     m.TotalChannels,
 		TotalReservations: m.TotalReservations,
 	}
 	if m.Discrepancies != "" && m.Discrepancies != "[]" {
-		var rows []biz.AccountInconsistency
-		if err := json.Unmarshal([]byte(m.Discrepancies), &rows); err == nil {
-			result.AccountInconsistencies = rows
+		var records []reconciliationDiscrepancyRecord
+		if err := json.Unmarshal([]byte(m.Discrepancies), &records); err == nil {
+			applyReconciliationRecords(result, records)
 		}
 	}
 	return result
+}
+
+func reconciliationRecordsFromResult(result *biz.ReconciliationResult) []reconciliationDiscrepancyRecord {
+	if result == nil {
+		return nil
+	}
+	records := make([]reconciliationDiscrepancyRecord, 0, result.DiscrepancyCount())
+	for _, d := range result.AccountInconsistencies {
+		records = append(records, reconciliationDiscrepancyRecord{
+			Type:            biz.ReconciliationDiscrepancyTypeAccount,
+			UserID:          d.UserID,
+			ExpectedQuota:   d.ExpectedQuota,
+			ActualQuota:     d.ActualQuota,
+			LedgerNetAmount: d.LedgerNetAmount,
+			FrozenQuota:     d.FrozenQuota,
+		})
+	}
+	for _, d := range result.ChannelInconsistencies {
+		records = append(records, reconciliationDiscrepancyRecord{
+			Type:              biz.ReconciliationDiscrepancyTypeChannel,
+			ChannelID:         d.ChannelID,
+			ExpectedUsedQuota: d.ExpectedUsedQuota,
+			ActualUsedQuota:   d.ActualUsedQuota,
+			LedgerQuota:       d.LedgerQuota,
+			UpstreamCost:      d.UpstreamCost,
+			Difference:        d.Difference,
+		})
+	}
+	for _, d := range result.LogInconsistencies {
+		records = append(records, reconciliationDiscrepancyRecord{
+			Type:        biz.ReconciliationDiscrepancyTypeLog,
+			LedgerCount: d.LedgerCount,
+			LogCount:    d.LogCount,
+			LedgerQuota: d.LedgerQuota,
+			LogQuota:    d.LogQuota,
+			CountDiff:   d.CountDiff,
+			QuotaDiff:   d.QuotaDiff,
+		})
+	}
+	return records
+}
+
+func applyReconciliationRecords(result *biz.ReconciliationResult, records []reconciliationDiscrepancyRecord) {
+	for _, record := range records {
+		switch record.Type {
+		case "", biz.ReconciliationDiscrepancyTypeAccount:
+			result.AccountInconsistencies = append(result.AccountInconsistencies, biz.AccountInconsistency{
+				UserID:          record.UserID,
+				ExpectedQuota:   record.ExpectedQuota,
+				ActualQuota:     record.ActualQuota,
+				LedgerNetAmount: record.LedgerNetAmount,
+				FrozenQuota:     record.FrozenQuota,
+			})
+		case biz.ReconciliationDiscrepancyTypeChannel:
+			result.ChannelInconsistencies = append(result.ChannelInconsistencies, biz.ChannelInconsistency{
+				ChannelID:         record.ChannelID,
+				ExpectedUsedQuota: record.ExpectedUsedQuota,
+				ActualUsedQuota:   record.ActualUsedQuota,
+				LedgerQuota:       record.LedgerQuota,
+				UpstreamCost:      record.UpstreamCost,
+				Difference:        record.Difference,
+			})
+		case biz.ReconciliationDiscrepancyTypeLog:
+			result.LogInconsistencies = append(result.LogInconsistencies, biz.LogInconsistency{
+				LedgerCount: record.LedgerCount,
+				LogCount:    record.LogCount,
+				LedgerQuota: record.LedgerQuota,
+				LogQuota:    record.LogQuota,
+				CountDiff:   record.CountDiff,
+				QuotaDiff:   record.QuotaDiff,
+			})
+		}
+	}
 }

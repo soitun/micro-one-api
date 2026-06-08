@@ -711,11 +711,15 @@ func reconciliationRunToProto(run *biz.ReconciliationResult) (*billingv1.Reconci
 	if err != nil {
 		return nil, err
 	}
+	totalChannels, err := safecast.IntToInt32(run.TotalChannels)
+	if err != nil {
+		return nil, err
+	}
 	totalReservations, err := safecast.IntToInt32(run.TotalReservations)
 	if err != nil {
 		return nil, err
 	}
-	discrepancyCount, err := safecast.IntToInt32(len(run.AccountInconsistencies))
+	discrepancyCount, err := safecast.IntToInt32(run.DiscrepancyCount())
 	if err != nil {
 		return nil, err
 	}
@@ -724,16 +728,40 @@ func reconciliationRunToProto(run *biz.ReconciliationResult) (*billingv1.Reconci
 		RunAt:             run.RunAt.Unix(),
 		ExpiredCleaned:    expiredCleaned,
 		TotalAccounts:     totalAccounts,
+		TotalChannels:     totalChannels,
 		TotalReservations: totalReservations,
 		DiscrepancyCount:  discrepancyCount,
 	}
 	for _, d := range run.AccountInconsistencies {
 		out.Discrepancies = append(out.Discrepancies, &billingv1.ReconciliationDiscrepancy{
+			Type:            biz.ReconciliationDiscrepancyTypeAccount,
 			UserId:          d.UserID,
 			ExpectedQuota:   d.ExpectedQuota,
 			ActualQuota:     d.ActualQuota,
 			LedgerNetAmount: d.LedgerNetAmount,
 			FrozenQuota:     d.FrozenQuota,
+		})
+	}
+	for _, d := range run.ChannelInconsistencies {
+		out.Discrepancies = append(out.Discrepancies, &billingv1.ReconciliationDiscrepancy{
+			Type:              biz.ReconciliationDiscrepancyTypeChannel,
+			ChannelId:         d.ChannelID,
+			ExpectedUsedQuota: d.ExpectedUsedQuota,
+			ActualUsedQuota:   d.ActualUsedQuota,
+			LedgerQuota:       d.LedgerQuota,
+			UpstreamCost:      d.UpstreamCost,
+			Difference:        d.Difference,
+		})
+	}
+	for _, d := range run.LogInconsistencies {
+		out.Discrepancies = append(out.Discrepancies, &billingv1.ReconciliationDiscrepancy{
+			Type:        biz.ReconciliationDiscrepancyTypeLog,
+			LedgerCount: d.LedgerCount,
+			LogCount:    d.LogCount,
+			LedgerQuota: d.LedgerQuota,
+			LogQuota:    d.LogQuota,
+			CountDiff:   d.CountDiff,
+			QuotaDiff:   d.QuotaDiff,
 		})
 	}
 	return out, nil

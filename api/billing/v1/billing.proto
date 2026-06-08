@@ -294,6 +294,7 @@ message ReconciliationRun {
   int32 total_reservations = 5;
   int32 discrepancy_count = 6;
   repeated ReconciliationDiscrepancy discrepancies = 7;
+  int32 total_channels = 8;
 }
 
 message ReconciliationDiscrepancy {
@@ -302,6 +303,18 @@ message ReconciliationDiscrepancy {
   int64 actual_quota = 3;
   int64 ledger_net_amount = 4;
   int64 frozen_quota = 5;
+  string type = 6;
+  int64 channel_id = 7;
+  int64 expected_used_quota = 8;
+  int64 actual_used_quota = 9;
+  int64 ledger_quota = 10;
+  int64 upstream_cost = 11;
+  int64 difference = 12;
+  int64 ledger_count = 13;
+  int64 log_count = 14;
+  int64 log_quota = 15;
+  int64 count_diff = 16;
+  int64 quota_diff = 17;
 }
 
 message ListReconciliationRunsRequest {

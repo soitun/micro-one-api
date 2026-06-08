@@ -705,11 +705,23 @@ type ChannelBalanceRefreshResult struct {
 }
 
 type ReconciliationDiscrepancyView struct {
-	UserID          string `json:"user_id"`
-	ExpectedQuota   int64  `json:"expected_quota"`
-	ActualQuota     int64  `json:"actual_quota"`
-	LedgerNetAmount int64  `json:"ledger_net_amount"`
-	FrozenQuota     int64  `json:"frozen_quota"`
+	Type              string `json:"type,omitempty"`
+	UserID            string `json:"user_id,omitempty"`
+	ExpectedQuota     int64  `json:"expected_quota,omitempty"`
+	ActualQuota       int64  `json:"actual_quota,omitempty"`
+	LedgerNetAmount   int64  `json:"ledger_net_amount,omitempty"`
+	FrozenQuota       int64  `json:"frozen_quota,omitempty"`
+	ChannelID         int64  `json:"channel_id,omitempty"`
+	ExpectedUsedQuota int64  `json:"expected_used_quota,omitempty"`
+	ActualUsedQuota   int64  `json:"actual_used_quota,omitempty"`
+	LedgerQuota       int64  `json:"ledger_quota,omitempty"`
+	UpstreamCost      int64  `json:"upstream_cost,omitempty"`
+	Difference        int64  `json:"difference,omitempty"`
+	LedgerCount       int64  `json:"ledger_count,omitempty"`
+	LogCount          int64  `json:"log_count,omitempty"`
+	LogQuota          int64  `json:"log_quota,omitempty"`
+	CountDiff         int64  `json:"count_diff,omitempty"`
+	QuotaDiff         int64  `json:"quota_diff,omitempty"`
 }
 
 type ReconciliationRunView struct {
@@ -717,6 +729,7 @@ type ReconciliationRunView struct {
 	RunAt             int64                           `json:"run_at"`
 	ExpiredCleaned    int32                           `json:"expired_cleaned"`
 	TotalAccounts     int32                           `json:"total_accounts"`
+	TotalChannels     int32                           `json:"total_channels"`
 	TotalReservations int32                           `json:"total_reservations"`
 	DiscrepancyCount  int32                           `json:"discrepancy_count"`
 	Discrepancies     []ReconciliationDiscrepancyView `json:"discrepancies,omitempty"`
@@ -762,16 +775,29 @@ func reconciliationRunFromProto(run *billingv1.ReconciliationRun) *Reconciliatio
 		RunAt:             run.GetRunAt(),
 		ExpiredCleaned:    run.GetExpiredCleaned(),
 		TotalAccounts:     run.GetTotalAccounts(),
+		TotalChannels:     run.GetTotalChannels(),
 		TotalReservations: run.GetTotalReservations(),
 		DiscrepancyCount:  run.GetDiscrepancyCount(),
 	}
 	for _, d := range run.GetDiscrepancies() {
 		view.Discrepancies = append(view.Discrepancies, ReconciliationDiscrepancyView{
-			UserID:          d.GetUserId(),
-			ExpectedQuota:   d.GetExpectedQuota(),
-			ActualQuota:     d.GetActualQuota(),
-			LedgerNetAmount: d.GetLedgerNetAmount(),
-			FrozenQuota:     d.GetFrozenQuota(),
+			Type:              d.GetType(),
+			UserID:            d.GetUserId(),
+			ExpectedQuota:     d.GetExpectedQuota(),
+			ActualQuota:       d.GetActualQuota(),
+			LedgerNetAmount:   d.GetLedgerNetAmount(),
+			FrozenQuota:       d.GetFrozenQuota(),
+			ChannelID:         d.GetChannelId(),
+			ExpectedUsedQuota: d.GetExpectedUsedQuota(),
+			ActualUsedQuota:   d.GetActualUsedQuota(),
+			LedgerQuota:       d.GetLedgerQuota(),
+			UpstreamCost:      d.GetUpstreamCost(),
+			Difference:        d.GetDifference(),
+			LedgerCount:       d.GetLedgerCount(),
+			LogCount:          d.GetLogCount(),
+			LogQuota:          d.GetLogQuota(),
+			CountDiff:         d.GetCountDiff(),
+			QuotaDiff:         d.GetQuotaDiff(),
 		})
 	}
 	return view

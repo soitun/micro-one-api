@@ -10,9 +10,13 @@ import (
 )
 
 type mockReconRepo struct {
-	accounts []*Account
-	ledgerSums map[string]int64
-	reservations []*Reservation
+	accounts             []*Account
+	ledgerSums           map[string]int64
+	reservations         []*Reservation
+	channels             []*ChannelUsageSnapshot
+	channelLedgerUsage   []*ChannelLedgerUsage
+	ledgerConsumeSummary *ConsumeSummary
+	logConsumeSummary    *ConsumeSummary
 }
 
 func (m *mockReconRepo) ListAllAccounts(ctx context.Context) ([]*Account, error) {
@@ -24,6 +28,28 @@ func (m *mockReconRepo) SumLedgerAmounts(ctx context.Context, userID string) (in
 		return sum, nil
 	}
 	return 0, nil
+}
+
+func (m *mockReconRepo) ListChannelUsage(ctx context.Context) ([]*ChannelUsageSnapshot, error) {
+	return m.channels, nil
+}
+
+func (m *mockReconRepo) SumConsumeLedgerUsageByChannel(ctx context.Context) ([]*ChannelLedgerUsage, error) {
+	return m.channelLedgerUsage, nil
+}
+
+func (m *mockReconRepo) GetLedgerConsumeSummary(ctx context.Context) (*ConsumeSummary, error) {
+	if m.ledgerConsumeSummary != nil {
+		return m.ledgerConsumeSummary, nil
+	}
+	return &ConsumeSummary{}, nil
+}
+
+func (m *mockReconRepo) GetLogConsumeSummary(ctx context.Context) (*ConsumeSummary, error) {
+	if m.logConsumeSummary != nil {
+		return m.logConsumeSummary, nil
+	}
+	return &ConsumeSummary{}, nil
 }
 
 func (m *mockReconRepo) ListReservationsByStatus(ctx context.Context, status string) ([]*Reservation, error) {
@@ -99,4 +125,59 @@ func TestRunReconciliation_NoInconsistencies(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, result.AccountInconsistencies)
 	assert.Equal(t, 1, result.TotalAccounts)
+}
+
+func TestRunReconciliation_ChannelUsageConsistency(t *testing.T) {
+	account := &Account{UserID: "user1", Quota: 1000, FrozenQuota: 0, Group: "default"}
+	reconRepo := &mockReconRepo{
+		accounts:   []*Account{account},
+		ledgerSums: map[string]int64{"user1": 1000},
+		channels: []*ChannelUsageSnapshot{
+			{ChannelID: 10, UsedQuota: 250},
+		},
+		channelLedgerUsage: []*ChannelLedgerUsage{
+			{ChannelID: 10, Quota: 500, UpstreamCost: 123},
+		},
+	}
+
+	uc := NewReconciliationUsecase(
+		&mockAccountRepo{account: account},
+		&mockReservationRepo{reservations: make(map[string]*Reservation)},
+		reconRepo,
+		nil,
+	)
+	result, err := uc.RunReconciliation(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, result.ChannelInconsistencies, 1)
+	assert.Equal(t, int64(10), result.ChannelInconsistencies[0].ChannelID)
+	assert.Equal(t, int64(500), result.ChannelInconsistencies[0].ExpectedUsedQuota)
+	assert.Equal(t, int64(250), result.ChannelInconsistencies[0].ActualUsedQuota)
+	assert.Equal(t, int64(123), result.ChannelInconsistencies[0].UpstreamCost)
+	assert.Equal(t, 1, result.DiscrepancyCount())
+}
+
+func TestRunReconciliation_LogLedgerConsistency(t *testing.T) {
+	account := &Account{UserID: "user1", Quota: 1000, FrozenQuota: 0, Group: "default"}
+	reconRepo := &mockReconRepo{
+		accounts:             []*Account{account},
+		ledgerSums:           map[string]int64{"user1": 1000},
+		ledgerConsumeSummary: &ConsumeSummary{Count: 2, Quota: 700},
+		logConsumeSummary:    &ConsumeSummary{Count: 1, Quota: 400},
+	}
+
+	uc := NewReconciliationUsecase(
+		&mockAccountRepo{account: account},
+		&mockReservationRepo{reservations: make(map[string]*Reservation)},
+		reconRepo,
+		nil,
+	)
+	result, err := uc.RunReconciliation(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, result.LogInconsistencies, 1)
+	assert.Equal(t, int64(2), result.LogInconsistencies[0].LedgerCount)
+	assert.Equal(t, int64(1), result.LogInconsistencies[0].LogCount)
+	assert.Equal(t, int64(300), result.LogInconsistencies[0].QuotaDiff)
+	assert.Equal(t, 1, result.DiscrepancyCount())
 }
