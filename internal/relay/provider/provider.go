@@ -440,7 +440,7 @@ func readOpenAIStream(resp *http.Response) <-chan StreamChunk {
 
 				var chunk StreamChunk
 				if err := sonic.Unmarshal([]byte(data), &chunk); err != nil {
-					applogger.Log.Warn("failed to parse SSE chunk",
+					logProviderWarn("failed to parse SSE chunk",
 						zap.Error(err),
 						zap.Int("data_length", len(data)),
 						zap.String("data_preview", applogger.TruncateString(data, 100)),
@@ -452,9 +452,21 @@ func readOpenAIStream(resp *http.Response) <-chan StreamChunk {
 		}
 
 		if err := scanner.Err(); err != nil {
-			applogger.Log.Error("scanner error", zap.Error(err))
+			logProviderError("scanner error", zap.Error(err))
 		}
 	}()
 
 	return chunkChan
+}
+
+func logProviderWarn(msg string, fields ...zap.Field) {
+	if applogger.Log != nil {
+		applogger.Log.Warn(msg, fields...)
+	}
+}
+
+func logProviderError(msg string, fields ...zap.Field) {
+	if applogger.Log != nil {
+		applogger.Log.Error(msg, fields...)
+	}
 }
