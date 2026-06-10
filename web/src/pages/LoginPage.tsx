@@ -26,10 +26,10 @@ export function LoginPage() {
       password,
     });
 
-    const data = unwrapApiData<string | { token?: string }>(response.data, 'Login failed');
+    const data = unwrapApiData<string | { token?: string }>(response.data, '登录失败');
     const token = typeof data === 'string' ? data : data?.token;
     if (!token) {
-      throw new Error('Login failed');
+      throw new Error('登录失败');
     }
 
     localStorage.setItem('token', token);
@@ -41,11 +41,11 @@ export function LoginPage() {
     const nextUsername = username.trim();
 
     if (!nextUsername) {
-      setError('Username is required');
+      setError('请输入用户名');
       return;
     }
     if (mode === 'register' && password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError('两次输入的密码不一致');
       return;
     }
 
@@ -57,16 +57,16 @@ export function LoginPage() {
           username: nextUsername,
           password,
         });
-        unwrapApiData(response.data, 'Registration failed');
+        unwrapApiData(response.data, '注册失败');
         await signIn(nextUsername);
-        toast.success('Account created');
+        toast.success('账号创建成功');
       } else {
         await signIn(nextUsername);
-        toast.success('Signed in');
+        toast.success('登录成功');
       }
       navigate('/dashboard');
     } catch (err: unknown) {
-      const message = getApiErrorMessage(err, 'Network error');
+      const message = getApiErrorMessage(err, '网络错误');
       setError(message);
       toast.error(message);
     } finally {
@@ -78,15 +78,15 @@ export function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>{mode === 'login' ? 'Login' : 'Create account'}</CardTitle>
+          <CardTitle>{mode === 'login' ? '登录' : '注册账号'}</CardTitle>
           <CardDescription>
-            {mode === 'login' ? 'Sign in to your One API account' : 'Register with a username and password'}
+            {mode === 'login' ? '登录您的 micro-one-api 账号' : '使用用户名和密码注册'}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
+              <Label htmlFor="username">用户名</Label>
               <Input
                 id="username"
                 type="text"
@@ -98,7 +98,7 @@ export function LoginPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">密码</Label>
               <Input
                 id="password"
                 type="password"
@@ -111,7 +111,7 @@ export function LoginPage() {
             </div>
             {mode === 'register' && (
               <div className="space-y-2">
-                <Label htmlFor="confirm-password">Confirm password</Label>
+                <Label htmlFor="confirm-password">确认密码</Label>
                 <Input
                   id="confirm-password"
                   type="password"
@@ -125,7 +125,7 @@ export function LoginPage() {
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? (mode === 'login' ? 'Signing in...' : 'Creating account...') : mode === 'login' ? 'Sign in' : 'Create account'}
+              {loading ? (mode === 'login' ? '登录中…' : '创建中…') : mode === 'login' ? '登录' : '注册账号'}
             </Button>
             {mode === 'login' && (
               <>
@@ -164,7 +164,7 @@ export function LoginPage() {
                 setConfirmPassword('');
               }}
             >
-              {mode === 'login' ? 'Create a new account' : 'Back to sign in'}
+              {mode === 'login' ? '注册新账号' : '返回登录'}
             </Button>
           </form>
         </CardContent>
