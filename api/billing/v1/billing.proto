@@ -30,6 +30,7 @@ service BillingService {
   rpc ListReconciliationRuns(ListReconciliationRunsRequest) returns (ListReconciliationRunsResponse);
   rpc GetReconciliationRun(GetReconciliationRunRequest) returns (GetReconciliationRunResponse);
   rpc AggregateLedgerByDate(AggregateLedgerByDateRequest) returns (AggregateLedgerByDateResponse);
+  rpc AggregateUsage(AggregateUsageRequest) returns (AggregateUsageResponse);
 }
 
 // ========== 配额预扣 ==========
@@ -61,6 +62,9 @@ message CommitQuotaRequest {
   int64 elapsed_time = 9;
   bool is_stream = 10;
   int64 cache_read_tokens = 11;
+  // Optional upstream cost override in quota units. When omitted, billing-service
+  // calculates it from upstream pricing config.
+  int64 upstream_cost = 12;
 }
 
 message CommitQuotaResponse {
@@ -290,6 +294,7 @@ message ReconciliationRun {
   int32 total_reservations = 5;
   int32 discrepancy_count = 6;
   repeated ReconciliationDiscrepancy discrepancies = 7;
+  int32 total_channels = 8;
 }
 
 message ReconciliationDiscrepancy {
@@ -298,6 +303,18 @@ message ReconciliationDiscrepancy {
   int64 actual_quota = 3;
   int64 ledger_net_amount = 4;
   int64 frozen_quota = 5;
+  string type = 6;
+  int64 channel_id = 7;
+  int64 expected_used_quota = 8;
+  int64 actual_used_quota = 9;
+  int64 ledger_quota = 10;
+  int64 upstream_cost = 11;
+  int64 difference = 12;
+  int64 ledger_count = 13;
+  int64 log_count = 14;
+  int64 log_quota = 15;
+  int64 count_diff = 16;
+  int64 quota_diff = 17;
 }
 
 message ListReconciliationRunsRequest {
@@ -334,6 +351,7 @@ message AggregateLedgerByDateResponse {
   int64 total_prompt_tokens = 4;
   int64 total_completion_tokens = 5;
   int64 total_count = 6;
+  int64 total_cache_read_tokens = 7;
 }
 
 message DailyUsage {
@@ -343,9 +361,60 @@ message DailyUsage {
   int64 completion_tokens = 4;
   int64 count = 5;
   int64 elapsed_time = 6;
+  int64 cache_read_tokens = 7;
 }
 
 message ModelUsage {
   string model = 1;
   int64 tokens = 2;
+}
+
+// ========== 多维用量聚合 ==========
+
+// AggregateUsageRequest 跨用户、多维度的真实 SQL 聚合（替代抽样统计）。
+message AggregateUsageRequest {
+  // 维度：user | channel | model | token | type | day | hour。可组合，按顺序生成分组键。
+  repeated string group_by = 1;
+  string user_id = 2;     // 可选：限定用户
+  int64 channel_id = 3;   // 可选：限定渠道（0 表示不限定）
+  string model = 4;       // 可选：限定模型
+  string type = 5;        // 可选：账本类型，默认 "consume"
+  google.protobuf.Timestamp start_time = 6;
+  google.protobuf.Timestamp end_time = 7;
+  int32 limit = 8;        // 可选：返回前 N 个桶（按 quota 降序），0 表示不限制
+}
+
+message AggregateUsageResponse {
+  repeated UsageBucket buckets = 1;
+  UsageTotals totals = 2;
+}
+
+// UsageBucket 一个分组维度组合下的聚合值。
+message UsageBucket {
+  string user_id = 1;
+  int64 channel_id = 2;
+  string model = 3;
+  string token_name = 4;
+  string type = 5;
+  string day = 6;   // YYYY-MM-DD（当 group_by 含 day）
+  string hour = 7;  // YYYY-MM-DD HH（当 group_by 含 hour）
+  int64 quota = 8;  // SUM(ABS(amount))
+  int64 prompt_tokens = 9;
+  int64 completion_tokens = 10;
+  int64 count = 11;
+  int64 elapsed_time = 12;
+  int64 upstream_cost = 13;
+  int64 gross_profit = 14;
+  int64 cache_read_tokens = 15;
+}
+
+message UsageTotals {
+  int64 quota = 1;
+  int64 prompt_tokens = 2;
+  int64 completion_tokens = 3;
+  int64 count = 4;
+  int64 elapsed_time = 5;
+  int64 upstream_cost = 6;
+  int64 gross_profit = 7;
+  int64 cache_read_tokens = 8;
 }

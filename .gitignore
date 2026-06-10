@@ -59,3 +59,5 @@ web/.env
 internal/admin/server/static/web/
 cert/
 .claude
+# Local build/save outputs
+dist/

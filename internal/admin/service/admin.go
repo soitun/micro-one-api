@@ -705,11 +705,23 @@ type ChannelBalanceRefreshResult struct {
 }
 
 type ReconciliationDiscrepancyView struct {
-	UserID          string `json:"user_id"`
-	ExpectedQuota   int64  `json:"expected_quota"`
-	ActualQuota     int64  `json:"actual_quota"`
-	LedgerNetAmount int64  `json:"ledger_net_amount"`
-	FrozenQuota     int64  `json:"frozen_quota"`
+	Type              string `json:"type,omitempty"`
+	UserID            string `json:"user_id,omitempty"`
+	ExpectedQuota     int64  `json:"expected_quota,omitempty"`
+	ActualQuota       int64  `json:"actual_quota,omitempty"`
+	LedgerNetAmount   int64  `json:"ledger_net_amount,omitempty"`
+	FrozenQuota       int64  `json:"frozen_quota,omitempty"`
+	ChannelID         int64  `json:"channel_id,omitempty"`
+	ExpectedUsedQuota int64  `json:"expected_used_quota,omitempty"`
+	ActualUsedQuota   int64  `json:"actual_used_quota,omitempty"`
+	LedgerQuota       int64  `json:"ledger_quota,omitempty"`
+	UpstreamCost      int64  `json:"upstream_cost,omitempty"`
+	Difference        int64  `json:"difference,omitempty"`
+	LedgerCount       int64  `json:"ledger_count,omitempty"`
+	LogCount          int64  `json:"log_count,omitempty"`
+	LogQuota          int64  `json:"log_quota,omitempty"`
+	CountDiff         int64  `json:"count_diff,omitempty"`
+	QuotaDiff         int64  `json:"quota_diff,omitempty"`
 }
 
 type ReconciliationRunView struct {
@@ -717,6 +729,7 @@ type ReconciliationRunView struct {
 	RunAt             int64                           `json:"run_at"`
 	ExpiredCleaned    int32                           `json:"expired_cleaned"`
 	TotalAccounts     int32                           `json:"total_accounts"`
+	TotalChannels     int32                           `json:"total_channels"`
 	TotalReservations int32                           `json:"total_reservations"`
 	DiscrepancyCount  int32                           `json:"discrepancy_count"`
 	Discrepancies     []ReconciliationDiscrepancyView `json:"discrepancies,omitempty"`
@@ -725,6 +738,23 @@ type ReconciliationRunView struct {
 type ListReconciliationRunsResult struct {
 	Runs  []*ReconciliationRunView `json:"runs"`
 	Total int64                    `json:"total"`
+}
+
+type UsageAggregateView struct {
+	Key              string `json:"key"`
+	UserID           string `json:"user_id,omitempty"`
+	ChannelID        int64  `json:"channel_id,omitempty"`
+	Model            string `json:"model,omitempty"`
+	TokenName        string `json:"token_name,omitempty"`
+	Type             string `json:"type,omitempty"`
+	Quota            int64  `json:"quota"`
+	UpstreamCost     int64  `json:"upstream_cost"`
+	GrossProfit      int64  `json:"gross_profit"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	Count            int64  `json:"count"`
+	ElapsedTime      int64  `json:"elapsed_time"`
 }
 
 func (s *AdminService) ListReconciliationRuns(ctx context.Context, page, pageSize int32) (*ListReconciliationRunsResult, error) {
@@ -740,6 +770,64 @@ func (s *AdminService) ListReconciliationRuns(ctx context.Context, page, pageSiz
 		out.Runs = append(out.Runs, reconciliationRunFromProto(run))
 	}
 	return out, nil
+}
+
+func (s *AdminService) AggregateUsageTopN(ctx context.Context, groupBy string, limit int32) ([]UsageAggregateView, error) {
+	if s.billingClient == nil {
+		return []UsageAggregateView{}, nil
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	resp, err := s.billingClient.AggregateUsage(ctx, &billingv1.AggregateUsageRequest{
+		GroupBy: []string{groupBy},
+		Type:    "consume",
+		Limit:   limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]UsageAggregateView, 0, len(resp.GetBuckets()))
+	for _, bucket := range resp.GetBuckets() {
+		items = append(items, usageAggregateViewFromBucket(bucket, groupBy))
+	}
+	return items, nil
+}
+
+func usageAggregateViewFromBucket(bucket *billingv1.UsageBucket, groupBy string) UsageAggregateView {
+	view := UsageAggregateView{
+		UserID:           bucket.GetUserId(),
+		ChannelID:        bucket.GetChannelId(),
+		Model:            bucket.GetModel(),
+		TokenName:        bucket.GetTokenName(),
+		Type:             bucket.GetType(),
+		Quota:            bucket.GetQuota(),
+		UpstreamCost:     bucket.GetUpstreamCost(),
+		GrossProfit:      bucket.GetGrossProfit(),
+		PromptTokens:     bucket.GetPromptTokens(),
+		CompletionTokens: bucket.GetCompletionTokens(),
+		CacheReadTokens:  bucket.GetCacheReadTokens(),
+		Count:            bucket.GetCount(),
+		ElapsedTime:      bucket.GetElapsedTime(),
+	}
+	switch groupBy {
+	case "user":
+		view.Key = bucket.GetUserId()
+	case "channel":
+		view.Key = strconv.FormatInt(bucket.GetChannelId(), 10)
+	case "model":
+		view.Key = bucket.GetModel()
+	case "token":
+		view.Key = bucket.GetTokenName()
+	case "type":
+		view.Key = bucket.GetType()
+	default:
+		view.Key = bucket.GetModel()
+		if view.Key == "" {
+			view.Key = view.UserID
+		}
+	}
+	return view
 }
 
 func (s *AdminService) GetReconciliationRun(ctx context.Context, runID int64) (*ReconciliationRunView, error) {
@@ -762,16 +850,29 @@ func reconciliationRunFromProto(run *billingv1.ReconciliationRun) *Reconciliatio
 		RunAt:             run.GetRunAt(),
 		ExpiredCleaned:    run.GetExpiredCleaned(),
 		TotalAccounts:     run.GetTotalAccounts(),
+		TotalChannels:     run.GetTotalChannels(),
 		TotalReservations: run.GetTotalReservations(),
 		DiscrepancyCount:  run.GetDiscrepancyCount(),
 	}
 	for _, d := range run.GetDiscrepancies() {
 		view.Discrepancies = append(view.Discrepancies, ReconciliationDiscrepancyView{
-			UserID:          d.GetUserId(),
-			ExpectedQuota:   d.GetExpectedQuota(),
-			ActualQuota:     d.GetActualQuota(),
-			LedgerNetAmount: d.GetLedgerNetAmount(),
-			FrozenQuota:     d.GetFrozenQuota(),
+			Type:              d.GetType(),
+			UserID:            d.GetUserId(),
+			ExpectedQuota:     d.GetExpectedQuota(),
+			ActualQuota:       d.GetActualQuota(),
+			LedgerNetAmount:   d.GetLedgerNetAmount(),
+			FrozenQuota:       d.GetFrozenQuota(),
+			ChannelID:         d.GetChannelId(),
+			ExpectedUsedQuota: d.GetExpectedUsedQuota(),
+			ActualUsedQuota:   d.GetActualUsedQuota(),
+			LedgerQuota:       d.GetLedgerQuota(),
+			UpstreamCost:      d.GetUpstreamCost(),
+			Difference:        d.GetDifference(),
+			LedgerCount:       d.GetLedgerCount(),
+			LogCount:          d.GetLogCount(),
+			LogQuota:          d.GetLogQuota(),
+			CountDiff:         d.GetCountDiff(),
+			QuotaDiff:         d.GetQuotaDiff(),
 		})
 	}
 	return view
@@ -1489,31 +1590,55 @@ func (s *AdminService) ListLogs(ctx context.Context, req *adminv1.ListLogsReques
 	}, nil
 }
 
+// GetLogStats returns ledger statistics computed by real SQL aggregation in the
+// billing service (GROUP BY type), rather than summing a sampled page of rows.
+// total_amount is the true consumed quota (ABS sum of consume entries).
 func (s *AdminService) GetLogStats(ctx context.Context, req *adminv1.ListLogsRequest) (map[string]interface{}, error) {
-	if req.Page <= 0 {
-		req.Page = 1
+	aggReq := &billingv1.AggregateUsageRequest{
+		GroupBy: []string{"type"},
+		UserId:  req.UserId,
 	}
-	if req.PageSize <= 0 {
-		req.PageSize = 1000
+	if req.StartTime > 0 {
+		aggReq.StartTime = timestamppb.New(time.Unix(req.StartTime, 0))
 	}
-	resp, err := s.ListLogs(ctx, req)
+	if req.EndTime > 0 {
+		aggReq.EndTime = timestamppb.New(time.Unix(req.EndTime, 0))
+	}
+
+	resp, err := s.billingClient.AggregateUsage(ctx, aggReq)
 	if err != nil {
-		return nil, err
+		if st, ok := status.FromError(err); ok {
+			return nil, fmt.Errorf("failed to aggregate usage: %s", st.Message())
+		}
+		return nil, fmt.Errorf("failed to aggregate usage: %w", err)
 	}
+
 	countByType := map[string]int64{}
 	amountByType := map[string]int64{}
-	totalAmount := int64(0)
-	for _, entry := range resp.Logs {
-		countByType[entry.Type]++
-		amountByType[entry.Type] += entry.Amount
-		totalAmount += entry.Amount
+	upstreamCostByType := map[string]int64{}
+	grossProfitByType := map[string]int64{}
+	totalCount := int64(0)
+	upstreamCost := int64(0)
+	grossProfit := int64(0)
+	for _, bucket := range resp.GetBuckets() {
+		countByType[bucket.GetType()] = bucket.GetCount()
+		amountByType[bucket.GetType()] = bucket.GetQuota()
+		upstreamCostByType[bucket.GetType()] = bucket.GetUpstreamCost()
+		grossProfitByType[bucket.GetType()] = bucket.GetGrossProfit()
+		totalCount += bucket.GetCount()
 	}
+	upstreamCost = upstreamCostByType["consume"]
+	grossProfit = grossProfitByType["consume"]
+
 	return map[string]interface{}{
-		"total":          resp.Total,
-		"sampled_count":  len(resp.Logs),
-		"total_amount":   totalAmount,
-		"count_by_type":  countByType,
-		"amount_by_type": amountByType,
+		"total":                 totalCount,
+		"total_amount":          amountByType["consume"],
+		"upstream_cost":         upstreamCost,
+		"gross_profit":          grossProfit,
+		"count_by_type":         countByType,
+		"amount_by_type":        amountByType,
+		"upstream_cost_by_type": upstreamCostByType,
+		"gross_profit_by_type":  grossProfitByType,
 	}, nil
 }
 
@@ -1570,6 +1695,7 @@ func (s *AdminService) ListLedgerEntries(ctx context.Context, req *adminv1.ListL
 			"quota":            entry.GetQuota(),
 			"promptTokens":     entry.GetPromptTokens(),
 			"completionTokens": entry.GetCompletionTokens(),
+			"cacheReadTokens":  entry.GetCacheReadTokens(),
 			"channelId":        entry.GetChannelId(),
 			"elapsedTime":      entry.GetElapsedTime(),
 			"isStream":         entry.GetIsStream(),

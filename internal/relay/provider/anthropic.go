@@ -274,7 +274,7 @@ func (p *AnthropicProvider) ChatCompletionsStream(ctx context.Context, req *Chat
 
 			var event anthropicStreamEvent
 			if err := sonic.Unmarshal([]byte(data), &event); err != nil {
-				applogger.Log.Warn("failed to parse Anthropic SSE event",
+				logProviderWarn("failed to parse Anthropic SSE event",
 					zap.Error(err),
 					zap.String("data_preview", applogger.TruncateString(data, 100)),
 				)
@@ -305,7 +305,7 @@ func (p *AnthropicProvider) ChatCompletionsStream(ctx context.Context, req *Chat
 		}
 
 		if err := scanner.Err(); err != nil {
-			applogger.Log.Error("Anthropic stream scanner error", zap.Error(err))
+			logProviderError("Anthropic stream scanner error", zap.Error(err))
 		}
 	}()
 

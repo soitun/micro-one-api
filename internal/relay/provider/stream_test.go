@@ -3,12 +3,15 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	applogger "micro-one-api/internal/pkg/logger"
 )
 
 func TestMain(m *testing.M) {
@@ -133,6 +136,30 @@ func TestOpenAIProvider_ChatCompletionsStreamParsesUsage(t *testing.T) {
 	if usage.PromptTokens != 11 || usage.CompletionTokens != 3 || usage.TotalTokens != 14 {
 		t.Fatalf("usage = %+v, want prompt=11 completion=3 total=14", usage)
 	}
+}
+
+func TestReadOpenAIStreamScannerErrorWithNilLoggerDoesNotPanic(t *testing.T) {
+	previous := applogger.Log
+	applogger.Log = nil
+	t.Cleanup(func() {
+		applogger.Log = previous
+	})
+
+	for range readOpenAIStream(&http.Response{Body: errorReadCloser{err: errors.New("read failed")}}) {
+		t.Fatal("expected no chunks")
+	}
+}
+
+type errorReadCloser struct {
+	err error
+}
+
+func (r errorReadCloser) Read([]byte) (int, error) {
+	return 0, r.err
+}
+
+func (r errorReadCloser) Close() error {
+	return nil
 }
 
 func TestOpenAIProvider_ChatCompletionsStreamPassesToolCallDeltas(t *testing.T) {

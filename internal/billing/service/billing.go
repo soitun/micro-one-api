@@ -50,6 +50,7 @@ func (s *BillingService) CommitQuota(ctx context.Context, req *billingv1.CommitQ
 		PromptTokens:     req.PromptTokens,
 		CompletionTokens: req.CompletionTokens,
 		CacheReadTokens:  req.CacheReadTokens,
+		UpstreamCost:     firstPositiveInt64(req.UpstreamCost, req.ActualCost),
 		ElapsedTime:      req.ElapsedTime,
 		IsStream:         req.IsStream,
 	})
@@ -339,6 +340,7 @@ func (s *BillingService) ListLedger(ctx context.Context, req *billingv1.ListLedg
 			Quota:            ledger.Quota,
 			PromptTokens:     ledger.PromptTokens,
 			CompletionTokens: ledger.CompletionTokens,
+			CacheReadTokens:  ledger.CacheReadTokens,
 			ChannelId:        ledger.ChannelID,
 			ElapsedTime:      ledger.ElapsedTime,
 			IsStream:         ledger.IsStream,
@@ -372,19 +374,21 @@ func (s *BillingService) AggregateLedgerByDate(ctx context.Context, req *billing
 	}
 
 	dailyProto := make([]*billingv1.DailyUsage, len(daily))
-	var totalQuota, totalPrompt, totalCompletion, totalCount int64
+	var totalQuota, totalPrompt, totalCompletion, totalCacheRead, totalCount int64
 	for i, d := range daily {
 		dailyProto[i] = &billingv1.DailyUsage{
 			Date:             d.Date,
 			Quota:            d.Quota,
 			PromptTokens:     d.PromptTokens,
 			CompletionTokens: d.CompletionTokens,
+			CacheReadTokens:  d.CacheReadTokens,
 			Count:            d.Count,
 			ElapsedTime:      d.ElapsedTime,
 		}
 		totalQuota += d.Quota
 		totalPrompt += d.PromptTokens
 		totalCompletion += d.CompletionTokens
+		totalCacheRead += d.CacheReadTokens
 		totalCount += d.Count
 	}
 
@@ -402,8 +406,78 @@ func (s *BillingService) AggregateLedgerByDate(ctx context.Context, req *billing
 		TotalQuota:            totalQuota,
 		TotalPromptTokens:     totalPrompt,
 		TotalCompletionTokens: totalCompletion,
+		TotalCacheReadTokens:  totalCacheRead,
 		TotalCount:            totalCount,
 	}, nil
+}
+
+func (s *BillingService) AggregateUsage(ctx context.Context, req *billingv1.AggregateUsageRequest) (*billingv1.AggregateUsageResponse, error) {
+	filter := biz.UsageFilter{
+		GroupBy:   req.GetGroupBy(),
+		UserID:    req.GetUserId(),
+		ChannelID: req.GetChannelId(),
+		Model:     req.GetModel(),
+		Type:      req.GetType(),
+		Limit:     int(req.GetLimit()),
+	}
+	if req.GetStartTime().IsValid() {
+		filter.StartTime = req.GetStartTime().AsTime()
+	}
+	if req.GetEndTime().IsValid() {
+		filter.EndTime = req.GetEndTime().AsTime()
+	}
+
+	buckets, totals, err := s.uc.AggregateUsage(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	bucketsProto := make([]*billingv1.UsageBucket, len(buckets))
+	for i, b := range buckets {
+		bucketsProto[i] = &billingv1.UsageBucket{
+			UserId:           b.UserID,
+			ChannelId:        b.ChannelID,
+			Model:            b.Model,
+			TokenName:        b.TokenName,
+			Type:             b.Type,
+			Day:              b.Day,
+			Hour:             b.Hour,
+			Quota:            b.Quota,
+			UpstreamCost:     b.UpstreamCost,
+			GrossProfit:      b.GrossProfit,
+			PromptTokens:     b.PromptTokens,
+			CompletionTokens: b.CompletionTokens,
+			CacheReadTokens:  b.CacheReadTokens,
+			Count:            b.Count,
+			ElapsedTime:      b.ElapsedTime,
+		}
+	}
+
+	if totals == nil {
+		totals = &biz.UsageTotals{}
+	}
+	return &billingv1.AggregateUsageResponse{
+		Buckets: bucketsProto,
+		Totals: &billingv1.UsageTotals{
+			Quota:            totals.Quota,
+			UpstreamCost:     totals.UpstreamCost,
+			GrossProfit:      totals.GrossProfit,
+			PromptTokens:     totals.PromptTokens,
+			CompletionTokens: totals.CompletionTokens,
+			CacheReadTokens:  totals.CacheReadTokens,
+			Count:            totals.Count,
+			ElapsedTime:      totals.ElapsedTime,
+		},
+	}, nil
+}
+
+func firstPositiveInt64(values ...int64) int64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func (s *BillingService) CreatePaymentOrder(ctx context.Context, req *billingv1.CreatePaymentOrderRequest) (*billingv1.PaymentOrderResponse, error) {
@@ -643,11 +717,15 @@ func reconciliationRunToProto(run *biz.ReconciliationResult) (*billingv1.Reconci
 	if err != nil {
 		return nil, err
 	}
+	totalChannels, err := safecast.IntToInt32(run.TotalChannels)
+	if err != nil {
+		return nil, err
+	}
 	totalReservations, err := safecast.IntToInt32(run.TotalReservations)
 	if err != nil {
 		return nil, err
 	}
-	discrepancyCount, err := safecast.IntToInt32(len(run.AccountInconsistencies))
+	discrepancyCount, err := safecast.IntToInt32(run.DiscrepancyCount())
 	if err != nil {
 		return nil, err
 	}
@@ -656,16 +734,40 @@ func reconciliationRunToProto(run *biz.ReconciliationResult) (*billingv1.Reconci
 		RunAt:             run.RunAt.Unix(),
 		ExpiredCleaned:    expiredCleaned,
 		TotalAccounts:     totalAccounts,
+		TotalChannels:     totalChannels,
 		TotalReservations: totalReservations,
 		DiscrepancyCount:  discrepancyCount,
 	}
 	for _, d := range run.AccountInconsistencies {
 		out.Discrepancies = append(out.Discrepancies, &billingv1.ReconciliationDiscrepancy{
+			Type:            biz.ReconciliationDiscrepancyTypeAccount,
 			UserId:          d.UserID,
 			ExpectedQuota:   d.ExpectedQuota,
 			ActualQuota:     d.ActualQuota,
 			LedgerNetAmount: d.LedgerNetAmount,
 			FrozenQuota:     d.FrozenQuota,
+		})
+	}
+	for _, d := range run.ChannelInconsistencies {
+		out.Discrepancies = append(out.Discrepancies, &billingv1.ReconciliationDiscrepancy{
+			Type:              biz.ReconciliationDiscrepancyTypeChannel,
+			ChannelId:         d.ChannelID,
+			ExpectedUsedQuota: d.ExpectedUsedQuota,
+			ActualUsedQuota:   d.ActualUsedQuota,
+			LedgerQuota:       d.LedgerQuota,
+			UpstreamCost:      d.UpstreamCost,
+			Difference:        d.Difference,
+		})
+	}
+	for _, d := range run.LogInconsistencies {
+		out.Discrepancies = append(out.Discrepancies, &billingv1.ReconciliationDiscrepancy{
+			Type:        biz.ReconciliationDiscrepancyTypeLog,
+			LedgerCount: d.LedgerCount,
+			LogCount:    d.LogCount,
+			LedgerQuota: d.LedgerQuota,
+			LogQuota:    d.LogQuota,
+			CountDiff:   d.CountDiff,
+			QuotaDiff:   d.QuotaDiff,
 		})
 	}
 	return out, nil

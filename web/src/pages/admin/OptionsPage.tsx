@@ -20,26 +20,26 @@ interface OptionItem {
 const FEATURED_OPTIONS = [
   {
     key: 'RegisterEnabled',
-    label: 'Registration enabled',
-    description: 'Allow new users to create accounts.',
+    label: '开放注册',
+    description: '允许新用户注册账号。',
     type: 'boolean',
   },
   {
     key: 'QuotaForNewUser',
-    label: 'Default new-user quota',
-    description: 'Quota granted when a user registers.',
+    label: '新用户默认额度',
+    description: '新用户注册时获得的初始额度。',
     type: 'quota',
   },
   {
     key: 'QuotaForInviter',
-    label: 'Inviter reward',
-    description: 'Quota granted to the inviter after a successful invite.',
+    label: '邀请人奖励额度',
+    description: '成功邀请一位新用户后,邀请人获得的奖励额度。',
     type: 'quota',
   },
   {
     key: 'QuotaForInvitee',
-    label: 'Invitee reward',
-    description: 'Quota granted to the invited user.',
+    label: '被邀请人奖励额度',
+    description: '被邀请的新用户获得的奖励额度。',
     type: 'quota',
   },
 ] as const;
@@ -74,11 +74,11 @@ export function AdminOptionsPage() {
   const updateMutation = useMutation({
     mutationFn: async ({ key, value }: OptionItem) => {
       const res = await adminApiClient.put('/option/', { key, value });
-      ensureApiSuccess(res.data, 'Option update failed');
+      ensureApiSuccess(res.data, '选项更新失败');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-options'] });
-      toast.success('Option saved');
+      toast.success('选项已保存');
     },
   });
 
@@ -106,7 +106,7 @@ export function AdminOptionsPage() {
   const handleCustomSave = () => {
     const key = customKey.trim();
     if (!key) {
-      toast.error('Option key is required');
+      toast.error('请输入选项键名');
       return;
     }
     updateMutation.mutate(
@@ -123,28 +123,28 @@ export function AdminOptionsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold">System Options</h2>
+        <h2 className="text-2xl font-semibold">系统选项</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Manage registration, quota grants, and one-api compatible settings.
+          管理系统注册、额度发放和兼容 one-api 的设置项。
         </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Core Settings</CardTitle>
-          <CardDescription>Common operational options used by user onboarding.</CardDescription>
+          <CardTitle>核心设置</CardTitle>
+          <CardDescription>用户入门相关的常用配置项。</CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <TableSkeleton columns={['Setting', 'Value', 'Actions']} rows={4} />
+            <TableSkeleton columns={['配置项', '当前值', '操作']} rows={4} />
           ) : (
             <div className="overflow-x-auto rounded-lg border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Setting</TableHead>
-                    <TableHead>Value</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead>配置项</TableHead>
+                    <TableHead>值</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -161,8 +161,8 @@ export function AdminOptionsPage() {
                             onChange={(event) => setDraft(option.key, event.target.value)}
                             className="h-8 rounded-md border bg-background px-2 text-sm"
                           >
-                            <option value="true">Enabled</option>
-                            <option value="false">Disabled</option>
+                            <option value="true">启用</option>
+                            <option value="false">禁用</option>
                           </select>
                         ) : (
                           <Input
@@ -183,7 +183,7 @@ export function AdminOptionsPage() {
                           onClick={() => saveOption(option.key, option.value, option.type)}
                         >
                           <Save className="size-3.5" />
-                          Save
+                          保存
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -197,17 +197,17 @@ export function AdminOptionsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Custom Option</CardTitle>
-          <CardDescription>Create or overwrite any one-api option key.</CardDescription>
+          <CardTitle>自定义选项</CardTitle>
+          <CardDescription>创建或覆盖任意 one-api 兼容的选项。</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-[1fr_2fr_auto] md:items-end">
             <div className="space-y-2">
-              <Label htmlFor="option-key">Key</Label>
+              <Label htmlFor="option-key">键名</Label>
               <Input id="option-key" value={customKey} onChange={(event) => setCustomKey(event.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="option-value">Value</Label>
+              <Label htmlFor="option-value">选项值</Label>
               <Input id="option-value" value={customValue} onChange={(event) => setCustomValue(event.target.value)} />
             </div>
             <Button onClick={handleCustomSave} disabled={updateMutation.isPending}>
@@ -219,21 +219,21 @@ export function AdminOptionsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>All Options</CardTitle>
-          <CardDescription>Read-only overview of values returned by the backend.</CardDescription>
+          <CardTitle>全部选项</CardTitle>
+          <CardDescription>查看后端返回的所有选项值（只读）。</CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <TableSkeleton columns={['Key', 'Value']} rows={8} />
+            <TableSkeleton columns={['键名', '值']} rows={8} />
           ) : !options || options.length === 0 ? (
-            <EmptyState title="No options found" description="System options storage may not be configured." />
+            <EmptyState title="未找到任何选项" description="系统选项存储可能尚未配置。" />
           ) : (
             <div className="max-h-[420px] overflow-auto rounded-lg border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Key</TableHead>
-                    <TableHead>Value</TableHead>
+                    <TableHead>键名</TableHead>
+                    <TableHead>值</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

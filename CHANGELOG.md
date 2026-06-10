@@ -1,0 +1,49 @@
+# Changelog
+
+All notable changes to `micro-one-api` are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project follows [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.2.0] - 2026-06-10
+
+### Added
+- **成本与利润分析 (Phase 2)**: `billing_ledgers` 新增 `upstream_cost` 字段(`migrations/029`),
+  relay 提交时按渠道侧定价计算上游成本并写入账本;新增收入/成本/毛利相关统计维度。
+- **多维 SQL 用量聚合 (Phase 1)**: `billing` 服务新增多维聚合 RPC(按用户/渠道/模型/Token/分组/小时|日),
+  取代原先 admin 的 1000 条内存抽样统计;`migrations/028` 为 `billing_ledgers` 补充 `(created_at)`、
+  `(channel_id, created_at)`、`(model_name, created_at)` 索引。
+- **渠道对账 (Phase 3 起步)**: `RunReconciliation` 增加渠道维度校验
+  (本地累计渠道用量/成本 vs 渠道 `used_quota`),以及 ledger/log 双写一致性比对。
+- **对账差异告警**: `billing-service` 检测到对账差异时通过 gRPC 投递到 `notify-worker`,
+  按 `RECON_ALERT_RECIPIENTS` 创建通知;出错仅记日志,不阻塞对账任务。
+- **成本健康 dashboard**: 管理后台新增成本/毛利/渠道余额健康面板
+  (基于 `reconciliation_runs` + 账本聚合)。
+- **缓存 token 用量展示**: 用量统计与账本写入支持 `cache_read_tokens` 字段
+  (`migrations/031`),后台与 `/v1/usage` 路径可见缓存命中率相关指标。
+- **管理后台 i18n(zh-CN)**: 关键文案本地化。
+
+### Changed
+- 管理员日志/用量统计从内存抽样改为调用 billing 真实聚合,数字可信。
+- 对账任务支持通过 `WithNotifier` / `WithRecipients` 选项装配通知;
+  不配置通知端点时退化为仅日志模式(向后兼容)。
+
+### Fixed
+- 修复 relay 流式响应 logger 偶发空指针 panic。
+- dashboard token 趋势 Y 轴在数值跨度大时改为紧凑单位显示。
+
+## [0.1.1] - 2026-05-09
+
+### Added
+- 渠道余额刷新适配 OpenAI/DeepSeek/OpenRouter/SiliconFlow 等 provider。
+- Docker builder stage 增加 `--platform=$BUILDPLATFORM` 多架构支持。
+- `admin-api` 支持外部管理前端构建产物托管。
+
+## [0.1.0] - 2026-05-06
+
+首个公开版本,核心微服务边界确立:
+- `relay-gateway`、`admin-api`、`identity-service`、`channel-service`、
+  `billing-service`、`config-service`、`log-service`、`monitor-worker`、`notify-worker`。
+- OpenAI 兼容 API 网关、用户/Token/额度/账务基本链路、Docker Compose 部署。

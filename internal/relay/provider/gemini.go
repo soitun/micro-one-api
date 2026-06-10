@@ -249,7 +249,7 @@ func (p *GeminiProvider) ChatCompletionsStream(ctx context.Context, req *ChatCom
 
 			var wrapper geminiStreamWrapper
 			if err := sonic.Unmarshal([]byte(data), &wrapper); err != nil {
-				applogger.Log.Warn("failed to parse Gemini SSE chunk",
+				logProviderWarn("failed to parse Gemini SSE chunk",
 					zap.Error(err),
 					zap.String("data_preview", applogger.TruncateString(data, 100)),
 				)
@@ -278,7 +278,7 @@ func (p *GeminiProvider) ChatCompletionsStream(ctx context.Context, req *ChatCom
 		}
 
 		if err := scanner.Err(); err != nil {
-			applogger.Log.Error("Gemini stream scanner error", zap.Error(err))
+			logProviderError("Gemini stream scanner error", zap.Error(err))
 		}
 	}()
 

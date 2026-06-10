@@ -22,6 +22,7 @@ func setupLedgerTestDB(t *testing.T) *gorm.DB {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id TEXT,
 			amount INTEGER,
+			upstream_cost INTEGER DEFAULT 0,
 			balance_after INTEGER,
 			type TEXT,
 			reference_id TEXT,
@@ -31,6 +32,7 @@ func setupLedgerTestDB(t *testing.T) *gorm.DB {
 			quota INTEGER DEFAULT 0,
 			prompt_tokens INTEGER DEFAULT 0,
 			completion_tokens INTEGER DEFAULT 0,
+			cache_read_tokens INTEGER DEFAULT 0,
 			channel_id INTEGER DEFAULT 0,
 			elapsed_time INTEGER DEFAULT 0,
 			is_stream INTEGER DEFAULT 0,
@@ -55,20 +57,22 @@ func TestLedgerRepo_CreateLedger(t *testing.T) {
 
 	ctx := context.Background()
 	ledger := &biz.Ledger{
-		UserID:       "user1",
-		Amount:       -100,
-		BalanceAfter: 900,
-		Type:         "consume",
-		ReferenceID:  "res_test_001",
-		Remark:       "test consume",
-		TokenName:    "token-1",
-		ModelName:    "gpt-test",
-		Quota:        12,
-		PromptTokens: 7,
+		UserID:           "user1",
+		Amount:           -100,
+		BalanceAfter:     900,
+		Type:             "consume",
+		ReferenceID:      "res_test_001",
+		Remark:           "test consume",
+		TokenName:        "token-1",
+		ModelName:        "gpt-test",
+		Quota:            12,
+		PromptTokens:     7,
 		CompletionTokens: 5,
-		ChannelID:    3,
-		ElapsedTime:  123,
-		Endpoint:     "/v1/chat/completions",
+		CacheReadTokens:  3,
+		ChannelID:        3,
+		ElapsedTime:      123,
+		Endpoint:         "/v1/chat/completions",
+		UpstreamCost:     40,
 	}
 
 	err := repo.CreateLedger(ctx, ledger)
@@ -80,11 +84,13 @@ func TestLedgerRepo_CreateLedger(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "user1", model.UserID)
 	assert.Equal(t, int64(-100), model.Amount)
+	assert.Equal(t, int64(40), model.UpstreamCost)
 	assert.Equal(t, int64(900), model.BalanceAfter)
 	assert.Equal(t, "consume", model.Type)
 	assert.Equal(t, "token-1", model.TokenName)
 	assert.Equal(t, "gpt-test", model.ModelName)
 	assert.Equal(t, int64(12), model.Quota)
+	assert.Equal(t, int64(3), model.CacheReadTokens)
 }
 
 func TestLedgerRepo_ListLedgers(t *testing.T) {
@@ -183,13 +189,13 @@ func TestLedgerRepo_AggregateLedgerByDate(t *testing.T) {
 
 	// Insert test data: two days, two models, quota != |amount| (simulates ModelPrice billing)
 	err := db.Exec(`
-		INSERT INTO billing_ledgers (user_id, amount, balance_after, type, model_name, quota, prompt_tokens, completion_tokens, elapsed_time, created_at)
+		INSERT INTO billing_ledgers (user_id, amount, balance_after, type, model_name, quota, prompt_tokens, completion_tokens, cache_read_tokens, elapsed_time, created_at)
 		VALUES
-			('u1', -217500, 782500, 'consume', 'mimo-v2.5-pro', 1000000, 600000, 400000, 500, ?),
-			('u1', -100, 782400, 'consume', 'gpt-4o', 200, 100, 100, 200, ?),
-			('u1', -300, 782100, 'consume', 'mimo-v2.5-pro', 500, 300, 200, 300, ?),
-			('u1', 500000, 1282100, 'recharge', '', 0, 0, 0, 0, ?),
-			('u2', -999, 0, 'consume', 'other-model', 999, 500, 499, 100, ?)
+			('u1', -217500, 782500, 'consume', 'mimo-v2.5-pro', 1000000, 600000, 400000, 120000, 500, ?),
+			('u1', -100, 782400, 'consume', 'gpt-4o', 200, 100, 100, 20, 200, ?),
+			('u1', -300, 782100, 'consume', 'mimo-v2.5-pro', 500, 300, 200, 30, 300, ?),
+			('u1', 500000, 1282100, 'recharge', '', 0, 0, 0, 0, 0, ?),
+			('u2', -999, 0, 'consume', 'other-model', 999, 500, 499, 50, 100, ?)
 	`, today, today, yesterday, yesterday, today).Error
 	require.NoError(t, err)
 
@@ -211,6 +217,7 @@ func TestLedgerRepo_AggregateLedgerByDate(t *testing.T) {
 	assert.Equal(t, int64(300), daily[0].Quota) // |amount|, NOT quota(500)
 	assert.Equal(t, int64(300), daily[0].PromptTokens)
 	assert.Equal(t, int64(200), daily[0].CompletionTokens)
+	assert.Equal(t, int64(30), daily[0].CacheReadTokens)
 	assert.Equal(t, int64(1), daily[0].Count)
 
 	// Today: 2 entries, amount=(-217500)+(-100), quota=217600
@@ -218,6 +225,7 @@ func TestLedgerRepo_AggregateLedgerByDate(t *testing.T) {
 	assert.Equal(t, int64(217600), daily[1].Quota) // 217500 + 100
 	assert.Equal(t, int64(600100), daily[1].PromptTokens)
 	assert.Equal(t, int64(400100), daily[1].CompletionTokens)
+	assert.Equal(t, int64(120020), daily[1].CacheReadTokens)
 	assert.Equal(t, int64(2), daily[1].Count)
 
 	// Models: mimo-v2.5-pro (1M+500 tokens) > gpt-4o (200 tokens)
@@ -249,4 +257,115 @@ func TestLedgerRepo_AggregateLedgerByDate_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, daily)
 	assert.Empty(t, models)
+}
+
+func TestLedgerRepo_AggregateUsage_ByChannelCrossUser(t *testing.T) {
+	db := setupLedgerTestDB(t)
+	defer func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	}()
+
+	data := &Data{db: db}
+	repo := NewLedgerRepo(data)
+	ctx := context.Background()
+
+	seed := []*biz.Ledger{
+		{UserID: "u1", Amount: -100, UpstreamCost: 30, Type: "consume", ModelName: "gpt-a", ChannelID: 1, PromptTokens: 10, CompletionTokens: 5, CacheReadTokens: 2, ElapsedTime: 100},
+		{UserID: "u2", Amount: -50, UpstreamCost: 20, Type: "consume", ModelName: "gpt-a", ChannelID: 1, PromptTokens: 4, CompletionTokens: 2, CacheReadTokens: 1, ElapsedTime: 40},
+		{UserID: "u1", Amount: -25, UpstreamCost: 10, Type: "consume", ModelName: "gpt-b", ChannelID: 2, PromptTokens: 3, CompletionTokens: 1, CacheReadTokens: 1, ElapsedTime: 20},
+		{UserID: "u1", Amount: 1000, Type: "recharge", ChannelID: 0},
+	}
+	for _, l := range seed {
+		require.NoError(t, repo.CreateLedger(ctx, l))
+	}
+
+	// Aggregate consume usage grouped by channel, across all users.
+	buckets, totals, err := repo.AggregateUsage(ctx, biz.UsageFilter{
+		GroupBy: []string{biz.UsageDimChannel},
+		Type:    "consume",
+	})
+	require.NoError(t, err)
+	require.Len(t, buckets, 2)
+
+	// Ordered by quota desc: channel 1 (150) before channel 2 (25).
+	assert.Equal(t, int64(1), buckets[0].ChannelID)
+	assert.Equal(t, int64(150), buckets[0].Quota)
+	assert.Equal(t, int64(50), buckets[0].UpstreamCost)
+	assert.Equal(t, int64(100), buckets[0].GrossProfit)
+	assert.Equal(t, int64(3), buckets[0].CacheReadTokens)
+	assert.Equal(t, int64(2), buckets[0].Count)
+	assert.Equal(t, int64(2), buckets[1].ChannelID)
+	assert.Equal(t, int64(25), buckets[1].Quota)
+
+	// Totals exclude the recharge row (consume filter) -> 175.
+	assert.Equal(t, int64(175), totals.Quota)
+	assert.Equal(t, int64(60), totals.UpstreamCost)
+	assert.Equal(t, int64(115), totals.GrossProfit)
+	assert.Equal(t, int64(4), totals.CacheReadTokens)
+	assert.Equal(t, int64(3), totals.Count)
+}
+
+func TestLedgerRepo_AggregateUsage_TotalsIgnoreLimit(t *testing.T) {
+	db := setupLedgerTestDB(t)
+	defer func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	}()
+
+	data := &Data{db: db}
+	repo := NewLedgerRepo(data)
+	ctx := context.Background()
+
+	for _, l := range []*biz.Ledger{
+		{UserID: "u1", Amount: -100, UpstreamCost: 40, Type: "consume", ModelName: "gpt-a"},
+		{UserID: "u1", Amount: -50, UpstreamCost: 10, Type: "consume", ModelName: "gpt-b"},
+	} {
+		require.NoError(t, repo.CreateLedger(ctx, l))
+	}
+
+	buckets, totals, err := repo.AggregateUsage(ctx, biz.UsageFilter{
+		GroupBy: []string{biz.UsageDimModel},
+		Type:    "consume",
+		Limit:   1,
+	})
+	require.NoError(t, err)
+	require.Len(t, buckets, 1)
+	assert.Equal(t, int64(100), buckets[0].Quota)
+	assert.Equal(t, int64(150), totals.Quota)
+	assert.Equal(t, int64(50), totals.UpstreamCost)
+	assert.Equal(t, int64(100), totals.GrossProfit)
+}
+
+func TestLedgerRepo_AggregateUsage_ByType_AllTypes(t *testing.T) {
+	db := setupLedgerTestDB(t)
+	defer func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	}()
+
+	data := &Data{db: db}
+	repo := NewLedgerRepo(data)
+	ctx := context.Background()
+
+	for _, l := range []*biz.Ledger{
+		{UserID: "u1", Amount: -100, Type: "consume"},
+		{UserID: "u1", Amount: -40, Type: "consume"},
+		{UserID: "u1", Amount: 1000, Type: "recharge"},
+	} {
+		require.NoError(t, repo.CreateLedger(ctx, l))
+	}
+
+	// Empty Type => no type filter, aggregate every type.
+	buckets, totals, err := repo.AggregateUsage(ctx, biz.UsageFilter{GroupBy: []string{biz.UsageDimType}})
+	require.NoError(t, err)
+	require.Len(t, buckets, 2)
+
+	byType := map[string]int64{}
+	for _, b := range buckets {
+		byType[b.Type] = b.Quota
+	}
+	assert.Equal(t, int64(140), byType["consume"])
+	assert.Equal(t, int64(1000), byType["recharge"])
+	assert.Equal(t, int64(1140), totals.Quota)
 }
