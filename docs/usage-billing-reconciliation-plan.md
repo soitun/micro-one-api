@@ -3,6 +3,14 @@
 > 分支：`feature/usage-billing-reconciliation`
 > 范围：`billing-service`、`log-service`、`channel-service` 及 `admin` / `relay` 相关聚合链路
 
+## 进度状态(截至 2026-06-10)
+
+- [x] **Phase 1** — DB 聚合下沉 + admin 接线 + 索引（`migrations/028` + 多维聚合 RPC）
+- [x] **Phase 2** — 成本/利润分析（`migrations/029` 加 `upstream_cost`，账本写入上游成本）
+- [x] **Phase 3** — 渠道对账（`RunReconciliation` 增渠道维度 + ledger/log 双写校验）
+- [x] **Phase 4** — 告警（`notify-worker` 投递差异通知，可配置收件人；dashboard 成本健康面板已上线）
+- [ ] **后续** — Top-N 图表（管理后台可选）、告警通道扩展（邮件/IM）
+
 ## 一、架构现状
 
 微服务架构（Kratos 框架），相关三块：

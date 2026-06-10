@@ -11,6 +11,10 @@
 - 多供应商适配：支持 OpenAI-compatible 渠道，并包含 Anthropic、Gemini、Azure、VoyageAI 等 provider 适配器；DeepSeek、Moonshot、Groq、Tongyi、OpenRouter、SiliconFlow、Ollama、Doubao 等按 OpenAI-compatible 方式转发。
 - 用户与令牌管理：支持用户鉴权、令牌状态、过期时间、额度检查、模型权限和用户角色控制。
 - 配额与账务：提供额度预扣、释放、结算、ledger、兑换码、支付订单和用量记录等能力。
+- 成本与利润分析：`billing_ledgers` 记录上游成本，账本聚合支持收入/成本/毛利维度，可按模型、渠道、用户、Token、时间下钻。
+- 多维用量聚合：用量统计改为 SQL `GROUP BY` 聚合（按用户/渠道/模型/Token/分组/小时|日），告别 admin 抽样估算。
+- 对账与告警：`RunReconciliation` 覆盖账户额度、渠道用量、ledger/log 双写一致性；差异通过 `notify-worker` 投递通知（可配置收件人）。
+- 成本健康 dashboard：管理后台展示成本/毛利/渠道余额健康指标；用量统计与账本支持缓存 token（`cache_read_tokens`）与命中率展示。
 - 管理后台：提供 React/Vite 前端和 `admin-api` BFF，用于管理用户、令牌、渠道、订单、兑换码、用量和系统配置。
 - 监控与日志：提供健康检查、Prometheus metrics、业务日志聚合、监控 worker 和通知 worker。
 - 部署形态：支持本地开发、Docker Compose 和 Kubernetes 部署。
@@ -168,6 +172,10 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 | `RATE_LIMIT_REQUESTS_PER_SECOND` / `RATE_LIMIT_BURST` | 网关限流参数 |
 | `CORS_ALLOWED_ORIGINS` | CORS 允许来源 |
 | `ADMIN_WEB_ROOT` | admin-api 使用的外部前端构建目录 |
+| `NOTIFY_GRPC_ENDPOINT` | billing 对账告警投递目标（notify-worker gRPC）；留空则退化为仅日志 |
+| `RECON_ALERT_ENABLED` | 是否启用对账差异告警（`true`/`false`） |
+| `RECON_ALERT_RECIPIENTS` | 对账告警收件人列表，JSON 数组，例如 `[admin,ops]` |
+| `RECON_ALERT_INTERVAL` | 对账任务执行间隔，例如 `1h`、`30m` |
 
 更多配置见 [.env.example](./.env.example) 和 [docs/deployment.md](./docs/deployment.md)。
 
