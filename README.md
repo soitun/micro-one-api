@@ -4,6 +4,8 @@
 
 本项目面向需要统一管理多个上游模型供应商、内部额度、访问令牌、账务和运营后台的场景。它不是上游服务的替代品，也不提供任何第三方模型账号、订阅或 API Key。
 
+> 📣 **最新发布**:[v0.2.1 发布公告](./docs/release-v0.2.1.md)(含 v0.1.1 / v0.2.0 重要能力回顾) · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.2.1)
+
 ## 功能概览
 
 - OpenAI 兼容 API 网关：支持 `/v1/chat/completions`、`/v1/models`、`/v1/responses` 以及 embeddings、audio、image、moderations 等 raw relay 路由。
