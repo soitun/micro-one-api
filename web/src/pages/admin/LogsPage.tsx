@@ -1,16 +1,19 @@
-import { useQuery } from '@tanstack/react-query';
-import { Eye } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Eye, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { adminApiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { EmptyState } from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/LoadingStates';
 import { AdminPagination } from '@/components/admin/AdminPagination';
@@ -18,7 +21,7 @@ import { ExportButton } from '@/components/admin/ExportButton';
 import { SortableHeader } from '@/components/admin/SortableHeader';
 import { useAdminTableState } from '@/hooks/useAdminTableState';
 import { buildAdminListParams } from '@/lib/admin-table-query';
-import { unwrapApiData } from '@/lib/api-response';
+import { ensureApiSuccess, unwrapApiData } from '@/lib/api-response';
 import { sortRows, type SortState } from '@/lib/table-utils';
 import {
   Table,
@@ -74,6 +77,9 @@ const LOG_TYPE_NAMES: Record<string, string> = {
 
 export function AdminLogsPage() {
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
+  const [isCleanOpen, setIsCleanOpen] = useState(false);
+  const [cleanEndTime, setCleanEndTime] = useState('');
+  const queryClient = useQueryClient();
   const {
     page,
     pageSize,
@@ -129,6 +135,31 @@ export function AdminLogsPage() {
     queryFn: async () => {
       const res = await adminApiClient.get(`/log/${selectedLogId}`);
       return unwrapApiData<LogEntry>(res.data);
+    },
+  });
+
+  const cleanMutation = useMutation({
+    mutationFn: async () => {
+      const endTime = Math.floor(new Date(cleanEndTime).getTime() / 1000);
+      if (!Number.isFinite(endTime) || endTime <= 0) {
+        throw new Error('End time is required');
+      }
+      const params = new URLSearchParams({ end_time: String(endTime) });
+      if (userId) params.set('user_id', userId);
+      if (type) params.set('type', type);
+      const res = await adminApiClient.delete(`/log?${params}`);
+      ensureApiSuccess(res.data, 'Log cleanup failed');
+      return unwrapApiData<{ deleted?: number }>(res.data);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-logs'] });
+      setIsCleanOpen(false);
+      setCleanEndTime('');
+      toast.success(`Deleted ${Number(data?.deleted ?? 0)} log entries`);
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Log cleanup failed';
+      toast.error(message);
     },
   });
 
@@ -207,6 +238,10 @@ export function AdminLogsPage() {
           }}
         >
           Clear
+        </Button>
+        <Button type="button" variant="destructive" onClick={() => setIsCleanOpen(true)}>
+          <Trash2 className="size-4" />
+          Clean
         </Button>
         <div className="ml-auto">
           <ExportButton
@@ -334,6 +369,45 @@ export function AdminLogsPage() {
           ) : (
             <EmptyState title="Log details unavailable" description="The log service did not return details for this entry." />
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCleanOpen} onOpenChange={setIsCleanOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clean Logs</DialogTitle>
+            <DialogDescription>
+              Delete matching log entries up to the selected time.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="log-clean-end-time">End Time</Label>
+              <Input
+                id="log-clean-end-time"
+                type="datetime-local"
+                value={cleanEndTime}
+                onChange={(event) => setCleanEndTime(event.target.value)}
+              />
+            </div>
+            <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+              Scope: user {userId || 'all'} · type {type || 'all'}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsCleanOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={!cleanEndTime || cleanMutation.isPending}
+              onClick={() => cleanMutation.mutate()}
+            >
+              <Trash2 className="size-4" />
+              {cleanMutation.isPending ? 'Cleaning...' : 'Clean Logs'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

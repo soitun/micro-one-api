@@ -73,4 +73,56 @@ describe('AdminLogsPage', () => {
     expect(within(dialog).getByText('full relay log message')).toBeInTheDocument();
     expect(within(dialog).getByText('250 ms')).toBeInTheDocument();
   });
+
+  it('cleans logs with the current filters and cutoff time', async () => {
+    const user = userEvent.setup();
+    const deletedRequest = { url: null as URL | null };
+
+    server.use(
+      http.get('/api/log', () =>
+        HttpResponse.json({
+          success: true,
+          data: {
+            logs: [
+              {
+                id: '123',
+                userId: '42',
+                type: 'consume',
+                amount: '-1000000',
+                balanceAfter: '4000000',
+                referenceId: 'req-123',
+                remark: 'summary row',
+                createdAt: '1760000000',
+              },
+            ],
+            total: 1,
+          },
+        }),
+      ),
+      http.delete('/api/log', ({ request }) => {
+        deletedRequest.url = new URL(request.url);
+        return HttpResponse.json({ success: true, data: { deleted: 1 } });
+      }),
+    );
+
+    renderWithQuery(
+      <MemoryRouter initialEntries={['/admin/logs?user_id=42&type=consume']}>
+        <AdminLogsPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Clean' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('End Time'), '2026-06-15T12:30');
+    await user.click(within(dialog).getByRole('button', { name: 'Clean Logs' }));
+
+    expect(await screen.findByText('Billing Logs')).toBeInTheDocument();
+    expect(deletedRequest.url).not.toBeNull();
+    const deleteURL = deletedRequest.url;
+    if (!deleteURL) throw new Error('delete request was not captured');
+    expect(deleteURL.searchParams.get('user_id')).toBe('42');
+    expect(deleteURL.searchParams.get('type')).toBe('consume');
+    expect(Number(deleteURL.searchParams.get('end_time'))).toBeGreaterThan(0);
+  });
 });
