@@ -4,7 +4,7 @@
 
 本项目面向需要统一管理多个上游模型供应商、内部额度、访问令牌、账务和运营后台的场景。它不是上游服务的替代品，也不提供任何第三方模型账号、订阅或 API Key。
 
-> 📣 **最新发布**:[v0.2.1 发布公告](./docs/release-v0.2.1.md)(含 v0.1.1 / v0.2.0 重要能力回顾) · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.2.1)
+> 📣 **最新发布**:[v0.2.2 发布公告](./docs/release-v0.2.2.md)(notify 实际投递 / 对账告警配置修正 / 全服务 CI 构建) · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.2.2)
 
 ## 功能概览
 
@@ -178,8 +178,11 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 | `ADMIN_WEB_ROOT` | admin-api 使用的外部前端构建目录 |
 | `NOTIFY_GRPC_ENDPOINT` | billing 对账告警投递目标（notify-worker gRPC）；留空则退化为仅日志 |
 | `RECON_ALERT_ENABLED` | 是否启用对账差异告警（`true`/`false`） |
-| `RECON_ALERT_RECIPIENTS` | 对账告警收件人列表，JSON 数组，例如 `[admin,ops]` |
+| `RECON_ALERT_NOTIFY_TYPE` | 对账告警通知类型，支持 `event` / `webhook` / `email` |
+| `RECON_ALERT_RECIPIENTS` | 对账告警目标，JSON 数组；webhook/event 可填 URL 或留空走 `NOTIFY_WEBHOOK_URL`，email 填邮箱 |
 | `RECON_ALERT_INTERVAL` | 对账任务执行间隔，例如 `1h`、`30m` |
+| `NOTIFY_WEBHOOK_URL` | notify-worker 默认 webhook 投递地址 |
+| `NOTIFY_SMTP_HOST` / `NOTIFY_SMTP_PORT` / `NOTIFY_SMTP_USER` / `NOTIFY_SMTP_PASS` / `NOTIFY_SMTP_FROM` | notify-worker 邮件投递配置 |
 
 更多配置见 [.env.example](./.env.example) 和 [docs/deployment.md](./docs/deployment.md)。
 
