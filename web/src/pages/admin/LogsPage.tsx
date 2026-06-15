@@ -1,7 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { Eye } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { adminApiClient } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { EmptyState } from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/LoadingStates';
@@ -23,19 +31,37 @@ import {
 
 interface LogEntry {
   id: string;
+  level?: string;
   userId: string;
+  user_id?: string | number;
   type: string;
+  message?: string;
+  source?: string;
+  request_id?: string;
   amount: string;
   balanceAfter: string;
   referenceId: string;
   remark: string;
   createdAt: string;
+  created_at?: string | number;
+  username?: string;
+  token_name?: string;
+  model_name?: string;
+  quota?: string | number;
+  prompt_tokens?: string | number;
+  completion_tokens?: string | number;
+  cache_read_tokens?: string | number;
+  channel?: string | number;
+  elapsed_time?: string | number;
+  is_stream?: boolean;
 }
 
 interface LogListData {
   logs?: LogEntry[];
   total?: number;
 }
+
+type DetailRow = [string, string | number | boolean | undefined | null];
 
 const EMPTY_LOGS: LogEntry[] = [];
 
@@ -47,6 +73,7 @@ const LOG_TYPE_NAMES: Record<string, string> = {
 };
 
 export function AdminLogsPage() {
+  const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
   const {
     page,
     pageSize,
@@ -96,13 +123,57 @@ export function AdminLogsPage() {
     },
   });
 
+  const { data: selectedLog, isLoading: isDetailLoading } = useQuery({
+    queryKey: ['admin-log-detail', selectedLogId],
+    enabled: selectedLogId !== null,
+    queryFn: async () => {
+      const res = await adminApiClient.get(`/log/${selectedLogId}`);
+      return unwrapApiData<LogEntry>(res.data);
+    },
+  });
+
   function formatQuota(q: string) {
     return (parseInt(q || '0') / 500000).toFixed(2);
+  }
+
+  function formatRawQuota(value: string | number | undefined) {
+    return formatQuota(String(value ?? '0'));
+  }
+
+  function formatTimestamp(value: string | number | undefined) {
+    const seconds = Number(value ?? 0);
+    return seconds > 0 ? new Date(seconds * 1000).toLocaleString() : '-';
+  }
+
+  function displayValue(value: string | number | boolean | undefined | null) {
+    if (value === undefined || value === null || value === '') return '-';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    return String(value);
   }
 
   const logs = data?.logs ?? EMPTY_LOGS;
   const total = data?.total ?? logs.length;
   const visibleLogs = useMemo(() => sortRows(logs, sort), [logs, sort]);
+  const detailRows: DetailRow[] = selectedLog
+    ? [
+        ['ID', selectedLog.id],
+        ['Type', selectedLog.type || selectedLog.level],
+        ['User ID', selectedLog.userId || selectedLog.user_id],
+        ['Username', selectedLog.username],
+        ['Source', selectedLog.source],
+        ['Request ID', selectedLog.request_id],
+        ['Model', selectedLog.model_name],
+        ['Token', selectedLog.token_name],
+        ['Channel', selectedLog.channel],
+        ['Quota', formatRawQuota(selectedLog.quota ?? selectedLog.amount)],
+        ['Prompt Tokens', selectedLog.prompt_tokens],
+        ['Completion Tokens', selectedLog.completion_tokens],
+        ['Cache Read Tokens', selectedLog.cache_read_tokens],
+        ['Elapsed Time', selectedLog.elapsed_time ? `${selectedLog.elapsed_time} ms` : undefined],
+        ['Stream', selectedLog.is_stream],
+        ['Created At', formatTimestamp(selectedLog.created_at ?? selectedLog.createdAt)],
+      ]
+    : [];
 
   return (
     <div className="space-y-4">
@@ -157,7 +228,7 @@ export function AdminLogsPage() {
       </div>
 
       {isLoading ? (
-        <TableSkeleton columns={['ID', 'User ID', 'Type', 'Amount', 'Balance After', 'Reference', 'Remark', 'Created At']} rows={8} />
+        <TableSkeleton columns={['ID', 'User ID', 'Type', 'Amount', 'Balance After', 'Reference', 'Remark', 'Created At', 'Actions']} rows={8} />
       ) : !logs || logs.length === 0 ? (
         <EmptyState title="No logs found" description="Adjust the filters or check back after billing events are recorded." />
       ) : (
@@ -182,6 +253,7 @@ export function AdminLogsPage() {
                   <SortableHeader<LogEntry> columnKey="createdAt" sort={sort} onSortChange={setSort}>
                     Created At
                   </SortableHeader>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -201,6 +273,17 @@ export function AdminLogsPage() {
                     <TableCell>
                       {new Date(parseInt(log.createdAt) * 1000).toLocaleString()}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-sm"
+                        aria-label={`View log ${log.id}`}
+                        onClick={() => setSelectedLogId(String(log.id))}
+                      >
+                        <Eye className="size-4" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -216,6 +299,43 @@ export function AdminLogsPage() {
           />
         </>
       )}
+
+      <Dialog open={selectedLogId !== null} onOpenChange={(open) => !open && setSelectedLogId(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Log Details</DialogTitle>
+            <DialogDescription>
+              {selectedLogId ? `Inspect billing and relay metadata for log ${selectedLogId}.` : 'Inspect billing and relay metadata.'}
+            </DialogDescription>
+          </DialogHeader>
+          {isDetailLoading ? (
+            <TableSkeleton columns={['Field', 'Value']} rows={8} />
+          ) : selectedLog ? (
+            <div className="space-y-4">
+              <div className="overflow-x-auto rounded-lg border">
+                <Table>
+                  <TableBody>
+                    {detailRows.map(([label, value]) => (
+                      <TableRow key={label}>
+                        <TableCell className="w-40 bg-muted/40 text-xs font-medium text-muted-foreground">{label}</TableCell>
+                        <TableCell className="font-mono text-xs">{displayValue(value)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Message</div>
+                <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs leading-5">
+                  {displayValue(selectedLog.message || selectedLog.remark)}
+                </pre>
+              </div>
+            </div>
+          ) : (
+            <EmptyState title="Log details unavailable" description="The log service did not return details for this entry." />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
