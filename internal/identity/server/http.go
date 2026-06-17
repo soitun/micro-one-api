@@ -592,78 +592,26 @@ func handleUserLogs(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsec
 	logType := strings.TrimSpace(r.URL.Query().Get("type"))
 	userID := strconv.FormatInt(snapshot.UserID, 10)
 
-	var entries []*commonv1.LedgerEntry
-	var total int64
-	if logType == "" {
-		resp, err := billingClient.ListLedger(r.Context(), &billingv1.ListLedgerRequest{
-			UserId:   userID,
-			Page:     page,
-			PageSize: pageSize,
-		})
-		if err != nil {
-			writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
-			return
-		}
-		entries = resp.GetEntries()
-		total = resp.GetTotal()
-	} else {
-		var err error
-		entries, total, err = listFilteredLedgerEntries(r.Context(), billingClient, userID, page, pageSize, logType)
-		if err != nil {
-			writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
-			return
-		}
+	resp, err := billingClient.ListLedger(r.Context(), &billingv1.ListLedgerRequest{
+		UserId:   userID,
+		Page:     page,
+		PageSize: pageSize,
+		Type:     logType,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: err.Error()})
+		return
 	}
 
-	items := make([]map[string]interface{}, 0, len(entries))
-	for _, entry := range entries {
+	items := make([]map[string]interface{}, 0, len(resp.GetEntries()))
+	for _, entry := range resp.GetEntries() {
 		items = append(items, ledgerEntryToMap(entry))
 	}
 
 	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{
 		"items": items,
-		"total": total,
+		"total": resp.GetTotal(),
 	}})
-}
-
-func listFilteredLedgerEntries(ctx context.Context, billingClient billingv1.BillingServiceClient, userID string, page, pageSize int32, logType string) ([]*commonv1.LedgerEntry, int64, error) {
-	const scanPageSize int32 = 100
-
-	matches := make([]*commonv1.LedgerEntry, 0, pageSize)
-	scanned := int64(0)
-	totalLedgers := int64(1)
-	for scanPage := int32(1); scanned < totalLedgers; scanPage++ {
-		resp, err := billingClient.ListLedger(ctx, &billingv1.ListLedgerRequest{
-			UserId:   userID,
-			Page:     scanPage,
-			PageSize: scanPageSize,
-		})
-		if err != nil {
-			return nil, 0, err
-		}
-		totalLedgers = resp.GetTotal()
-		entries := resp.GetEntries()
-		if len(entries) == 0 {
-			break
-		}
-		scanned += int64(len(entries))
-		for _, entry := range entries {
-			if entry.GetType() == logType {
-				matches = append(matches, entry)
-			}
-		}
-	}
-
-	total := int64(len(matches))
-	start := int((page - 1) * pageSize)
-	if start >= len(matches) {
-		return []*commonv1.LedgerEntry{}, total, nil
-	}
-	end := start + int(pageSize)
-	if end > len(matches) {
-		end = len(matches)
-	}
-	return matches[start:end], total, nil
 }
 
 func ledgerEntryToMap(entry *commonv1.LedgerEntry) map[string]interface{} {
