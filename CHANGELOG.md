@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-18
+
 ### Added
 - 渠道健康状态与自动熔断：relay 上游调用会回写成功/失败和响应时间，
   channel-service 连续失败达到阈值后跳过该渠道，冷却期后允许半开恢复；
