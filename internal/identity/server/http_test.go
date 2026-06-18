@@ -548,6 +548,9 @@ func TestIdentityHTTPUserLogsUsesAuthenticatedUser(t *testing.T) {
 	if billingClient.lastLedgerRequest.GetUserId() != strconv.FormatInt(user.ID, 10) {
 		t.Fatalf("ledger user_id = %q, want authenticated user %d", billingClient.lastLedgerRequest.GetUserId(), user.ID)
 	}
+	if billingClient.lastLedgerRequest.GetType() != "consume" {
+		t.Fatalf("ledger type = %q, want consume", billingClient.lastLedgerRequest.GetType())
+	}
 	body := rec.Body.String()
 	if !strings.Contains(body, `"success":true`) || !strings.Contains(body, `"type":"consume"`) {
 		t.Fatalf("logs response mismatch: %s", body)
@@ -1772,39 +1775,49 @@ func (c *identityHTTPBillingClient) ListLedger(ctx context.Context, req *billing
 			Total:   int64(len(c.ledgerEntries)),
 		}, nil
 	}
-	return &billingv1.ListLedgerResponse{
-		Entries: []*commonv1.LedgerEntry{
-			{
-				Id:               "1",
-				UserId:           req.GetUserId(),
-				Type:             "consume",
-				Amount:           -25,
-				BalanceAfter:     975,
-				ReferenceId:      "res-1",
-				Remark:           "model=mimo-v2.5, tokens=25",
-				CreatedAt:        timestamppb.Now(),
-				TokenName:        "token-1",
-				ModelName:        "mimo-v2.5",
-				Quota:            25,
-				PromptTokens:     10,
-				CompletionTokens: 15,
-				CacheReadTokens:  4,
-				ChannelId:        2,
-				ElapsedTime:      123,
-				Endpoint:         "/v1/chat/completions",
-			},
-			{
-				Id:           "2",
-				UserId:       req.GetUserId(),
-				Type:         "recharge",
-				Amount:       1000,
-				BalanceAfter: 1000,
-				ReferenceId:  "topup-1",
-				Remark:       "manual",
-				CreatedAt:    timestamppb.Now(),
-			},
+	entries := []*commonv1.LedgerEntry{
+		{
+			Id:               "1",
+			UserId:           req.GetUserId(),
+			Type:             "consume",
+			Amount:           -25,
+			BalanceAfter:     975,
+			ReferenceId:      "res-1",
+			Remark:           "model=mimo-v2.5, tokens=25",
+			CreatedAt:        timestamppb.Now(),
+			TokenName:        "token-1",
+			ModelName:        "mimo-v2.5",
+			Quota:            25,
+			PromptTokens:     10,
+			CompletionTokens: 15,
+			CacheReadTokens:  4,
+			ChannelId:        2,
+			ElapsedTime:      123,
+			Endpoint:         "/v1/chat/completions",
 		},
-		Total: 2,
+		{
+			Id:           "2",
+			UserId:       req.GetUserId(),
+			Type:         "recharge",
+			Amount:       1000,
+			BalanceAfter: 1000,
+			ReferenceId:  "topup-1",
+			Remark:       "manual",
+			CreatedAt:    timestamppb.Now(),
+		},
+	}
+	if req.GetType() != "" {
+		filtered := make([]*commonv1.LedgerEntry, 0, len(entries))
+		for _, entry := range entries {
+			if entry.GetType() == req.GetType() {
+				filtered = append(filtered, entry)
+			}
+		}
+		entries = filtered
+	}
+	return &billingv1.ListLedgerResponse{
+		Entries: entries,
+		Total:   int64(len(entries)),
 	}, nil
 }
 

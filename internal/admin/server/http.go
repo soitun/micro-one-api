@@ -25,6 +25,7 @@ import (
 	"micro-one-api/internal/admin/service"
 	"micro-one-api/internal/pkg/metrics"
 	"micro-one-api/internal/pkg/safecast"
+	"micro-one-api/internal/pkg/xhttp"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
@@ -84,9 +85,7 @@ func newAdminGuard(svc *service.AdminService) func(http.HandlerFunc) http.Handle
 // Optional arguments are kept for backwards-compatible tests and older wire
 // call sites: first is identity HTTP endpoint, second is external web root.
 func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *khttp.Server {
-	srv := khttp.NewServer(
-		khttp.Address(addr),
-	)
+	srv := khttp.NewServer(xhttp.SafeKratosServerOptions(khttp.Address(addr))...)
 	identityProxy := newServiceReverseProxy(optionString(options, 0))
 	webAssets := newAdminWebAssets(optionString(options, 1))
 	handlePage := webAssets.handlePage
@@ -2335,7 +2334,21 @@ func handleOneAPILogByID(w http.ResponseWriter, r *http.Request, svc *service.Ad
 		handleOneAPILogs(w, r, svc)
 		return
 	}
-	writeJSON(w, http.StatusNotImplemented, apiResponse(false, "log delete is not implemented", nil))
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	idText := strings.TrimPrefix(trimmed, "api/log/")
+	idText = strings.Trim(idText, "/")
+	if idText == "" || strings.Contains(idText, "/") {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "invalid log id", nil))
+		return
+	}
+	if _, err := strconv.ParseInt(idText, 10, 64); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "invalid log id", nil))
+		return
+	}
+	handleOneAPIGetLog(w, r, idText)
 }
 
 func handleOneAPIDeleteLogs(w http.ResponseWriter, r *http.Request) {
@@ -2344,19 +2357,13 @@ func handleOneAPIDeleteLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serviceToken := os.Getenv("SERVICE_TOKEN")
-	targetURL, err := logDeleteURLFromEnv()
+	targetURL, err := logServiceURLFromEnv("/v1/logs")
 	if err != nil || serviceToken == "" {
 		writeJSON(w, http.StatusNotImplemented, apiResponse(false, "log delete is not configured", nil))
 		return
 	}
 	targetURL.RawQuery = r.URL.RawQuery
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodDelete, targetURL.String(), nil)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, apiResponse(false, "failed to create log delete request", nil))
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+serviceToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doLogServiceRequest(r.Context(), http.MethodDelete, targetURL, serviceToken)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, apiResponse(false, "log service unavailable", nil))
 		return
@@ -2379,13 +2386,46 @@ func handleOneAPIDeleteLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, apiResponse(true, "", payload))
 }
 
-func logDeleteURLFromEnv() (*url.URL, error) {
-	return logDeleteURL(strings.TrimSpace(os.Getenv("LOG_HTTP_ENDPOINT")))
+func handleOneAPIGetLog(w http.ResponseWriter, r *http.Request, idText string) {
+	serviceToken := os.Getenv("SERVICE_TOKEN")
+	targetURL, err := logServiceURLFromEnv("/v1/logs/" + idText)
+	if err != nil || serviceToken == "" {
+		writeJSON(w, http.StatusNotImplemented, apiResponse(false, "log detail is not configured", nil))
+		return
+	}
+	resp, err := doLogServiceRequest(r.Context(), http.MethodGet, targetURL, serviceToken)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, apiResponse(false, "log service unavailable", nil))
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, apiResponse(false, "failed to read log service response", nil))
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		writeJSON(w, resp.StatusCode, apiResponse(false, string(body), nil))
+		return
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"raw": string(body)}))
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse(true, "", payload))
 }
 
-func logDeleteURL(endpoint string) (*url.URL, error) {
+func logServiceURLFromEnv(path string) (*url.URL, error) {
+	return logServiceURL(strings.TrimSpace(os.Getenv("LOG_HTTP_ENDPOINT")), path)
+}
+
+func logServiceURL(endpoint, path string) (*url.URL, error) {
 	if endpoint == "" {
 		return nil, errors.New("missing log endpoint")
+	}
+	if !strings.HasPrefix(path, "/") || strings.Contains(path, "?") || strings.Contains(path, "#") {
+		return nil, errors.New("log service path must be absolute and clean")
 	}
 	u, err := url.Parse(endpoint)
 	if err != nil {
@@ -2397,10 +2437,47 @@ func logDeleteURL(endpoint string) (*url.URL, error) {
 	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errors.New("log endpoint must be an origin URL")
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/v1/logs"
+	if !isAllowedLogServiceOrigin(u.Scheme, u.Hostname()) {
+		return nil, errors.New("log endpoint origin is not allowed")
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + path
 	u.RawPath = ""
 	u.ForceQuery = false
 	return u, nil
+}
+
+func doLogServiceRequest(ctx context.Context, method string, targetURL *url.URL, serviceToken string) (*http.Response, error) {
+	if targetURL == nil || serviceToken == "" {
+		return nil, errors.New("missing log service request config")
+	}
+	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
+		return nil, errors.New("invalid log service scheme")
+	}
+	if targetURL.Host == "" || targetURL.User != nil || !isAllowedLogServiceOrigin(targetURL.Scheme, targetURL.Hostname()) {
+		return nil, errors.New("invalid log service origin")
+	}
+	req, err := http.NewRequestWithContext(ctx, method, targetURL.String(), nil) // #nosec G704 -- targetURL is built from LOG_HTTP_ENDPOINT and validated by logServiceURL/doLogServiceRequest.
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+serviceToken)
+	return http.DefaultClient.Do(req) // #nosec G704 -- request URL is validated to an allowed log-service origin above.
+}
+
+func isAllowedLogServiceOrigin(scheme, host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false
+	}
+	if scheme == "https" {
+		return true
+	}
+	return host == "localhost" ||
+		host == "127.0.0.1" ||
+		host == "::1" ||
+		host == "log-service" ||
+		strings.HasSuffix(host, ".svc") ||
+		strings.HasSuffix(host, ".svc.cluster.local")
 }
 
 func handleOneAPIListLogs(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {

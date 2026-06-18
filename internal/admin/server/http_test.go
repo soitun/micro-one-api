@@ -105,6 +105,7 @@ type adminHTTPChannelClient struct {
 	existingFailureCount int32
 	existingLastError    string
 	existingLastSuccess  int64
+	healthReq            *channelv1.RecordChannelHealthRequest
 }
 
 func (c *adminHTTPChannelClient) CreateChannel(ctx context.Context, req *channelv1.CreateChannelRequest, opts ...grpc.CallOption) (*channelv1.CreateChannelResponse, error) {
@@ -127,6 +128,11 @@ func (c *adminHTTPChannelClient) DeleteChannel(ctx context.Context, req *channel
 func (c *adminHTTPChannelClient) ChangeChannelStatus(ctx context.Context, req *channelv1.ChangeChannelStatusRequest, opts ...grpc.CallOption) (*channelv1.ChangeChannelStatusResponse, error) {
 	c.statuses = append(c.statuses, req.Status)
 	return &channelv1.ChangeChannelStatusResponse{Success: true, Message: "updated"}, nil
+}
+
+func (c *adminHTTPChannelClient) RecordChannelHealth(ctx context.Context, req *channelv1.RecordChannelHealthRequest, opts ...grpc.CallOption) (*channelv1.RecordChannelHealthResponse, error) {
+	c.healthReq = req
+	return &channelv1.RecordChannelHealthResponse{Success: true, Message: "ok"}, nil
 }
 
 func (c *adminHTTPChannelClient) GetChannel(ctx context.Context, req *channelv1.GetChannelRequest, opts ...grpc.CallOption) (*channelv1.GetChannelReply, error) {
@@ -159,6 +165,7 @@ func (c *adminHTTPChannelClient) GetChannel(ctx context.Context, req *channelv1.
 			BalanceRefreshLastError:           c.existingLastError,
 			BalanceRefreshLastSuccessTime:     c.existingLastSuccess,
 			ConsecutiveBalanceRefreshFailures: c.existingFailureCount,
+			HealthStatus:                      "healthy",
 		},
 	}, nil
 }
@@ -177,6 +184,7 @@ func (c *adminHTTPChannelClient) ListChannels(ctx context.Context, req *channelv
 		Balance:            12.5,
 		BalanceUpdatedTime: 1710000100,
 		UsedQuota:          900,
+		HealthStatus:       "healthy",
 	}
 	disabled := &commonv1.ChannelSummary{
 		Id:     102,
@@ -1831,32 +1839,113 @@ func TestAdminHTTPOneAPILogDeleteRequiresEndTime(t *testing.T) {
 	}
 }
 
-func TestLogDeleteURLUsesConfiguredOriginAndFixedPath(t *testing.T) {
-	got, err := logDeleteURL("https://logs.example.com/base/")
+func TestAdminHTTPOneAPILogDetailProxiesToLogService(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	t.Setenv("SERVICE_TOKEN", "service-token")
+
+	var gotAuth string
+	logService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/logs/123" {
+			t.Fatalf("unexpected log-service request: %s %s", r.Method, r.URL.Path)
+		}
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":123,"type":"consume","message":"ok"}`))
+	}))
+	defer logService.Close()
+	t.Setenv("LOG_HTTP_ENDPOINT", logService.URL)
+
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+	req := httptest.NewRequest(http.MethodGet, "/api/log/123", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if gotAuth != "Bearer service-token" {
+		t.Fatalf("auth = %q", gotAuth)
+	}
+	for _, want := range []string{`"success":true`, `"id":123`, `"type":"consume"`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("detail response missing %s: %s", want, rec.Body.String())
+		}
+	}
+}
+
+func TestAdminHTTPOneAPILogDetailRequiresConfiguredLogService(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	t.Setenv("SERVICE_TOKEN", "service-token")
+
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+	req := httptest.NewRequest(http.MethodGet, "/api/log/123", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "log detail is not configured") {
+		t.Fatalf("detail configuration response mismatch: %s", rec.Body.String())
+	}
+}
+
+func TestLogServiceURLUsesConfiguredOriginAndFixedPath(t *testing.T) {
+	got, err := logServiceURL("https://logs.example.com/base/", "/v1/logs")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.String() != "https://logs.example.com/base/v1/logs" {
-		t.Fatalf("logDeleteURL = %q", got.String())
+		t.Fatalf("logServiceURL = %q", got.String())
+	}
+
+	got, err = logServiceURL("https://logs.example.com/base/", "/v1/logs/123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "https://logs.example.com/base/v1/logs/123" {
+		t.Fatalf("logServiceURL = %q", got.String())
 	}
 }
 
-func TestLogDeleteURLRejectsUnsafeEndpointShapes(t *testing.T) {
+func TestLogServiceURLRejectsUnsafeEndpointShapes(t *testing.T) {
 	for _, endpoint := range []string{
 		"file:///tmp/logs",
 		"https://user:pass@logs.example.com",
 		"https://logs.example.com?target=http://metadata",
 		"https://logs.example.com/#fragment",
 	} {
-		if _, err := logDeleteURL(endpoint); err == nil {
-			t.Fatalf("logDeleteURL accepted %q", endpoint)
+		if _, err := logServiceURL(endpoint, "/v1/logs"); err == nil {
+			t.Fatalf("logServiceURL accepted %q", endpoint)
+		}
+	}
+	for _, path := range []string{"v1/logs", "/v1/logs?target=http://metadata", "/v1/logs#fragment"} {
+		if _, err := logServiceURL("https://logs.example.com", path); err == nil {
+			t.Fatalf("logServiceURL accepted path %q", path)
 		}
 	}
 }
 
 func TestAdminHTTPTestChannel(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
-	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+	t.Setenv("PROVIDER_DISABLE_SSRF_CHECK", "true")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("upstream path = %q, want /v1/models", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer sk-test" {
+			t.Fatalf("authorization header = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+	}))
+	defer upstream.Close()
+	channel := &adminHTTPChannelClient{baseURL: upstream.URL + "/v1"}
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, channel, &adminHTTPBillingClient{})
 	req := httptest.NewRequest(http.MethodGet, "/api/channel/test/101", nil)
 	req.Header.Set("Authorization", "Bearer admin-token")
 	rec := httptest.NewRecorder()
@@ -1868,6 +1957,9 @@ func TestAdminHTTPTestChannel(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"channel_id":101`) {
 		t.Fatalf("channel test response mismatch: %s", rec.Body.String())
+	}
+	if channel.healthReq == nil || !channel.healthReq.Success || channel.healthReq.ChannelId != 101 {
+		t.Fatalf("health request mismatch: %+v", channel.healthReq)
 	}
 }
 
