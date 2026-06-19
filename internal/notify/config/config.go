@@ -51,6 +51,14 @@ type NotifySVCConfig struct {
 	SMTPPass string `json:"smtp_pass"`
 	// SMTPFrom is the sender email address.
 	SMTPFrom string `json:"smtp_from"`
+	// WeComWebhookURL is the enterprise wecom webhook URL or key.
+	WeComWebhookURL string `json:"wecom_webhook_url"`
+	// DingTalkWebhookURL is the dingtalk webhook URL or access_token.
+	DingTalkWebhookURL string `json:"dingtalk_webhook_url"`
+	// FeishuWebhookURL is the feishu webhook URL.
+	FeishuWebhookURL string `json:"feishu_webhook_url"`
+	// SlackWebhookURL is the slack incoming webhook URL.
+	SlackWebhookURL string `json:"slack_webhook_url"`
 	// DispatchInterval is the pending notification scan interval.
 	DispatchInterval string `json:"dispatch_interval"`
 	// DispatchBatch is the maximum pending notifications processed per scan.

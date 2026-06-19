@@ -23,12 +23,16 @@ type Sender interface {
 }
 
 type SenderConfig struct {
-	WebhookURL string
-	SMTPHost   string
-	SMTPPort   int
-	SMTPUser   string
-	SMTPPass   string
-	SMTPFrom   string
+	WebhookURL        string
+	SMTPHost          string
+	SMTPPort          int
+	SMTPUser          string
+	SMTPPass          string
+	SMTPFrom          string
+	WeComWebhookURL   string
+	DingTalkWebhookURL string
+	FeishuWebhookURL  string
+	SlackWebhookURL   string
 }
 
 type MultiSender struct {
@@ -49,6 +53,14 @@ func (s *MultiSender) Send(ctx context.Context, n *Notification) error {
 		return s.sendWebhook(ctx, n)
 	case NotifyTypeEmail:
 		return s.sendEmail(ctx, n)
+	case NotifyTypeWeCom:
+		return s.sendWeCom(ctx, n)
+	case NotifyTypeDingTalk:
+		return s.sendDingTalk(ctx, n)
+	case NotifyTypeFeishu:
+		return s.sendFeishu(ctx, n)
+	case NotifyTypeSlack:
+		return s.sendSlack(ctx, n)
 	default:
 		return ErrUnsupportedNotificationType
 	}
@@ -198,4 +210,113 @@ func (d *Dispatcher) loop(ctx context.Context) {
 			_ = d.DispatchOnce(ctx)
 		}
 	}
+}
+
+// sendWeCom sends a notification to WeCom (Enterprise WeChat) webhook.
+func (s *MultiSender) sendWeCom(ctx context.Context, n *Notification) error {
+	endpoint := s.cfg.WeComWebhookURL
+	if endpoint == "" {
+		return ErrNotificationSenderNotReady
+	}
+	// If recipient is provided and looks like a complete URL, use it
+	if isHTTPURL(n.Recipient) {
+		endpoint = n.Recipient
+	} else if n.Recipient != "" && !strings.Contains(endpoint, "://") {
+		// If recipient is a key, build the full URL
+		endpoint = fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=%s", n.Recipient)
+	}
+	// Build message content with subject included
+	content := n.Subject + "\n" + n.Content
+	payload := map[string]interface{}{
+		"msgtype": "text",
+		"text": map[string]interface{}{
+			"content": content,
+		},
+	}
+	return s.sendJSONWebhook(ctx, endpoint, payload)
+}
+
+// sendDingTalk sends a notification to DingTalk webhook.
+func (s *MultiSender) sendDingTalk(ctx context.Context, n *Notification) error {
+	endpoint := s.cfg.DingTalkWebhookURL
+	if endpoint == "" {
+		return ErrNotificationSenderNotReady
+	}
+	// If recipient is provided and looks like a complete URL, use it
+	if isHTTPURL(n.Recipient) {
+		endpoint = n.Recipient
+	} else if n.Recipient != "" && !strings.Contains(endpoint, "://") {
+		// If recipient is an access_token, build the full URL
+		endpoint = fmt.Sprintf("https://oapi.dingtalk.com/robot/send?access_token=%s", n.Recipient)
+	}
+	// Build message content with subject included
+	content := n.Subject + "\n" + n.Content
+	payload := map[string]interface{}{
+		"msgtype": "text",
+		"text": map[string]interface{}{
+			"content": content,
+		},
+	}
+	return s.sendJSONWebhook(ctx, endpoint, payload)
+}
+
+// sendFeishu sends a notification to Feishu (Lark) webhook.
+func (s *MultiSender) sendFeishu(ctx context.Context, n *Notification) error {
+	endpoint := s.cfg.FeishuWebhookURL
+	if endpoint == "" {
+		return ErrNotificationSenderNotReady
+	}
+	// Use recipient as webhook URL if provided
+	if n.Recipient != "" {
+		endpoint = n.Recipient
+	}
+	// Build message content with subject included
+	content := n.Subject + "\n" + n.Content
+	payload := map[string]interface{}{
+		"msg_type": "text",
+		"content": map[string]interface{}{
+			"text": content,
+		},
+	}
+	return s.sendJSONWebhook(ctx, endpoint, payload)
+}
+
+// sendSlack sends a notification to Slack incoming webhook.
+func (s *MultiSender) sendSlack(ctx context.Context, n *Notification) error {
+	endpoint := s.cfg.SlackWebhookURL
+	if endpoint == "" {
+		return ErrNotificationSenderNotReady
+	}
+	// Use recipient as webhook URL if provided
+	if n.Recipient != "" {
+		endpoint = n.Recipient
+	}
+	// Build message content with subject included
+	content := n.Subject + "\n" + n.Content
+	payload := map[string]interface{}{
+		"text": content,
+	}
+	return s.sendJSONWebhook(ctx, endpoint, payload)
+}
+
+// sendJSONWebhook is a helper for sending JSON payloads to webhook endpoints.
+func (s *MultiSender) sendJSONWebhook(ctx context.Context, endpoint string, payload map[string]interface{}) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
+	}
+	return nil
 }

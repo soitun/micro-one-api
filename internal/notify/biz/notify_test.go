@@ -2,7 +2,9 @@ package biz
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -378,6 +380,18 @@ func TestNotifyConstants(t *testing.T) {
 	if NotifyTypeEvent != "event" {
 		t.Fatalf("expected event, got %s", NotifyTypeEvent)
 	}
+	if NotifyTypeWeCom != "wecom" {
+		t.Fatalf("expected wecom, got %s", NotifyTypeWeCom)
+	}
+	if NotifyTypeDingTalk != "dingtalk" {
+		t.Fatalf("expected dingtalk, got %s", NotifyTypeDingTalk)
+	}
+	if NotifyTypeFeishu != "feishu" {
+		t.Fatalf("expected feishu, got %s", NotifyTypeFeishu)
+	}
+	if NotifyTypeSlack != "slack" {
+		t.Fatalf("expected slack, got %s", NotifyTypeSlack)
+	}
 	if NotifyStatusPending != "pending" {
 		t.Fatalf("expected pending, got %s", NotifyStatusPending)
 	}
@@ -386,5 +400,160 @@ func TestNotifyConstants(t *testing.T) {
 	}
 	if NotifyStatusFailed != "failed" {
 		t.Fatalf("expected failed, got %s", NotifyStatusFailed)
+	}
+}
+
+// TestMultiSenderWeCom tests enterprise wecom notification sending.
+func TestMultiSenderWeCom(t *testing.T) {
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("expected json content type, got %s", r.Header.Get("Content-Type"))
+		}
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	sender := NewMultiSender(SenderConfig{WeComWebhookURL: srv.URL})
+	err := sender.Send(context.Background(), &Notification{
+		ID:        1,
+		Type:      NotifyTypeWeCom,
+		Recipient: "",
+		Subject:   "Test Alert",
+		Content:   "This is a test message",
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(receivedBody, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if payload["msgtype"] != "text" {
+		t.Fatalf("expected msgtype text, got %v", payload["msgtype"])
+	}
+}
+
+// TestMultiSenderDingTalk tests dingtalk notification sending.
+func TestMultiSenderDingTalk(t *testing.T) {
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	sender := NewMultiSender(SenderConfig{DingTalkWebhookURL: srv.URL})
+	err := sender.Send(context.Background(), &Notification{
+		ID:        1,
+		Type:      NotifyTypeDingTalk,
+		Recipient: "",
+		Subject:   "Test Alert",
+		Content:   "This is a test message",
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(receivedBody, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if payload["msgtype"] != "text" {
+		t.Fatalf("expected msgtype text, got %v", payload["msgtype"])
+	}
+}
+
+// TestMultiSenderFeishu tests feishu notification sending.
+func TestMultiSenderFeishu(t *testing.T) {
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	sender := NewMultiSender(SenderConfig{FeishuWebhookURL: srv.URL})
+	err := sender.Send(context.Background(), &Notification{
+		ID:        1,
+		Type:      NotifyTypeFeishu,
+		Recipient: "",
+		Subject:   "Test Alert",
+		Content:   "This is a test message",
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(receivedBody, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if payload["msg_type"] != "text" {
+		t.Fatalf("expected msg_type text, got %v", payload["msg_type"])
+	}
+}
+
+// TestMultiSenderSlack tests slack notification sending.
+func TestMultiSenderSlack(t *testing.T) {
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	sender := NewMultiSender(SenderConfig{SlackWebhookURL: srv.URL})
+	err := sender.Send(context.Background(), &Notification{
+		ID:        1,
+		Type:      NotifyTypeSlack,
+		Recipient: "",
+		Subject:   "Test Alert",
+		Content:   "This is a test message",
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(receivedBody, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if payload["text"] == nil {
+		t.Fatalf("expected text field in payload")
 	}
 }
