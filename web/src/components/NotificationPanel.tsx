@@ -17,6 +17,8 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { adminApiClient } from '@/lib/api';
+import { unwrapApiData } from '@/lib/api-response';
 
 // Notification types based on backend API response (snake_case)
 interface Notification {
@@ -104,10 +106,8 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
         status: 'pending',
       });
 
-      const response = await fetch(`/v1/notifications?${params}`);
-      if (!response.ok) return;
-
-      const data: NotificationListResponse = await response.json();
+      const response = await adminApiClient.get(`/api/admin/notifications?${params}`);
+      const data = unwrapApiData<NotificationListResponse>(response.data);
       if (mountedRef.current) {
         setUnreadCount(data.total ?? 0);
       }
@@ -129,12 +129,8 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
         params.append('status', statusFilter);
       }
 
-      const response = await fetch(`/v1/notifications?${params}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch notifications');
-      }
-
-      const data: NotificationListResponse = await response.json();
+      const response = await adminApiClient.get(`/api/admin/notifications?${params}`);
+      const data = unwrapApiData<NotificationListResponse>(response.data);
       if (mountedRef.current) {
         setNotifications(data.items ?? []);
         setTotal(data.total ?? 0);

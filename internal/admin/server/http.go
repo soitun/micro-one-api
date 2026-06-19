@@ -87,6 +87,7 @@ func newAdminGuard(svc *service.AdminService) func(http.HandlerFunc) http.Handle
 func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *khttp.Server {
 	srv := khttp.NewServer(xhttp.SafeKratosServerOptions(khttp.Address(addr))...)
 	identityProxy := newServiceReverseProxy(optionString(options, 0))
+	notifyWorkerProxy := newNotifyWorkerProxy()
 	webAssets := newAdminWebAssets(optionString(options, 1))
 	handlePage := webAssets.handlePage
 	adminAuth := newAdminGuard(svc)
@@ -388,6 +389,16 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandlePrefix("/api/channel", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleOneAPIChannels(w, r, svc)
 	}))
+
+	// Notification endpoints - proxy to notify-worker
+	if notifyWorkerProxy != nil {
+		srv.HandleFunc("/api/admin/notifications", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+			handleNotifyProxy(w, r, notifyWorkerProxy)
+		}))
+		srv.HandlePrefix("/api/admin/notifications/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+			handleNotifyProxyByID(w, r, notifyWorkerProxy)
+		}))
+	}
 
 	return srv
 }
@@ -2834,4 +2845,90 @@ func writeServiceResponse(w http.ResponseWriter, resp interface{}, err error) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// newNotifyWorkerProxy creates a reverse proxy to the notify-worker HTTP service.
+// It reads the NOTIFY_HTTP_ENDPOINT environment variable, defaulting to http://notify-worker:8008.
+func newNotifyWorkerProxy() *httputil.ReverseProxy {
+	endpoint := os.Getenv("NOTIFY_HTTP_ENDPOINT")
+	if endpoint == "" {
+		// Default to notify-worker's HTTP port
+		endpoint = "http://notify-worker:8008"
+	}
+	target, err := url.Parse(endpoint)
+	if err != nil {
+		return nil
+	}
+	return httputil.NewSingleHostReverseProxy(target)
+}
+
+// handleNotifyProxy proxies requests to the notify-worker's /v1/notifications endpoint.
+// It adds the admin authentication wrapper and forwards the request with the original query parameters.
+func handleNotifyProxy(w http.ResponseWriter, r *http.Request, proxy *httputil.ReverseProxy) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	// Update the request path to point to notify-worker's endpoint
+	originalPath := r.URL.Path
+	r.URL.Path = strings.TrimPrefix(originalPath, "/api/admin")
+	// Ensure we're calling the correct endpoint
+	if r.URL.Path == "" || r.URL.Path == "/" {
+		r.URL.Path = "/v1/notifications"
+	}
+
+	// Proxy the request
+	proxy.ServeHTTP(w, r)
+}
+
+// handleNotifyProxyByID proxies requests to the notify-worker's /v1/notifications/{id} endpoint.
+// It handles GET requests for fetching a single notification and PUT requests for updating status.
+func handleNotifyProxyByID(w http.ResponseWriter, r *http.Request, proxy *httputil.ReverseProxy) {
+	// Extract the ID from the path
+	// Path format: /api/admin/notifications/{id} or /api/admin/notifications/{id}/status
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 5 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid notification path"})
+		return
+	}
+
+	// Extract notification ID and optional action (like "status")
+	notificationID := pathParts[4]
+	action := ""
+	if len(pathParts) > 5 {
+		action = pathParts[5]
+	}
+
+	// For status updates, we need to handle it specially since notify-worker's HTTP server
+	// only supports GET on /v1/notifications/{id}, does not support PUT
+	if action == "status" && r.Method == http.MethodPut" {
+		// Parse the request body to get the new status
+		var req struct {
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+
+		// Proxy to notify-worker's gRPC endpoint via HTTP (not available in current HTTP server)
+		// For now, return an error indicating this feature is not yet available
+		writeJSON(w, http.StatusNotImplemented, map[string]interface{}{
+			"success": false,
+			"message": "Notification status update via HTTP is not yet implemented. Please use the gRPC endpoint.",
+		})
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	// Update the request path to point to notify-worker's endpoint
+	r.URL.Path = "/v1/notifications/" + notificationID
+
+	// Proxy the request
+	proxy.ServeHTTP(w, r)
 }
