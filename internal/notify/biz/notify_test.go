@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -555,5 +556,257 @@ func TestMultiSenderSlack(t *testing.T) {
 	}
 	if payload["text"] == nil {
 		t.Fatalf("expected text field in payload")
+	}
+}
+
+// TestNormalizeWeComWebhookURL tests the WeCom URL normalization function.
+func TestNormalizeWeComWebhookURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "bare key",
+			input:    "test-key-12345",
+			expected: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key-12345",
+		},
+		{
+			name:     "full URL",
+			input:    "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=existing",
+			expected: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=existing",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeWeComWebhookURL(tt.input)
+			if result != tt.expected {
+				t.Errorf("normalizeWeComWebhookURL(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestNormalizeDingTalkWebhookURL tests the DingTalk URL normalization function.
+func TestNormalizeDingTalkWebhookURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "bare token",
+			input:    "test-token-67890",
+			expected: "https://oapi.dingtalk.com/robot/send?access_token=test-token-67890",
+		},
+		{
+			name:     "full URL",
+			input:    "https://oapi.dingtalk.com/robot/send?access_token=existing",
+			expected: "https://oapi.dingtalk.com/robot/send?access_token=existing",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeDingTalkWebhookURL(tt.input)
+			if result != tt.expected {
+				t.Errorf("normalizeDingTalkWebhookURL(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestMultiSenderWeComRecipientOverride tests recipient overriding config with full URL.
+func TestMultiSenderWeComRecipientOverride(t *testing.T) {
+	var hitCount int
+	var receivedURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitCount++
+		receivedURL = r.URL.String()
+		// Verify the URL contains the recipient's key parameter, not config's
+		if !strings.Contains(receivedURL, "key=recipient-key") {
+			t.Errorf("expected recipient key parameter in URL, got %s", receivedURL)
+		}
+		if strings.Contains(receivedURL, "key=config-key") {
+			t.Errorf("should not contain config key parameter in URL, got %s", receivedURL)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Config has one key
+	sender := NewMultiSender(SenderConfig{WeComWebhookURL: srv.URL + "?key=config-key"})
+	// Recipient overrides with different key
+	err := sender.Send(context.Background(), &Notification{
+		ID:        1,
+		Type:      NotifyTypeWeCom,
+		Recipient: srv.URL + "?key=recipient-key",
+		Subject:   "Test",
+		Content:   "Message",
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Verify our server was actually hit
+	if hitCount != 1 {
+		t.Fatalf("expected httptest server to be hit once, got %d", hitCount)
+	}
+}
+
+// TestMultiSenderWeComRecipientOnly tests sending with recipient but no global config.
+func TestMultiSenderWeComRecipientOnly(t *testing.T) {
+	var hitCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitCount++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// No global config configured
+	sender := NewMultiSender(SenderConfig{})
+	// Recipient provides the full URL
+	err := sender.Send(context.Background(), &Notification{
+		ID:        1,
+		Type:      NotifyTypeWeCom,
+		Recipient: srv.URL + "?key=test-key",
+		Subject:   "Test",
+		Content:   "Message",
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hitCount != 1 {
+		t.Fatalf("expected httptest server to be hit once, got %d", hitCount)
+	}
+}
+
+// TestMultiSenderDingTalkRecipientOnly tests sending with recipient but no global config.
+func TestMultiSenderDingTalkRecipientOnly(t *testing.T) {
+	var hitCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitCount++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// No global config configured
+	sender := NewMultiSender(SenderConfig{})
+	// Recipient provides the full URL
+	err := sender.Send(context.Background(), &Notification{
+		ID:        1,
+		Type:      NotifyTypeDingTalk,
+		Recipient: srv.URL + "?access_token=test-token",
+		Subject:   "Test",
+		Content:   "Message",
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hitCount != 1 {
+		t.Fatalf("expected httptest server to be hit once, got %d", hitCount)
+	}
+}
+
+// TestMultiSenderFeishuRecipientOnly tests sending with recipient but no global config.
+func TestMultiSenderFeishuRecipientOnly(t *testing.T) {
+	var hitCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitCount++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// No global config configured
+	sender := NewMultiSender(SenderConfig{})
+	// Recipient provides the full URL
+	err := sender.Send(context.Background(), &Notification{
+		ID:        1,
+		Type:      NotifyTypeFeishu,
+		Recipient: srv.URL,
+		Subject:   "Test",
+		Content:   "Message",
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hitCount != 1 {
+		t.Fatalf("expected httptest server to be hit once, got %d", hitCount)
+	}
+}
+
+// TestMultiSenderSlackRecipientOnly tests sending with recipient but no global config.
+func TestMultiSenderSlackRecipientOnly(t *testing.T) {
+	var hitCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitCount++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// No global config configured
+	sender := NewMultiSender(SenderConfig{})
+	// Recipient provides the full URL
+	err := sender.Send(context.Background(), &Notification{
+		ID:        1,
+		Type:      NotifyTypeSlack,
+		Recipient: srv.URL,
+		Subject:   "Test",
+		Content:   "Message",
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hitCount != 1 {
+		t.Fatalf("expected httptest server to be hit once, got %d", hitCount)
+	}
+}
+func TestMultiSenderDingTalkRecipientOverride(t *testing.T) {
+	var hitCount int
+	var receivedURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitCount++
+		receivedURL = r.URL.String()
+		// Verify the URL contains the recipient's token parameter, not config's
+		if !strings.Contains(receivedURL, "access_token=recipient-token") {
+			t.Errorf("expected recipient token parameter in URL, got %s", receivedURL)
+		}
+		if strings.Contains(receivedURL, "access_token=config-token") {
+			t.Errorf("should not contain config token parameter in URL, got %s", receivedURL)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Config has one token
+	sender := NewMultiSender(SenderConfig{DingTalkWebhookURL: srv.URL + "?access_token=config-token"})
+	// Recipient overrides with different token
+	err := sender.Send(context.Background(), &Notification{
+		ID:        1,
+		Type:      NotifyTypeDingTalk,
+		Recipient: srv.URL + "?access_token=recipient-token",
+		Subject:   "Test",
+		Content:   "Message",
+		CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Verify our server was actually hit
+	if hitCount != 1 {
+		t.Fatalf("expected httptest server to be hit once, got %d", hitCount)
 	}
 }

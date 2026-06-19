@@ -55,12 +55,16 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 		dispatchInterval = 30 * time.Second
 	}
 	sender := biz.NewMultiSender(biz.SenderConfig{
-		WebhookURL: cfg.Notify.WebhookURL,
-		SMTPHost:   cfg.Notify.SMTPHost,
-		SMTPPort:   cfg.Notify.SMTPPort,
-		SMTPUser:   cfg.Notify.SMTPUser,
-		SMTPPass:   cfg.Notify.SMTPPass,
-		SMTPFrom:   cfg.Notify.SMTPFrom,
+		WebhookURL:        cfg.Notify.WebhookURL,
+		SMTPHost:          cfg.Notify.SMTPHost,
+		SMTPPort:          cfg.Notify.SMTPPort,
+		SMTPUser:          cfg.Notify.SMTPUser,
+		SMTPPass:          cfg.Notify.SMTPPass,
+		SMTPFrom:          cfg.Notify.SMTPFrom,
+		WeComWebhookURL:   cfg.Notify.WeComWebhookURL,
+		DingTalkWebhookURL: cfg.Notify.DingTalkWebhookURL,
+		FeishuWebhookURL:  cfg.Notify.FeishuWebhookURL,
+		SlackWebhookURL:   cfg.Notify.SlackWebhookURL,
 	})
 	dispatcher := biz.NewDispatcher(uc, sender, dispatchInterval, cfg.Notify.DispatchBatch, cfg.Notify.MaxRetry)
 	stopDispatcher := dispatcher.Start(context.Background())

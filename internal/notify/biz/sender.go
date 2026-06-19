@@ -23,16 +23,16 @@ type Sender interface {
 }
 
 type SenderConfig struct {
-	WebhookURL        string
-	SMTPHost          string
-	SMTPPort          int
-	SMTPUser          string
-	SMTPPass          string
-	SMTPFrom          string
-	WeComWebhookURL   string
+	WebhookURL         string
+	SMTPHost           string
+	SMTPPort           int
+	SMTPUser           string
+	SMTPPass           string
+	SMTPFrom           string
+	WeComWebhookURL    string
 	DingTalkWebhookURL string
-	FeishuWebhookURL  string
-	SlackWebhookURL   string
+	FeishuWebhookURL   string
+	SlackWebhookURL    string
 }
 
 type MultiSender struct {
@@ -105,6 +105,28 @@ func (s *MultiSender) sendWebhook(ctx context.Context, n *Notification) error {
 func isHTTPURL(raw string) bool {
 	parsed, err := url.Parse(raw)
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
+}
+
+// normalizeWeComWebhookURL converts a bare key to full WeCom webhook URL if needed.
+func normalizeWeComWebhookURL(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	if isHTTPURL(raw) {
+		return raw
+	}
+	return fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=%s", raw)
+}
+
+// normalizeDingTalkWebhookURL converts a bare access_token to full DingTalk webhook URL if needed.
+func normalizeDingTalkWebhookURL(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	if isHTTPURL(raw) {
+		return raw
+	}
+	return fmt.Sprintf("https://oapi.dingtalk.com/robot/send?access_token=%s", raw)
 }
 
 func (s *MultiSender) sendEmail(ctx context.Context, n *Notification) error {
@@ -214,16 +236,16 @@ func (d *Dispatcher) loop(ctx context.Context) {
 
 // sendWeCom sends a notification to WeCom (Enterprise WeChat) webhook.
 func (s *MultiSender) sendWeCom(ctx context.Context, n *Notification) error {
-	endpoint := s.cfg.WeComWebhookURL
+	var endpoint string
+	// If recipient is provided, use it (normalize if it's a bare key)
+	if n.Recipient != "" {
+		endpoint = normalizeWeComWebhookURL(n.Recipient)
+	} else {
+		// Use default endpoint from config
+		endpoint = normalizeWeComWebhookURL(s.cfg.WeComWebhookURL)
+	}
 	if endpoint == "" {
 		return ErrNotificationSenderNotReady
-	}
-	// If recipient is provided and looks like a complete URL, use it
-	if isHTTPURL(n.Recipient) {
-		endpoint = n.Recipient
-	} else if n.Recipient != "" && !strings.Contains(endpoint, "://") {
-		// If recipient is a key, build the full URL
-		endpoint = fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=%s", n.Recipient)
 	}
 	// Build message content with subject included
 	content := n.Subject + "\n" + n.Content
@@ -238,16 +260,16 @@ func (s *MultiSender) sendWeCom(ctx context.Context, n *Notification) error {
 
 // sendDingTalk sends a notification to DingTalk webhook.
 func (s *MultiSender) sendDingTalk(ctx context.Context, n *Notification) error {
-	endpoint := s.cfg.DingTalkWebhookURL
+	var endpoint string
+	// If recipient is provided, use it (normalize if it's a bare token)
+	if n.Recipient != "" {
+		endpoint = normalizeDingTalkWebhookURL(n.Recipient)
+	} else {
+		// Use default endpoint from config
+		endpoint = normalizeDingTalkWebhookURL(s.cfg.DingTalkWebhookURL)
+	}
 	if endpoint == "" {
 		return ErrNotificationSenderNotReady
-	}
-	// If recipient is provided and looks like a complete URL, use it
-	if isHTTPURL(n.Recipient) {
-		endpoint = n.Recipient
-	} else if n.Recipient != "" && !strings.Contains(endpoint, "://") {
-		// If recipient is an access_token, build the full URL
-		endpoint = fmt.Sprintf("https://oapi.dingtalk.com/robot/send?access_token=%s", n.Recipient)
 	}
 	// Build message content with subject included
 	content := n.Subject + "\n" + n.Content
@@ -262,13 +284,16 @@ func (s *MultiSender) sendDingTalk(ctx context.Context, n *Notification) error {
 
 // sendFeishu sends a notification to Feishu (Lark) webhook.
 func (s *MultiSender) sendFeishu(ctx context.Context, n *Notification) error {
-	endpoint := s.cfg.FeishuWebhookURL
-	if endpoint == "" {
-		return ErrNotificationSenderNotReady
-	}
+	var endpoint string
 	// Use recipient as webhook URL if provided
 	if n.Recipient != "" {
 		endpoint = n.Recipient
+	} else {
+		// Use default endpoint from config
+		endpoint = s.cfg.FeishuWebhookURL
+	}
+	if endpoint == "" {
+		return ErrNotificationSenderNotReady
 	}
 	// Build message content with subject included
 	content := n.Subject + "\n" + n.Content
@@ -283,13 +308,16 @@ func (s *MultiSender) sendFeishu(ctx context.Context, n *Notification) error {
 
 // sendSlack sends a notification to Slack incoming webhook.
 func (s *MultiSender) sendSlack(ctx context.Context, n *Notification) error {
-	endpoint := s.cfg.SlackWebhookURL
-	if endpoint == "" {
-		return ErrNotificationSenderNotReady
-	}
+	var endpoint string
 	// Use recipient as webhook URL if provided
 	if n.Recipient != "" {
 		endpoint = n.Recipient
+	} else {
+		// Use default endpoint from config
+		endpoint = s.cfg.SlackWebhookURL
+	}
+	if endpoint == "" {
+		return ErrNotificationSenderNotReady
 	}
 	// Build message content with subject included
 	content := n.Subject + "\n" + n.Content

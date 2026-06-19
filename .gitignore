@@ -7,6 +7,17 @@
 *.dll
 *.so
 *.dylib
+# Executables without extension
+relay-gateway
+admin-api
+identity-service
+channel-service
+billing-service
+config-service
+log-service
+monitor-worker
+notify-worker
+migrate
 
 # Test binary, built with `go test -c`
 *.test
