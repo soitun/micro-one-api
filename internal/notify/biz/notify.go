@@ -15,6 +15,10 @@ const (
 	NotifyTypeWebhook = "webhook"
 	NotifyTypeEmail   = "email"
 	NotifyTypeEvent   = "event"
+	NotifyTypeWeCom   = "wecom"
+	NotifyTypeDingTalk = "dingtalk"
+	NotifyTypeFeishu   = "feishu"
+	NotifyTypeSlack    = "slack"
 
 	NotifyStatusPending = "pending"
 	NotifyStatusSent    = "sent"

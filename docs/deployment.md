@@ -291,20 +291,24 @@ curl -X POST http://localhost:8004/v1/reconciliation
 
 ### 6.1 对账告警投递
 
-`channel-service` 可以把渠道不可用告警写入 `notify-worker`，`billing-service` 可以把对账差异写入 `notify-worker`，再由 `notify-worker` 发送到 webhook 或 SMTP：
+`channel-service` 可以把渠道不可用告警写入 `notify-worker`，`billing-service` 可以把对账差异写入 `notify-worker`，再由 `notify-worker` 发送到各通知通道：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `NOTIFY_GRPC_ENDPOINT` | notify-worker gRPC 地址；留空时不投递通知 | - |
 | `CHANNEL_HEALTH_ALERT_ENABLED` | 渠道首次进入 `unavailable` 时是否投递通知 | `false` |
-| `CHANNEL_HEALTH_ALERT_NOTIFY_TYPE` | 渠道不可用告警类型：`event` / `webhook` / `email` | `event` |
-| `CHANNEL_HEALTH_ALERT_RECIPIENTS` | JSON 数组；webhook/event 可填 URL 或留空走 `NOTIFY_WEBHOOK_URL`，email 填邮箱 | `[""]` |
+| `CHANNEL_HEALTH_ALERT_NOTIFY_TYPE` | 渠道不可用告警类型：`event` / `webhook` / `email` / `wecom` / `dingtalk` / `feishu` / `slack` | `event` |
+| `CHANNEL_HEALTH_ALERT_RECIPIENTS` | JSON 数组；webhook/event 可填 URL 或留空走 `NOTIFY_WEBHOOK_URL`，email 填邮箱，IM 通道留空走对应配置 | `[""]` |
 | `RECON_ALERT_ENABLED` | 是否启用对账告警 | `true` |
-| `RECON_ALERT_NOTIFY_TYPE` | 告警类型：`event` / `webhook` / `email` | `event` |
-| `RECON_ALERT_RECIPIENTS` | JSON 数组；webhook/event 可填 URL 或留空走 `NOTIFY_WEBHOOK_URL`，email 填邮箱 | `[""]` |
+| `RECON_ALERT_NOTIFY_TYPE` | 告警类型：`event` / `webhook` / `email` / `wecom` / `dingtalk` / `feishu` / `slack` | `event` |
+| `RECON_ALERT_RECIPIENTS` | JSON 数组；webhook/event 可填 URL 或留空走 `NOTIFY_WEBHOOK_URL`，email 填邮箱，IM 通道留空走对应配置 | `[""]` |
 | `RECON_ALERT_INTERVAL` | 自动对账间隔 | `1h` |
 | `NOTIFY_WEBHOOK_URL` | 默认 webhook 地址，供 `event` / `webhook` 告警 fallback 使用 | - |
 | `NOTIFY_SMTP_HOST` / `NOTIFY_SMTP_PORT` / `NOTIFY_SMTP_USER` / `NOTIFY_SMTP_PASS` / `NOTIFY_SMTP_FROM` | SMTP 邮件投递配置 | - |
+| `NOTIFY_WECOM_WEBHOOK_URL` | 企业微信 Webhook URL 或 key | - |
+| `NOTIFY_DINGTALK_WEBHOOK_URL` | 钉钉 Webhook URL 或 access_token | - |
+| `NOTIFY_FEISHU_WEBHOOK_URL` | 飞书 Webhook URL | - |
+| `NOTIFY_SLACK_WEBHOOK_URL` | Slack Incoming Webhook URL | - |
 
 Webhook 示例：
 
@@ -324,6 +328,38 @@ NOTIFY_SMTP_PORT=587
 NOTIFY_SMTP_USER=ops@example.com
 NOTIFY_SMTP_PASS=change-me
 NOTIFY_SMTP_FROM=ops@example.com
+```
+
+企业微信示例：
+
+```bash
+RECON_ALERT_NOTIFY_TYPE=wecom
+RECON_ALERT_RECIPIENTS=[""]
+NOTIFY_WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
+```
+
+钉钉示例：
+
+```bash
+RECON_ALERT_NOTIFY_TYPE=dingtalk
+RECON_ALERT_RECIPIENTS=[""]
+NOTIFY_DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=xxx
+```
+
+飞书示例：
+
+```bash
+RECON_ALERT_NOTIFY_TYPE=feishu
+RECON_ALERT_RECIPIENTS=[""]
+NOTIFY_FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+```
+
+Slack 示例：
+
+```bash
+RECON_ALERT_NOTIFY_TYPE=slack
+RECON_ALERT_RECIPIENTS=[""]
+NOTIFY_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/xxx
 ```
 
 ## 7. 故障排查

@@ -21,6 +21,10 @@ notify_svc:
   smtp_user: ${NOTIFY_SMTP_USER:-}
   smtp_pass: ${NOTIFY_SMTP_PASS:-}
   smtp_from: ${NOTIFY_SMTP_FROM:-}
+  wecom_webhook_url: ${NOTIFY_WECOM_WEBHOOK_URL:-}
+  dingtalk_webhook_url: ${NOTIFY_DINGTALK_WEBHOOK_URL:-}
+  feishu_webhook_url: ${NOTIFY_FEISHU_WEBHOOK_URL:-}
+  slack_webhook_url: ${NOTIFY_SLACK_WEBHOOK_URL:-}
   dispatch_interval: ${NOTIFY_DISPATCH_INTERVAL:-30s}
   dispatch_batch: ${NOTIFY_DISPATCH_BATCH:-20}
   max_retry: ${NOTIFY_MAX_RETRY:-3}
