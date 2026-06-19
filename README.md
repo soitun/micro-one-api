@@ -4,7 +4,7 @@
 
 本项目面向需要统一管理多个上游模型供应商、内部额度、访问令牌、账务和运营后台的场景。它不是上游服务的替代品，也不提供任何第三方模型账号、订阅或 API Key。
 
-> 📣 **最新发布**:[v0.2.2 发布公告](./docs/release-v0.2.2.md)(notify 实际投递 / 对账告警配置修正 / 全服务 CI 构建) · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.2.2)
+> 📣 **最新发布**:[v0.2.4 发布公告](./docs/release-v0.2.4.md)(渠道健康告警文档补全 / 部署配置示例更新) · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.2.4)
 
 ## 功能概览
 
