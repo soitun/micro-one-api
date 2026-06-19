@@ -18,7 +18,6 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { adminApiClient } from '@/lib/api';
-import { unwrapApiData } from '@/lib/api-response';
 
 // Notification types based on backend API response (snake_case)
 interface Notification {
@@ -107,7 +106,8 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
       });
 
       const response = await adminApiClient.get(`/api/admin/notifications?${params}`);
-      const data = unwrapApiData<NotificationListResponse>(response.data);
+      // notify-worker returns {items, total} directly, not wrapped in {data}
+      const data: NotificationListResponse = response.data;
       if (mountedRef.current) {
         setUnreadCount(data.total ?? 0);
       }
@@ -130,7 +130,8 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
       }
 
       const response = await adminApiClient.get(`/api/admin/notifications?${params}`);
-      const data = unwrapApiData<NotificationListResponse>(response.data);
+      // notify-worker returns {items, total} directly, not wrapped in {data}
+      const data: NotificationListResponse = response.data;
       if (mountedRef.current) {
         setNotifications(data.items ?? []);
         setTotal(data.total ?? 0);
