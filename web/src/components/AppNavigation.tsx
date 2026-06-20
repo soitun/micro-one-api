@@ -340,7 +340,7 @@ export function AppNavigation() {
               {formatQuota(account?.quota)}
             </div>
             <ThemeToggle />
-            <NotificationPanel open={notificationOpen} onOpenChange={setNotificationOpen} />
+            {isAdmin && <NotificationPanel open={notificationOpen} onOpenChange={setNotificationOpen} />}
             {adminControl}
             <button
               type="button"

@@ -535,7 +535,7 @@ func TestAdminHTTPPageIsServed(t *testing.T) {
 
 func TestAdminHTTPPageSPARouteFallback(t *testing.T) {
 	srv := NewHTTPServer(":0", nil)
-	for _, path := range []string{"/", "/login", "/register", "/dashboard", "/tokens", "/pricing", "/redeem", "/admin/reconciliation", "/admin/options"} {
+	for _, path := range []string{"/", "/login", "/register", "/dashboard", "/tokens", "/pricing", "/redeem", "/admin/channel-health", "/admin/cost-analysis", "/admin/reconciliation", "/admin/options"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -545,6 +545,40 @@ func TestAdminHTTPPageSPARouteFallback(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), `<div id="root">`) {
 			t.Fatalf("path %s did not fall back to SPA shell: %s", path, rec.Body.String())
 		}
+	}
+}
+
+func TestAdminHTTPNotificationProxyRewritesListPath(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	var gotPath string
+	var gotQuery string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[],"total":7}`))
+	}))
+	defer upstream.Close()
+	t.Setenv("NOTIFY_HTTP_ENDPOINT", upstream.URL)
+
+	srv := NewHTTPServer(":0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/notifications?page=1&page_size=1&status=pending", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/notifications" {
+		t.Fatalf("proxied path = %q, want /v1/notifications", gotPath)
+	}
+	if gotQuery != "page=1&page_size=1&status=pending" {
+		t.Fatalf("proxied query = %q", gotQuery)
+	}
+	if !strings.Contains(rec.Body.String(), `"total":7`) {
+		t.Fatalf("response was not proxied: %s", rec.Body.String())
 	}
 }
 

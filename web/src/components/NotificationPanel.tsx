@@ -105,7 +105,7 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
         status: 'pending',
       });
 
-      const response = await adminApiClient.get(`/api/admin/notifications?${params}`);
+      const response = await adminApiClient.get(`/admin/notifications?${params}`);
       // notify-worker returns {items, total} directly, not wrapped in {data}
       const data: NotificationListResponse = response.data;
       if (mountedRef.current) {
@@ -129,15 +129,14 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
         params.append('status', statusFilter);
       }
 
-      const response = await adminApiClient.get(`/api/admin/notifications?${params}`);
+      const response = await adminApiClient.get(`/admin/notifications?${params}`);
       // notify-worker returns {items, total} directly, not wrapped in {data}
       const data: NotificationListResponse = response.data;
       if (mountedRef.current) {
         setNotifications(data.items ?? []);
         setTotal(data.total ?? 0);
-        // Update unread count from full list
-        const pending = (data.items ?? []).filter(n => n.status === 'pending').length;
-        setUnreadCount(pending);
+        // Note: unreadCount is maintained by fetchUnreadCount, not derived from filtered list
+        // to ensure badge shows accurate pending count regardless of current filter
       }
     } catch (error) {
       console.error('Failed to fetch notifications:', error);
@@ -210,7 +209,7 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
         size="icon-sm"
         aria-label="Notifications"
         onClick={() => onOpenChange(!open)}
-        className="hidden sm:inline-flex relative"
+        className="relative inline-flex"
       >
         <Bell className="size-4" />
         {unreadCount > 0 && (

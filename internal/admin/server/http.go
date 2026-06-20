@@ -109,6 +109,8 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandleFunc("/profile", handlePage)
 	srv.HandleFunc("/admin/users", handlePage)
 	srv.HandleFunc("/admin/channels", handlePage)
+	srv.HandleFunc("/admin/channel-health", handlePage)
+	srv.HandleFunc("/admin/cost-analysis", handlePage)
 	srv.HandleFunc("/admin/pricing", handlePage)
 	srv.HandleFunc("/admin/logs", handlePage)
 	srv.HandleFunc("/admin/payment-orders", handlePage)
@@ -2871,12 +2873,8 @@ func handleNotifyProxy(w http.ResponseWriter, r *http.Request, proxy *httputil.R
 	}
 
 	// Update the request path to point to notify-worker's endpoint
-	originalPath := r.URL.Path
-	r.URL.Path = strings.TrimPrefix(originalPath, "/api/admin")
-	// Ensure we're calling the correct endpoint
-	if r.URL.Path == "" || r.URL.Path == "/" {
-		r.URL.Path = "/v1/notifications"
-	}
+	// /api/admin/notifications -> /v1/notifications
+	r.URL.Path = "/v1/notifications"
 
 	// Proxy the request
 	proxy.ServeHTTP(w, r)
@@ -2902,7 +2900,7 @@ func handleNotifyProxyByID(w http.ResponseWriter, r *http.Request, proxy *httput
 
 	// For status updates, we need to handle it specially since notify-worker's HTTP server
 	// only supports GET on /v1/notifications/{id}, does not support PUT
-	if action == "status" && r.Method == http.MethodPut" {
+	if action == "status" && r.Method == http.MethodPut {
 		// Parse the request body to get the new status
 		var req struct {
 			Status string `json:"status"`
