@@ -5,8 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"micro-one-api/internal/pkg/metrics"
 )
 
 type mockReconRepo struct {
@@ -125,6 +128,28 @@ func TestRunReconciliation_NoInconsistencies(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, result.AccountInconsistencies)
 	assert.Equal(t, 1, result.TotalAccounts)
+}
+
+func TestRunReconciliation_RecordsMetrics(t *testing.T) {
+	account := &Account{UserID: "user1", Quota: 1000, FrozenQuota: 0, Group: "default"}
+	reconRepo := &mockReconRepo{
+		accounts:   []*Account{account},
+		ledgerSums: map[string]int64{"user1": 500},
+	}
+	uc := NewReconciliationUsecase(
+		&mockAccountRepo{account: account},
+		&mockReservationRepo{reservations: make(map[string]*Reservation)},
+		reconRepo,
+		nil,
+	)
+	runBefore := testutil.ToFloat64(metrics.ReconciliationRunsTotal.WithLabelValues("discrepancy"))
+	accountDiffBefore := testutil.ToFloat64(metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeAccount))
+
+	_, err := uc.RunReconciliation(context.Background())
+
+	require.NoError(t, err)
+	assert.InEpsilon(t, 1, testutil.ToFloat64(metrics.ReconciliationRunsTotal.WithLabelValues("discrepancy"))-runBefore, 0.000001)
+	assert.InEpsilon(t, 1, testutil.ToFloat64(metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeAccount))-accountDiffBefore, 0.000001)
 }
 
 func TestRunReconciliation_ChannelUsageConsistency(t *testing.T) {

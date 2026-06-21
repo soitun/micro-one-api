@@ -97,6 +97,86 @@ var (
 		},
 		[]string{"status"},
 	)
+
+	// ReconciliationRunsTotal counts reconciliation job executions by status.
+	ReconciliationRunsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "micro_one_api",
+			Subsystem: "billing",
+			Name:      "reconciliation_runs_total",
+			Help:      "Total number of billing reconciliation job executions",
+		},
+		[]string{"status"},
+	)
+
+	// ReconciliationRunDuration records reconciliation job duration by status.
+	ReconciliationRunDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "micro_one_api",
+			Subsystem: "billing",
+			Name:      "reconciliation_run_duration_seconds",
+			Help:      "Billing reconciliation job duration in seconds",
+			Buckets:   []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+		},
+		[]string{"status"},
+	)
+
+	// ReconciliationDiscrepanciesTotal counts discrepancies found by type.
+	ReconciliationDiscrepanciesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "micro_one_api",
+			Subsystem: "billing",
+			Name:      "reconciliation_discrepancies_total",
+			Help:      "Total number of reconciliation discrepancies found",
+		},
+		[]string{"type"},
+	)
+
+	// ChannelHealthCheckRunsTotal counts monitor-worker channel health check sweeps.
+	ChannelHealthCheckRunsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "micro_one_api",
+			Subsystem: "monitor",
+			Name:      "channel_health_check_runs_total",
+			Help:      "Total number of channel health check sweeps",
+		},
+		[]string{"status"},
+	)
+
+	// ChannelHealthCheckRunDuration records channel health check sweep duration.
+	ChannelHealthCheckRunDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "micro_one_api",
+			Subsystem: "monitor",
+			Name:      "channel_health_check_run_duration_seconds",
+			Help:      "Channel health check sweep duration in seconds",
+			Buckets:   []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+		},
+		[]string{"status"},
+	)
+
+	// ChannelHealthProbeTotal counts individual channel health probes by status and failure reason.
+	ChannelHealthProbeTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "micro_one_api",
+			Subsystem: "monitor",
+			Name:      "channel_health_probe_total",
+			Help:      "Total number of individual channel health probes",
+		},
+		[]string{"status", "reason"},
+	)
+
+	// ChannelHealthProbeDuration records individual channel health probe duration by status.
+	ChannelHealthProbeDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "micro_one_api",
+			Subsystem: "monitor",
+			Name:      "channel_health_probe_duration_seconds",
+			Help:      "Individual channel health probe duration in seconds",
+			Buckets:   []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+		},
+		[]string{"status"},
+	)
 )
 
 func init() {
@@ -109,6 +189,13 @@ func init() {
 		BillingReservationsTotal,
 		ChannelSelectionTotal,
 		UsageLogIngestTotal,
+		ReconciliationRunsTotal,
+		ReconciliationRunDuration,
+		ReconciliationDiscrepanciesTotal,
+		ChannelHealthCheckRunsTotal,
+		ChannelHealthCheckRunDuration,
+		ChannelHealthProbeTotal,
+		ChannelHealthProbeDuration,
 	)
 }
 

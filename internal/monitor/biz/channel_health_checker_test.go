@@ -9,9 +9,20 @@ import (
 
 	channelv1 "micro-one-api/api/channel/v1"
 	commonv1 "micro-one-api/api/common/v1"
+	"micro-one-api/internal/pkg/metrics"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/grpc"
 )
+
+const monitorMetricEpsilon = 0.000001
+
+func assertMonitorMetricDelta(t *testing.T, before, after, want float64) {
+	t.Helper()
+	if diff := after - before; diff < want-monitorMetricEpsilon || diff > want+monitorMetricEpsilon {
+		t.Fatalf("metric delta = %f, want %f", diff, want)
+	}
+}
 
 type checkerChannelClient struct {
 	channelv1.ChannelServiceClient
@@ -35,6 +46,8 @@ func (c *checkerChannelClient) RecordChannelHealth(ctx context.Context, req *cha
 
 func TestChannelHealthChecker_CheckOnceRecordsSuccess(t *testing.T) {
 	t.Setenv("PROVIDER_DISABLE_SSRF_CHECK", "true")
+	runBefore := testutil.ToFloat64(metrics.ChannelHealthCheckRunsTotal.WithLabelValues("success"))
+	probeBefore := testutil.ToFloat64(metrics.ChannelHealthProbeTotal.WithLabelValues("success", "none"))
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("path = %q, want /v1/models", r.URL.Path)
@@ -55,10 +68,15 @@ func TestChannelHealthChecker_CheckOnceRecordsSuccess(t *testing.T) {
 	if len(client.healthReqs) != 1 || !client.healthReqs[0].Success || client.healthReqs[0].ChannelId != 1 {
 		t.Fatalf("health requests = %+v", client.healthReqs)
 	}
+	runAfter := testutil.ToFloat64(metrics.ChannelHealthCheckRunsTotal.WithLabelValues("success"))
+	probeAfter := testutil.ToFloat64(metrics.ChannelHealthProbeTotal.WithLabelValues("success", "none"))
+	assertMonitorMetricDelta(t, runBefore, runAfter, 1)
+	assertMonitorMetricDelta(t, probeBefore, probeAfter, 1)
 }
 
 func TestChannelHealthChecker_CheckOnceRecordsFailure(t *testing.T) {
 	t.Setenv("PROVIDER_DISABLE_SSRF_CHECK", "true")
+	probeBefore := testutil.ToFloat64(metrics.ChannelHealthProbeTotal.WithLabelValues("error", "upstream_status"))
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 	}))
@@ -76,6 +94,8 @@ func TestChannelHealthChecker_CheckOnceRecordsFailure(t *testing.T) {
 	if len(client.healthReqs) != 1 || client.healthReqs[0].Success || client.healthReqs[0].ChannelId != 1 {
 		t.Fatalf("health requests = %+v", client.healthReqs)
 	}
+	probeAfter := testutil.ToFloat64(metrics.ChannelHealthProbeTotal.WithLabelValues("error", "upstream_status"))
+	assertMonitorMetricDelta(t, probeBefore, probeAfter, 1)
 }
 
 func TestChannelHealthChecker_CheckOnceSkipsUnsupportedProvider(t *testing.T) {

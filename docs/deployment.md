@@ -250,6 +250,13 @@ curl http://<service>:<port>/healthz
 | `micro_one_api_grpc_request_duration_seconds` | Histogram | gRPC 请求延迟 |
 | `micro_one_api_billing_reservations_total` | Counter | 账务预扣次数 |
 | `micro_one_api_channel_selection_total` | Counter | 渠道选择次数 |
+| `micro_one_api_billing_reconciliation_runs_total` | Counter | 对账任务运行次数（按 status） |
+| `micro_one_api_billing_reconciliation_run_duration_seconds` | Histogram | 对账任务运行耗时（按 status） |
+| `micro_one_api_billing_reconciliation_discrepancies_total` | Counter | 对账差异数量（按 type） |
+| `micro_one_api_monitor_channel_health_check_runs_total` | Counter | 渠道健康探测 sweep 次数（按 status） |
+| `micro_one_api_monitor_channel_health_check_run_duration_seconds` | Histogram | 渠道健康探测 sweep 耗时（按 status） |
+| `micro_one_api_monitor_channel_health_probe_total` | Counter | 单渠道探测次数（按 status/reason） |
+| `micro_one_api_monitor_channel_health_probe_duration_seconds` | Histogram | 单渠道探测耗时（按 status） |
 
 ### 5.3 K8s 健康检查配置
 

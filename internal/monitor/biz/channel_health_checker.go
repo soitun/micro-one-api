@@ -3,9 +3,11 @@ package biz
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	channelv1 "micro-one-api/api/channel/v1"
+	"micro-one-api/internal/pkg/metrics"
 	relayprovider "micro-one-api/internal/relay/provider"
 )
 
@@ -60,6 +62,12 @@ func (c *ChannelHealthChecker) CheckOnce(ctx context.Context) {
 	if c == nil || c.client == nil {
 		return
 	}
+	startedAt := time.Now()
+	status := "success"
+	defer func() {
+		metrics.ChannelHealthCheckRunsTotal.WithLabelValues(status).Inc()
+		metrics.ChannelHealthCheckRunDuration.WithLabelValues(status).Observe(time.Since(startedAt).Seconds())
+	}()
 	page := int32(1)
 	for {
 		resp, err := c.client.ListChannels(ctx, &channelv1.ListChannelsRequest{
@@ -68,6 +76,7 @@ func (c *ChannelHealthChecker) CheckOnce(ctx context.Context) {
 			Status:   1,
 		})
 		if err != nil || resp == nil {
+			status = "error"
 			return
 		}
 		channels := resp.GetChannels()
@@ -85,18 +94,20 @@ func (c *ChannelHealthChecker) CheckOnce(ctx context.Context) {
 }
 
 func (c *ChannelHealthChecker) probeChannel(ctx context.Context, channelID int64) {
+	startedAt := time.Now()
 	detail, err := c.client.GetChannel(ctx, &channelv1.GetChannelRequest{ChannelId: channelID})
 	if err != nil || detail == nil || detail.GetChannel() == nil {
+		observeHealthProbe("error", "channel_detail", time.Since(startedAt))
 		return
 	}
 	channel := detail.GetChannel()
 	probeCtx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
 	defer cancel()
-	startedAt := time.Now()
 	provider, err := c.providerFactory.CreateProviderWithConfig(channel.GetType(), channel.GetBaseUrl(), channel.GetKey(), relayprovider.ProviderConfig{
 		APIVersion: channel.GetConfig().GetApiVersion(),
 	})
 	if err != nil {
+		observeHealthProbe("error", healthProbeReason(err), time.Since(startedAt))
 		c.record(context.WithoutCancel(ctx), channelID, false, err.Error(), time.Since(startedAt).Milliseconds())
 		return
 	}
@@ -107,9 +118,11 @@ func (c *ChannelHealthChecker) probeChannel(ctx context.Context, channelID int64
 	})
 	responseTime := time.Since(startedAt).Milliseconds()
 	if err != nil {
+		observeHealthProbe("error", healthProbeReason(err), time.Since(startedAt))
 		c.record(context.WithoutCancel(ctx), channelID, false, err.Error(), responseTime)
 		return
 	}
+	observeHealthProbe("success", "none", time.Since(startedAt))
 	c.record(context.WithoutCancel(ctx), channelID, true, "", responseTime)
 }
 
@@ -123,6 +136,30 @@ func (c *ChannelHealthChecker) record(ctx context.Context, channelID int64, succ
 		Error:        message,
 		ResponseTime: responseTime,
 	})
+}
+
+func observeHealthProbe(status, reason string, duration time.Duration) {
+	metrics.ChannelHealthProbeTotal.WithLabelValues(status, reason).Inc()
+	metrics.ChannelHealthProbeDuration.WithLabelValues(status).Observe(duration.Seconds())
+}
+
+func healthProbeReason(err error) string {
+	if err == nil {
+		return "none"
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "context deadline exceeded"), strings.Contains(msg, "timeout"):
+		return "timeout"
+	case strings.Contains(msg, "unsupported"):
+		return "unsupported_provider"
+	case strings.Contains(msg, "ssrf"), strings.Contains(msg, "private ip"), strings.Contains(msg, "localhost"):
+		return "ssrf_blocked"
+	case strings.Contains(msg, "status"):
+		return "upstream_status"
+	default:
+		return "upstream_error"
+	}
 }
 
 func supportsModelsProbe(channelType int32) bool {

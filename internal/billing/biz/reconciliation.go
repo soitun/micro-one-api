@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"micro-one-api/internal/pkg/metrics"
 )
 
 // ReconciliationRepo provides data access for reconciliation tasks.
@@ -130,10 +132,26 @@ func NewReconciliationUsecase(
 }
 
 // RunReconciliation performs a full reconciliation: cleans expired reservations and checks quota consistency.
-func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (*ReconciliationResult, error) {
-	result := &ReconciliationResult{
+func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result *ReconciliationResult, err error) {
+	startedAt := time.Now()
+	result = &ReconciliationResult{
 		RunAt: time.Now(),
 	}
+	defer func() {
+		status := "success"
+		if err != nil {
+			status = "error"
+		} else if result.DiscrepancyCount() > 0 {
+			status = "discrepancy"
+		}
+		metrics.ReconciliationRunsTotal.WithLabelValues(status).Inc()
+		metrics.ReconciliationRunDuration.WithLabelValues(status).Observe(time.Since(startedAt).Seconds())
+		if result != nil {
+			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeAccount).Add(float64(len(result.AccountInconsistencies)))
+			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeChannel).Add(float64(len(result.ChannelInconsistencies)))
+			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeLog).Add(float64(len(result.LogInconsistencies)))
+		}
+	}()
 
 	// Step 1: Clean up expired reservations
 	expired, err := uc.reservationRepo.GetExpiredReservations(ctx)

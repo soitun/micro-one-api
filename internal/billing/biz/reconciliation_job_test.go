@@ -6,9 +6,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"micro-one-api/internal/pkg/metrics"
 )
+
+const floatEpsilon = 0.000001
+
+func assertMetricDelta(t *testing.T, before, after, want float64) {
+	t.Helper()
+	assert.InEpsilon(t, want, after-before, floatEpsilon)
+}
 
 type recordingNotifier struct {
 	calls []notifierCall
@@ -146,4 +156,18 @@ func TestReconciliationJob_WebhookFallbackRecipient(t *testing.T) {
 	assert.Equal(t, "webhook", n.calls[0].notifyType)
 	assert.Equal(t, "", n.calls[0].recipient)
 	assert.Contains(t, n.calls[0].subject, "[recon]")
+}
+
+func TestReconciliationJob_RecordsMetrics(t *testing.T) {
+	repo := &mockReconRepo{
+		accounts:   []*Account{{UserID: "user1", Quota: 1000, Group: "default"}},
+		ledgerSums: map[string]int64{"user1": 1000},
+	}
+	job := newJobHarness(t, repo, nil, nil, "")
+	before := testutil.ToFloat64(metrics.ReconciliationRunsTotal.WithLabelValues("success"))
+
+	job.runReconciliation(context.Background())
+
+	after := testutil.ToFloat64(metrics.ReconciliationRunsTotal.WithLabelValues("success"))
+	assertMetricDelta(t, before, after, 1)
 }

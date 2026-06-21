@@ -18,7 +18,7 @@
 - 对账与告警：`RunReconciliation` 覆盖账户额度、渠道用量、ledger/log 双写一致性；差异通过 `notify-worker` 投递通知（可配置收件人）。
 - 成本健康 dashboard：管理后台展示成本/毛利/渠道余额健康指标；用量统计与账本支持缓存 token（`cache_read_tokens`）与命中率展示。
 - 管理后台：提供 React/Vite 前端和 `admin-api` BFF，用于管理用户、令牌、渠道、订单、兑换码、用量和系统配置。
-- 监控与日志：提供健康检查、Prometheus metrics、业务日志聚合、监控 worker 和通知 worker。
+- 监控与日志：提供健康检查、Prometheus metrics、业务日志聚合、监控 worker 和通知 worker；对账任务与渠道健康探测暴露运行次数、耗时和失败原因指标。
 - 部署形态：支持本地开发、Docker Compose 和 Kubernetes 部署。
 
 ## 架构
