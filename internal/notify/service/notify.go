@@ -96,6 +96,7 @@ func notificationToProto(n *biz.Notification) (*notifyv1.NotificationItem, error
 		RetryCount: retryCount,
 		CreatedAt:  n.CreatedAt.Unix(),
 		SentAt:     n.SentAt.Unix(),
+		LastError:  n.LastError,
 	}, nil
 }
 
@@ -178,7 +179,7 @@ func notificationToMap(n *biz.Notification) map[string]interface{} {
 	return map[string]interface{}{
 		"id": n.ID, "type": n.Type, "recipient": n.Recipient, "subject": n.Subject,
 		"content": n.Content, "status": n.Status, "retry_count": n.RetryCount,
-		"created_at": n.CreatedAt, "sent_at": n.SentAt,
+		"created_at": n.CreatedAt, "sent_at": n.SentAt, "last_error": n.LastError,
 	}
 }
 

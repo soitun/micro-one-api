@@ -34,6 +34,7 @@ type Notification struct {
 	Content    string
 	Status     string // pending, sent, failed
 	RetryCount int
+	LastError  string
 	CreatedAt  time.Time
 	SentAt     time.Time
 }
@@ -46,7 +47,7 @@ type NotifyRepo interface {
 	ListPending(ctx context.Context, limit int32, maxRetry int) ([]*Notification, error)
 	UpdateStatus(ctx context.Context, id int64, status string) error
 	MarkFailed(ctx context.Context, id int64) error
-	RecordFailure(ctx context.Context, id int64, maxRetry int) error
+	RecordFailure(ctx context.Context, id int64, maxRetry int, lastError string) error
 }
 
 // NotifyUsecase implements business logic for notify-worker.
@@ -111,9 +112,9 @@ func (uc *NotifyUsecase) ListPending(ctx context.Context, limit int32, maxRetry 
 	return uc.repo.ListPending(ctx, limit, maxRetry)
 }
 
-func (uc *NotifyUsecase) RecordFailure(ctx context.Context, id int64, maxRetry int) error {
+func (uc *NotifyUsecase) RecordFailure(ctx context.Context, id int64, maxRetry int, lastError string) error {
 	if maxRetry < 1 {
 		maxRetry = 3
 	}
-	return uc.repo.RecordFailure(ctx, id, maxRetry)
+	return uc.repo.RecordFailure(ctx, id, maxRetry, lastError)
 }

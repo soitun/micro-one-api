@@ -528,13 +528,14 @@ func (r *testNotifyRepo) MarkFailed(ctx context.Context, id int64) error {
 	return notifybiz.ErrNotificationNotFound
 }
 
-func (r *testNotifyRepo) RecordFailure(ctx context.Context, id int64, maxRetry int) error {
+func (r *testNotifyRepo) RecordFailure(ctx context.Context, id int64, maxRetry int, lastError string) error {
 	for _, n := range r.notifications {
 		if n.ID == id {
 			n.RetryCount++
 			if n.RetryCount >= maxRetry {
 				n.Status = notifybiz.NotifyStatusFailed
 			}
+			n.LastError = lastError
 			return nil
 		}
 	}

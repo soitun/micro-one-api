@@ -28,6 +28,7 @@ interface Notification {
   content?: string;
   status?: string;
   retry_count?: number;
+  last_error?: string;
   created_at?: string;
   sent_at?: string;
 }
@@ -355,6 +356,13 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
                           {status === 'failed' && (notification.retry_count ?? 0) > 0 && (
                             <div className="mt-2 text-xs text-red-600 dark:text-red-400">
                               已重试 {notification.retry_count} 次
+                            </div>
+                          )}
+
+                          {status === 'failed' && notification.last_error && (
+                            <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+                              <span className="font-medium">失败原因: </span>
+                              <span className="break-words">{notification.last_error}</span>
                             </div>
                           )}
                         </div>

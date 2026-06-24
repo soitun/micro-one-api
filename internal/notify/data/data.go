@@ -28,6 +28,7 @@ type notificationModel struct {
 	Content    string `gorm:"column:content"`
 	Status     string `gorm:"column:status;index"`
 	RetryCount int    `gorm:"column:retry_count"`
+	LastError  string `gorm:"column:last_error"`
 	CreatedAt  int64  `gorm:"column:created_at;index"`
 	SentAt     int64  `gorm:"column:sent_at"`
 }
@@ -115,11 +116,12 @@ func (r *Repository) MarkFailed(ctx context.Context, id int64) error {
 	return r.markFailedMemory(id)
 }
 
-func (r *Repository) RecordFailure(ctx context.Context, id int64, maxRetry int) error {
+func (r *Repository) RecordFailure(ctx context.Context, id int64, maxRetry int, lastError string) error {
+	lastError = normalizeLastError(lastError)
 	if r.db != nil {
-		return r.recordFailureDB(ctx, id, maxRetry)
+		return r.recordFailureDB(ctx, id, maxRetry, lastError)
 	}
-	return r.recordFailureMemory(id, maxRetry)
+	return r.recordFailureMemory(id, maxRetry, lastError)
 }
 
 // DB implementations
@@ -132,6 +134,7 @@ func (r *Repository) createDB(ctx context.Context, n *biz.Notification) error {
 		Content:    n.Content,
 		Status:     n.Status,
 		RetryCount: n.RetryCount,
+		LastError:  n.LastError,
 		CreatedAt:  n.CreatedAt.Unix(),
 	}
 	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
@@ -157,6 +160,7 @@ func (r *Repository) getDB(ctx context.Context, id int64) (*biz.Notification, er
 		Content:    m.Content,
 		Status:     m.Status,
 		RetryCount: m.RetryCount,
+		LastError:  m.LastError,
 		CreatedAt:  time.Unix(m.CreatedAt, 0),
 		SentAt:     time.Unix(m.SentAt, 0),
 	}, nil
@@ -189,6 +193,7 @@ func (r *Repository) listDB(ctx context.Context, page, pageSize int32, notifyTyp
 			Content:    m.Content,
 			Status:     m.Status,
 			RetryCount: m.RetryCount,
+			LastError:  m.LastError,
 			CreatedAt:  time.Unix(m.CreatedAt, 0),
 			SentAt:     time.Unix(m.SentAt, 0),
 		}
@@ -215,6 +220,7 @@ func (r *Repository) listPendingDB(ctx context.Context, limit int32, maxRetry in
 			Content:    m.Content,
 			Status:     m.Status,
 			RetryCount: m.RetryCount,
+			LastError:  m.LastError,
 			CreatedAt:  time.Unix(m.CreatedAt, 0),
 			SentAt:     time.Unix(m.SentAt, 0),
 		}
@@ -228,6 +234,7 @@ func (r *Repository) updateStatusDB(ctx context.Context, id int64, status string
 	}
 	if status == biz.NotifyStatusSent {
 		updates["sent_at"] = time.Now().Unix()
+		updates["last_error"] = ""
 	}
 	return r.db.WithContext(ctx).Model(&notificationModel{}).Where("id = ?", id).Updates(updates).Error
 }
@@ -238,10 +245,11 @@ func (r *Repository) markFailedDB(ctx context.Context, id int64) error {
 	}).Error
 }
 
-func (r *Repository) recordFailureDB(ctx context.Context, id int64, maxRetry int) error {
+func (r *Repository) recordFailureDB(ctx context.Context, id int64, maxRetry int, lastError string) error {
 	return r.db.WithContext(ctx).Model(&notificationModel{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"status":      gorm.Expr("CASE WHEN retry_count + 1 >= ? THEN ? ELSE status END", maxRetry, biz.NotifyStatusFailed),
 		"retry_count": gorm.Expr("retry_count + ?", 1),
+		"last_error":  lastError,
 	}).Error
 }
 
@@ -320,6 +328,7 @@ func (r *Repository) updateStatusMemory(id int64, status string) error {
 	n.Status = status
 	if status == biz.NotifyStatusSent {
 		n.SentAt = time.Now()
+		n.LastError = ""
 	}
 	return nil
 }
@@ -335,7 +344,7 @@ func (r *Repository) markFailedMemory(id int64) error {
 	return nil
 }
 
-func (r *Repository) recordFailureMemory(id int64, maxRetry int) error {
+func (r *Repository) recordFailureMemory(id int64, maxRetry int, lastError string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n, ok := r.mem[id]
@@ -346,5 +355,14 @@ func (r *Repository) recordFailureMemory(id int64, maxRetry int) error {
 	if n.RetryCount >= maxRetry {
 		n.Status = biz.NotifyStatusFailed
 	}
+	n.LastError = lastError
 	return nil
+}
+
+func normalizeLastError(lastError string) string {
+	runes := []rune(lastError)
+	if len(runes) > 2048 {
+		return string(runes[:2048])
+	}
+	return lastError
 }

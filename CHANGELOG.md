@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- 通知记录新增最后一次投递失败原因字段，notify-worker 记录发送错误，管理后台通知面板在失败通知中展示失败原因。
+
 ## [0.2.7] - 2026-06-24
 
 ### Added

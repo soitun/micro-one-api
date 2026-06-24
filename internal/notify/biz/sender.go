@@ -208,7 +208,7 @@ func (d *Dispatcher) DispatchOnce(ctx context.Context) error {
 	}
 	for _, n := range items {
 		if err := d.sender.Send(ctx, n); err != nil {
-			if markErr := d.uc.RecordFailure(ctx, n.ID, d.maxRetry); markErr != nil {
+			if markErr := d.uc.RecordFailure(ctx, n.ID, d.maxRetry, err.Error()); markErr != nil {
 				return markErr
 			}
 			continue

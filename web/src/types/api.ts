@@ -574,6 +574,7 @@ export interface components {
             retryCount?: number;
             createdAt?: string;
             sentAt?: string;
+            lastError?: string;
         };
         "api.notify.v1.UpdateNotificationStatusRequest": {
             id?: string;

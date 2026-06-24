@@ -48,6 +48,7 @@ message NotificationItem {
   int32 retry_count = 7;
   int64 created_at = 8;
   int64 sent_at = 9;
+  string last_error = 10;
 }
 
 message CreateNotificationResponse {

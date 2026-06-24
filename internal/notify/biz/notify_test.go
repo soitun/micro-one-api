@@ -90,7 +90,7 @@ func (m *mockNotifyRepo) MarkFailed(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (m *mockNotifyRepo) RecordFailure(ctx context.Context, id int64, maxRetry int) error {
+func (m *mockNotifyRepo) RecordFailure(ctx context.Context, id int64, maxRetry int, lastError string) error {
 	n, ok := m.entries[id]
 	if !ok {
 		return ErrNotificationNotFound
@@ -99,6 +99,7 @@ func (m *mockNotifyRepo) RecordFailure(ctx context.Context, id int64, maxRetry i
 	if n.RetryCount >= maxRetry {
 		n.Status = NotifyStatusFailed
 	}
+	n.LastError = lastError
 	return nil
 }
 
@@ -285,20 +286,20 @@ func TestNotifyUsecase_RecordFailureRetriesBeforeFailed(t *testing.T) {
 	uc := NewNotifyUsecase(repo)
 	n, _ := uc.CreateNotification(context.Background(), NotifyTypeWebhook, "https://example.com", "s", "c")
 
-	if err := uc.RecordFailure(context.Background(), n.ID, 2); err != nil {
+	if err := uc.RecordFailure(context.Background(), n.ID, 2, "webhook returned status 500"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got, _ := uc.GetNotification(context.Background(), n.ID)
-	if got.Status != NotifyStatusPending || got.RetryCount != 1 {
-		t.Fatalf("expected pending retry 1, got status=%s retry=%d", got.Status, got.RetryCount)
+	if got.Status != NotifyStatusPending || got.RetryCount != 1 || got.LastError != "webhook returned status 500" {
+		t.Fatalf("expected pending retry 1 with error, got status=%s retry=%d error=%q", got.Status, got.RetryCount, got.LastError)
 	}
 
-	if err := uc.RecordFailure(context.Background(), n.ID, 2); err != nil {
+	if err := uc.RecordFailure(context.Background(), n.ID, 2, "timeout"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got, _ = uc.GetNotification(context.Background(), n.ID)
-	if got.Status != NotifyStatusFailed || got.RetryCount != 2 {
-		t.Fatalf("expected failed retry 2, got status=%s retry=%d", got.Status, got.RetryCount)
+	if got.Status != NotifyStatusFailed || got.RetryCount != 2 || got.LastError != "timeout" {
+		t.Fatalf("expected failed retry 2 with error, got status=%s retry=%d error=%q", got.Status, got.RetryCount, got.LastError)
 	}
 }
 
@@ -335,8 +336,8 @@ func TestDispatcherDispatchOnceRecordsFailure(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got, _ := uc.GetNotification(context.Background(), n.ID)
-	if got.Status != NotifyStatusPending || got.RetryCount != 1 {
-		t.Fatalf("expected pending retry 1, got status=%s retry=%d", got.Status, got.RetryCount)
+	if got.Status != NotifyStatusPending || got.RetryCount != 1 || got.LastError != "send failed" {
+		t.Fatalf("expected pending retry 1 with error, got status=%s retry=%d error=%q", got.Status, got.RetryCount, got.LastError)
 	}
 }
 
