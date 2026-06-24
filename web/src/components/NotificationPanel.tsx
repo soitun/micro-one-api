@@ -94,14 +94,10 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [canUsePortal, setCanUsePortal] = useState(false);
+  const canUsePortal = typeof document !== 'undefined';
 
   // Use ref to track component mounted state
   const mountedRef = useRef(true);
-
-  useEffect(() => {
-    setCanUsePortal(true);
-  }, []);
 
   // Fetch unread count only - lightweight polling
   const fetchUnreadCount = useCallback(async () => {
