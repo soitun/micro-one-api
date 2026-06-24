@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-06-24
+
 ### Added
 - Prometheus 指标补齐对账任务和渠道健康探测观测：新增对账运行次数/耗时/差异类型计数，以及 monitor-worker 渠道健康 sweep/probe 成功率、耗时和失败原因指标。
 
