@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Bell,
   CheckCircle2,
@@ -93,9 +94,14 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [canUsePortal, setCanUsePortal] = useState(false);
 
   // Use ref to track component mounted state
   const mountedRef = useRef(true);
+
+  useEffect(() => {
+    setCanUsePortal(true);
+  }, []);
 
   // Fetch unread count only - lightweight polling
   const fetchUnreadCount = useCallback(async () => {
@@ -227,7 +233,7 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
       </Button>
 
       {/* Panel - Opens when clicked */}
-      {open && (
+      {open && canUsePortal && createPortal(
         <>
           {/* Backdrop */}
           <div
@@ -236,7 +242,7 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
           />
 
           {/* Panel */}
-          <Card className="fixed right-0 top-0 z-50 h-full w-full max-w-md border-l shadow-xl">
+          <Card className="fixed right-0 top-0 z-50 h-[100dvh] w-full max-w-md rounded-none border-l py-0 shadow-xl">
             <div className="flex h-full flex-col">
               {/* Header */}
               <div className="flex items-center justify-between border-b px-4 py-3">
@@ -380,7 +386,8 @@ export function NotificationPanel({ open, onOpenChange }: NotificationPanelProps
               </div>
             </div>
           </Card>
-        </>
+        </>,
+        document.body
       )}
     </>
   );
