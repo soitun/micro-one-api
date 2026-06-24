@@ -4,8 +4,13 @@
 package main
 
 import (
+	"context"
+	"os"
+	"strings"
+
 	"github.com/go-kratos/kratos/v2"
 	"github.com/google/wire"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -15,6 +20,7 @@ import (
 	"micro-one-api/internal/identity/data"
 	"micro-one-api/internal/identity/server"
 	"micro-one-api/internal/identity/service"
+	applogger "micro-one-api/internal/pkg/logger"
 	"micro-one-api/internal/pkg/oauth"
 )
 
@@ -36,6 +42,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 }
 
 func newApp(cfg *identitycfg.Config, svc *service.IdentityService, uc *biz.IdentityUsecase, oauthRegistry *oauth.ProviderRegistry) (*kratos.App, func()) {
+	bootstrapAdmin(uc)
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
 	var billingClient billingv1.BillingServiceClient
 	var billingConn *grpc.ClientConn
@@ -53,6 +60,58 @@ func newApp(cfg *identitycfg.Config, svc *service.IdentityService, uc *biz.Ident
 			billingConn.Close()
 		}
 	}
+}
+
+func bootstrapAdmin(uc *biz.IdentityUsecase) {
+	result, err := uc.EnsureRootAdmin(context.Background())
+	if err != nil {
+		applogger.Log.Warn("admin bootstrap skipped", zap.Error(err))
+		return
+	}
+	if !result.Created {
+		return
+	}
+	if result.Generated {
+		logGeneratedAdminPassword(result)
+		return
+	}
+	applogger.Log.Info("initial admin created from INITIAL_ADMIN_PASSWORD env var", zap.String("username", result.Username))
+}
+
+func logGeneratedAdminPassword(result *biz.BootstrapResult) {
+	passwordFile := strings.TrimSpace(os.Getenv("INITIAL_ADMIN_PASSWORD_FILE"))
+	if passwordFile == "" {
+		applogger.Log.Warn("initial admin created with generated password; password was not logged",
+			zap.String("username", result.Username),
+			zap.String("email", result.Email),
+			zap.String("notice", "Set INITIAL_ADMIN_PASSWORD_FILE to write generated passwords to a private file, or use admin-reset to set a new password."),
+		)
+		return
+	}
+	if err := writeGeneratedPasswordFile(passwordFile, result.PlainPassword); err != nil {
+		applogger.Log.Error("failed to write generated initial admin password file",
+			zap.String("username", result.Username),
+			zap.Error(err),
+		)
+		return
+	}
+	applogger.Log.Warn("initial admin created with generated password written to private file",
+		zap.String("username", result.Username),
+		zap.String("email", result.Email),
+		zap.String("notice", "Read the file once, then log in and change the password immediately."),
+	)
+}
+
+func writeGeneratedPasswordFile(path, password string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- operator explicitly selects the one-time password output file; O_EXCL and 0600 prevent overwrite and broad reads.
+	if err != nil {
+		return err
+	}
+	if _, err := file.WriteString(password + "\n"); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 func registrationPolicyFromConfig(cfg *identitycfg.Config) server.RegistrationPolicy {

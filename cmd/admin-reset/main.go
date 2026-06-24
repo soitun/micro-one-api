@@ -58,10 +58,10 @@ func main() {
 	}
 
 	plain := *password
-	generatedPasswordFile := strings.TrimSpace(*passFile)
+	outputFile := strings.TrimSpace(*passFile)
 	generated := false
 	if plain == "" {
-		if generatedPasswordFile == "" {
+		if outputFile == "" {
 			fmt.Fprintln(os.Stderr, "error: -password or -generated-password-file is required")
 			os.Exit(2)
 		}
@@ -100,12 +100,12 @@ func main() {
 		verb = "created admin"
 	}
 	if generated {
-		if err := writeGeneratedPasswordFile(generatedPasswordFile, plain); err != nil {
+		if err := writeGeneratedPasswordFile(outputFile, plain); err != nil {
 			fmt.Fprintf(os.Stderr, "error: write generated password file: %v\n", err)
 			os.Exit(1)
 		}
 		fmt.Printf("%s %q\n", verb, uname)
-		fmt.Printf("generated password written to %q\n", generatedPasswordFile)
+		fmt.Println("generated password written to private file")
 		return
 	}
 	fmt.Printf("%s %q (password from -password flag)\n", verb, uname)

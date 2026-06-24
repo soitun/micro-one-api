@@ -129,4 +129,4 @@ CREATE TABLE IF NOT EXISTS `alert_rules` (
 -- Default admin user is bootstrapped by identity-service at startup based on
 -- INITIAL_ADMIN_USERNAME / INITIAL_ADMIN_EMAIL / INITIAL_ADMIN_PASSWORD env
 -- vars. If INITIAL_ADMIN_PASSWORD is unset, a random one-time password is
--- generated and printed to identity-service stdout once.
+-- generated. Set INITIAL_ADMIN_PASSWORD_FILE to write it to a private file.

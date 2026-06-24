@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"micro-one-api/internal/identity/biz"
 	identitycfg "micro-one-api/internal/identity/config"
+	applogger "micro-one-api/internal/pkg/logger"
 )
 
 func TestRegistrationPolicyFromConfigDefaultsEnabled(t *testing.T) {
@@ -34,6 +39,44 @@ func TestRegistrationPolicyFromConfigSupportsRestrictionsAndExplicitDisable(t *t
 	}
 	if !policy.TurnstileCheckEnabled || policy.TurnstileSecret != "secret" {
 		t.Fatalf("turnstile policy mismatch: %+v", policy)
+	}
+}
+
+func TestLogGeneratedAdminPasswordWritesPrivateFileWithoutLoggingSecret(t *testing.T) {
+	previous := applogger.Log
+	t.Cleanup(func() {
+		applogger.Log = previous
+	})
+	var logs bytes.Buffer
+	if err := applogger.SetOutput(&logs); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "initial-admin-password.txt")
+	t.Setenv("INITIAL_ADMIN_PASSWORD_FILE", path)
+
+	logGeneratedAdminPassword(&biz.BootstrapResult{
+		Username:      "admin",
+		Email:         "admin@example.com",
+		PlainPassword: "secret-pass",
+		Generated:     true,
+	})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(data)) != "secret-pass" {
+		t.Fatalf("password file content = %q", data)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("password file mode = %o, want 0600", got)
+	}
+	if strings.Contains(logs.String(), "secret-pass") {
+		t.Fatalf("generated password was logged: %s", logs.String())
 	}
 }
 
