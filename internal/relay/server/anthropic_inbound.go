@@ -9,9 +9,12 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	billingv1 "micro-one-api/api/billing/v1"
 	relaybiz "micro-one-api/internal/relay/biz"
+	"micro-one-api/internal/pkg/errors"
 	relayprovider "micro-one-api/internal/relay/provider"
 )
 
@@ -96,8 +99,12 @@ func convertAnthropicToChatCompletions(req *anthropicInboundRequest) (*relayprov
 		Tools:       convertAnthropicToolsToOpenAI(req.Tools),
 	}
 
+	const anthropicMaxOutputLimit = 64000
 	if req.MaxTokens > 0 {
 		mt := req.MaxTokens
+		if mt > anthropicMaxOutputLimit {
+			mt = anthropicMaxOutputLimit
+		}
 		ccReq.MaxTokens = &mt
 	} else {
 		mt := 4096
@@ -420,7 +427,7 @@ func (s *HTTPServer) handleAnthropicMessages(w http.ResponseWriter, r *http.Requ
 		Model: anthropicReq.Model,
 	})
 	if err != nil {
-		s.handleRelayPlanError(w, err)
+		s.handleAnthropicPlanError(w, err)
 		return
 	}
 
@@ -613,14 +620,17 @@ func (s *HTTPServer) handleAnthropicStreamingResponse(
 					})
 					flusher.Flush()
 				}
-				writeSSEEvent(w, "content_block_delta", map[string]interface{}{
+				if e := writeSSEEvent(w, "content_block_delta", map[string]interface{}{
 					"type":  "content_block_delta",
 					"index": thinkingIndex,
 					"delta": map[string]interface{}{
 						"type":     "thinking_delta",
 						"thinking": reasoning,
 					},
-				})
+				}); e != nil {
+					// Headers already written; cannot send HTTP error, best-effort abort.
+					break
+				}
 				flusher.Flush()
 			}
 
@@ -654,14 +664,16 @@ func (s *HTTPServer) handleAnthropicStreamingResponse(
 					flusher.Flush()
 					blockOpen = true
 				}
-				writeSSEEvent(w, "content_block_delta", map[string]interface{}{
+				if e := writeSSEEvent(w, "content_block_delta", map[string]interface{}{
 					"type":  "content_block_delta",
 					"index": 0,
 					"delta": map[string]interface{}{
 						"type": "text_delta",
 						"text": choice.Delta.Content,
 					},
-				})
+				}); e != nil {
+					break
+				}
 				flusher.Flush()
 			}
 			if choice.FinishReason != nil {
@@ -756,6 +768,58 @@ func mapFinishReasonStringToAnthropic(reason string) string {
 // ----------------------------------------------------------------------------
 // Anthropic error helper
 // ----------------------------------------------------------------------------
+
+// handleAnthropicPlanError maps biz-layer Plan() errors to Anthropic-format
+// error responses, mirroring the OpenAI-style handleRelayPlanError but emitting
+// the Anthropic error envelope so SDK clients can parse it correctly.
+func (s *HTTPServer) handleAnthropicPlanError(w http.ResponseWriter, err error) {
+	if errors.IsUnauthorized(err) {
+		s.writeAnthropicError(w, http.StatusUnauthorized, "authentication_error: invalid API key")
+		return
+	}
+	if errors.IsForbidden(err) {
+		s.writeAnthropicError(w, http.StatusForbidden, "permission_error: forbidden")
+		return
+	}
+	if errors.IsServiceUnavailable(err) {
+		s.writeAnthropicError(w, http.StatusServiceUnavailable, "api_error: no available channel")
+		return
+	}
+
+	st, ok := status.FromError(err)
+	if ok {
+		switch st.Code() {
+		case codes.NotFound:
+			s.writeAnthropicError(w, http.StatusUnauthorized, "authentication_error: invalid API key")
+		case codes.PermissionDenied:
+			s.writeAnthropicError(w, http.StatusForbidden, "permission_error: forbidden")
+		case codes.ResourceExhausted:
+			s.writeAnthropicError(w, http.StatusTooManyRequests, "rate_limit_error: rate limit exceeded")
+		case codes.Unavailable:
+			s.writeAnthropicError(w, http.StatusServiceUnavailable, "api_error: service unavailable")
+		default:
+			if strings.Contains(st.Message(), "no available channel") || strings.Contains(st.Message(), "channel not found") {
+				s.writeAnthropicError(w, http.StatusServiceUnavailable, "api_error: no available channel")
+				return
+			}
+			s.writeAnthropicError(w, http.StatusInternalServerError, "api_error: internal server error")
+		}
+		return
+	}
+
+	if strings.Contains(err.Error(), "no available channel") || strings.Contains(err.Error(), "channel not found") {
+		s.writeAnthropicError(w, http.StatusServiceUnavailable, "api_error: no available channel")
+		return
+	}
+
+	// Model not allowed
+	if strings.Contains(err.Error(), "not allowed") {
+		s.writeAnthropicError(w, http.StatusForbidden, "permission_error: model not allowed")
+		return
+	}
+
+	s.writeAnthropicError(w, http.StatusInternalServerError, "api_error: internal server error")
+}
 
 func (s *HTTPServer) writeAnthropicError(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
