@@ -260,6 +260,15 @@ func (s *HTTPServer) handleRawRelay(upstreamPath string, requireModel bool) http
 }
 
 func (s *HTTPServer) handleResponsesRelay(w http.ResponseWriter, r *http.Request) {
+	// Codex Responses WebSocket: when the client sends an Upgrade: websocket
+	// request against /v1/responses, hand off to the WS forwarder instead of
+	// the HTTP/SSE path. This is the ingress point for the new Responses WS
+	// protocol used by the Codex CLI.
+	if isOpenAIWSUpgradeRequest(r) {
+		s.handleResponsesWebSocket(r.Context(), w, r)
+		return
+	}
+
 	upstreamPath := r.URL.Path
 	if strings.HasPrefix(upstreamPath, "/v1/") {
 		upstreamPath = strings.TrimPrefix(upstreamPath, "/v1")

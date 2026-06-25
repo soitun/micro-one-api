@@ -1,0 +1,347 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/bytedance/sonic"
+	coderws "github.com/coder/websocket"
+	"go.uber.org/zap"
+
+	servererrors "micro-one-api/internal/pkg/errors"
+	applogger "micro-one-api/internal/pkg/logger"
+	relaybiz "micro-one-api/internal/relay/biz"
+)
+
+// OpenAI Responses WebSocket protocol constants. The OpenAI-Beta header value
+// matches the Responses WebSocket beta advertised by the Codex CLI and sub2api.
+const (
+	openAIWSBetaResponsesValue = "responses_websockets=2026-02-06"
+	// openAIWSClientReadLimitBytes is the per-frame read limit applied to the
+	// client-side connection. The Codex CLI can send very large response.create
+	// payloads (tool call history, file context); the coder/websocket default
+	// of 32 KiB would reject them, so we raise it to 64 MiB to match the HTTP
+	// request body limit used elsewhere in this server.
+	openAIWSClientReadLimitBytes int64 = 64 * 1024 * 1024
+	openAIWSFirstMessageTimeout        = 30 * time.Second
+)
+
+// handleResponsesWebSocket handles the inbound side of a Codex Responses
+// WebSocket connection: it accepts the upgrade, reads the first
+// response.create frame, authenticates + plans the relay (model mapping,
+// channel selection), dials the upstream Responses WebSocket, and runs the
+// bidirectional relay with per-turn quota commit / usage logging.
+//
+// It is the WebSocket counterpart of handleResponsesCreateLike and reuses the
+// same relaybiz.Plan + billing pipeline. The HTTP handler must guarantee that
+// the request is a WebSocket upgrade (see isOpenAIWSUpgradeRequest) before
+// calling this.
+func (s *HTTPServer) handleResponsesWebSocket(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	// Accept the upgrade. Compression with context takeover matches both the
+	// Codex CLI and the sub2api upstream dialer.
+	wsConn, err := coderws.Accept(w, r, &coderws.AcceptOptions{
+		CompressionMode: coderws.CompressionContextTakeover,
+	})
+	if err != nil {
+		if applogger.Log != nil {
+			applogger.Log.Warn("failed to accept openai responses websocket upgrade", zap.Error(err))
+		}
+		return
+	}
+	defer func() {
+		_ = wsConn.CloseNow()
+	}()
+	wsConn.SetReadLimit(openAIWSClientReadLimitBytes)
+
+	clientFrameConn := &coderWSFrameConn{conn: wsConn}
+
+	// Read the first frame: it must be a response.create JSON object carrying a
+	// model field (the Codex CLI always opens the connection this way).
+	readCtx, cancelRead := context.WithTimeout(ctx, openAIWSFirstMessageTimeout)
+	msgType, firstMessage, err := clientFrameConn.ReadFrame(readCtx)
+	cancelRead()
+	if err != nil {
+		closeOpenAIWSClientConn(wsConn, coderws.StatusPolicyViolation, "missing first response.create message")
+		return
+	}
+	if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
+		closeOpenAIWSClientConn(wsConn, coderws.StatusPolicyViolation, "unsupported websocket message type")
+		return
+	}
+
+	clientModel := extractOpenAIWSClientModel(firstMessage)
+	if clientModel == "" {
+		closeOpenAIWSClientConn(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
+		return
+	}
+
+	token := extractOpenAIBearerToken(r)
+	if token == "" {
+		closeOpenAIWSClientConn(wsConn, coderws.StatusPolicyViolation, "missing authorization token")
+		return
+	}
+
+	// Authenticate + plan (model mapping, channel selection). The first frame
+	// is JSON-rewritten with the resolved upstream model before dialing.
+	plan, err := s.relayUsecase.Plan(ctx, relaybiz.RelayRequest{
+		Token: token,
+		Model: clientModel,
+	})
+	if err != nil {
+		s.closeOpenAIWSWithPlanError(wsConn, err)
+		return
+	}
+
+	rewrittenFirstMessage := rewriteOpenAIWSModel(firstMessage, clientModel, plan.ResolvedModel)
+
+	// Reservations mirror the HTTP path: estimate tokens from the request body
+	// and commit per terminal turn.
+	requestID := generateRequestID()
+	reservation, err := s.reserveQuota(ctx, fmt.Sprintf("%d", plan.Auth.UserID), requestID, estimateRawTokens(rewrittenFirstMessage), plan.ResolvedModel, fmt.Sprintf("%d", plan.Channel.ID))
+	if err != nil {
+		closeOpenAIWSClientConn(wsConn, coderws.StatusTryAgainLater, "quota reservation failed")
+		return
+	}
+
+	// Dial the upstream Responses WebSocket endpoint for the selected channel.
+	wsURL, headers, err := s.buildOpenAIWSUpstreamTarget(r, plan.Channel)
+	if err != nil {
+		_ = s.releaseQuota(ctx, reservation.ReservationId, "upstream dial error")
+		closeOpenAIWSClientConn(wsConn, coderws.StatusInternalError, "failed to build upstream websocket target")
+		return
+	}
+
+	dialer := newCoderWSUpstreamDialer()
+	dialCtx, cancelDial := context.WithTimeout(ctx, openAIWSDialTimeoutDefault)
+	upstreamConn, statusCode, handshakeHeaders, err := dialer.Dial(dialCtx, wsURL, headers)
+	cancelDial()
+	if err != nil {
+		_ = s.releaseQuota(ctx, reservation.ReservationId, "upstream dial error")
+		s.closeOpenAIWSWithDialError(wsConn, statusCode, err, handshakeHeaders)
+		return
+	}
+
+	// Per-turn usage logging / quota commit. This mirrors the SSE branch of
+	// handleResponsesCreateLike (commitQuotaAfterResponse + ingestUsageLogAfterResponse).
+	turnCommits := 0
+	onTurnComplete := func(turn openAIWSTurnResult) {
+		usage := turn.usage
+		actualTotal := usage.totalTokens
+		if actualTotal <= 0 {
+			actualTotal = usage.promptTokens + usage.completionTokens
+		}
+		turnID := turn.requestID
+		if turnID == "" {
+			turnID = requestID
+		}
+		logInput := usageLogInput{
+			UserID:           plan.Auth.UserID,
+			TokenID:          plan.Auth.TokenID,
+			TokenName:        plan.Auth.TokenName,
+			RequestID:        turnID,
+			Endpoint:         "/v1/responses",
+			ModelName:        plan.ResolvedModel,
+			Quota:            actualTotal,
+			PromptTokens:     usage.promptTokens,
+			CompletionTokens: usage.completionTokens,
+			CacheReadTokens:  usage.cacheReadTokens,
+			ChannelID:        plan.Channel.ID,
+			IsStream:         true,
+		}
+		logUpstreamUsage(logInput)
+		if commitErr := s.commitQuotaAfterResponse(reservation.ReservationId, actualTotal, true, logInput); commitErr != nil {
+			if applogger.Log != nil {
+				applogger.Log.Warn("failed to commit openai ws turn quota",
+					zap.String("request_id", turnID),
+					zap.Error(commitErr),
+				)
+			}
+		} else {
+			s.ingestUsageLogAfterResponse(logInput)
+		}
+		turnCommits++
+	}
+
+	// Run the bidirectional relay. The first frame was already validated and
+	// rewritten; the relay writes it to the upstream before the pumps start.
+	relayResult, relayExit := relayOpenAIWSFrames(ctx, clientFrameConn, upstreamConn, rewrittenFirstMessage, openAIWSRelayOptions{
+		writeTimeout:   s.openAIWSWriteTimeout(),
+		idleTimeout:    s.openAIWSIdleTimeout(),
+		onTurnComplete: onTurnComplete,
+	})
+
+	// Fallback: if no terminal turn was committed (e.g. the upstream closed
+	// before completing a response), release the reservation instead of
+	// leaving it pinned.
+	if turnCommits == 0 {
+		if releaseErr := s.releaseQuota(ctx, reservation.ReservationId, "no completed ws turn"); releaseErr != nil && applogger.Log != nil {
+			applogger.Log.Warn("failed to release openai ws reservation", zap.String("request_id", requestID), zap.Error(releaseErr))
+		}
+	}
+
+	if relayExit != nil && relayExit.err != nil && applogger.Log != nil {
+		applogger.Log.Info("openai responses websocket relay ended",
+			zap.String("request_id", requestID),
+			zap.String("stage", relayExit.stage),
+			zap.Bool("graceful", relayExit.graceful),
+			zap.Bool("wrote_downstream", relayExit.wroteDownstream),
+			zap.Int64("c2u_frames", relayResult.clientToUpstream),
+			zap.Int64("u2c_frames", relayResult.upstreamToClient),
+			zap.Error(relayExit.err),
+		)
+	}
+}
+
+// buildOpenAIWSUpstreamTarget computes the upstream Responses WebSocket URL and
+// request headers for the selected channel. The channel's base URL (already
+// normalized by the provider factory to https) is converted to wss/ws, and the
+// Authorization + OpenAI-Beta headers are set.
+func (s *HTTPServer) buildOpenAIWSUpstreamTarget(r *http.Request, ch *relaybiz.Channel) (string, http.Header, error) {
+	baseURL := ch.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid channel base url: %w", err)
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "https":
+		parsed.Scheme = "wss"
+	case "http":
+		parsed.Scheme = "ws"
+	case "wss", "ws":
+		// keep as-is
+	default:
+		return "", nil, fmt.Errorf("unsupported scheme for ws: %s", parsed.Scheme)
+	}
+	// Ensure the path ends with /responses. Most OpenAI-compatible base URLs are
+	// configured as ".../v1"; the Responses WS endpoint is /v1/responses.
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	if !strings.HasSuffix(parsed.Path, "/responses") {
+		parsed.Path = parsed.Path + "/responses"
+	}
+	wsURL := parsed.String()
+
+	headers := make(http.Header)
+	headers.Set("Authorization", "Bearer "+ch.Key)
+	headers.Set("OpenAI-Beta", openAIWSBetaResponsesValue)
+	if ua := strings.TrimSpace(r.Header.Get("User-Agent")); ua != "" {
+		headers.Set("User-Agent", ua)
+	}
+	return wsURL, headers, nil
+}
+
+// closeOpenAIWSWithPlanError maps a biz Plan() error to a WebSocket close
+// status/reason, mirroring handleRelayPlanError / handleIdentityError.
+func (s *HTTPServer) closeOpenAIWSWithPlanError(conn *coderws.Conn, err error) {
+	if servererrors.IsUnauthorized(err) {
+		closeOpenAIWSClientConn(conn, coderws.StatusPolicyViolation, "unauthorized")
+		return
+	}
+	if servererrors.IsForbidden(err) {
+		closeOpenAIWSClientConn(conn, coderws.StatusPolicyViolation, "forbidden")
+		return
+	}
+	if servererrors.IsServiceUnavailable(err) {
+		closeOpenAIWSClientConn(conn, coderws.StatusTryAgainLater, "service unavailable")
+		return
+	}
+	closeOpenAIWSClientConn(conn, coderws.StatusInternalError, "internal server error")
+}
+
+// closeOpenAIWSWithDialError maps an upstream dial failure to a WebSocket close
+// status/reason, mirroring sub2api's mapOpenAIWSPassthroughDialError.
+func (s *HTTPServer) closeOpenAIWSWithDialError(conn *coderws.Conn, statusCode int, err error, headers http.Header) {
+	switch statusCode {
+	case http.StatusTooManyRequests:
+		closeOpenAIWSClientConn(conn, coderws.StatusTryAgainLater, "upstream rate limit exceeded, please retry later")
+	case http.StatusUnauthorized, http.StatusForbidden:
+		closeOpenAIWSClientConn(conn, coderws.StatusPolicyViolation, "upstream websocket authentication failed")
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, 529:
+		closeOpenAIWSClientConn(conn, coderws.StatusTryAgainLater, "upstream service temporarily unavailable")
+	default:
+		closeOpenAIWSClientConn(conn, coderws.StatusInternalError, "upstream websocket proxy failed")
+	}
+}
+
+// closeOpenAIWSClientConn closes a client WebSocket connection with the given
+// status / reason, truncating the reason to the protocol limit (125 bytes).
+func closeOpenAIWSClientConn(conn *coderws.Conn, status coderws.StatusCode, reason string) {
+	if conn == nil {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if len(reason) > 120 {
+		reason = reason[:120]
+	}
+	_ = conn.Close(status, reason)
+	_ = conn.CloseNow()
+}
+
+// extractOpenAIWSClientModel returns the model field from the first
+// response.create frame.
+func extractOpenAIWSClientModel(message []byte) string {
+	node, _ := sonic.Get(message, "model")
+	model, _ := node.String()
+	return strings.TrimSpace(model)
+}
+
+// rewriteOpenAIWSModel replaces the model in a response.create frame when model
+// mapping resolved it to a different upstream model. It mirrors the HTTP path's
+// rewriteRawModel behaviour: if the resolved model equals the client model the
+// payload is returned unchanged.
+func rewriteOpenAIWSModel(message []byte, clientModel, resolvedModel string) []byte {
+	if clientModel == resolvedModel || clientModel == "" || resolvedModel == "" {
+		return message
+	}
+	var payload map[string]interface{}
+	if err := sonic.Unmarshal(message, &payload); err != nil {
+		return message
+	}
+	payload["model"] = resolvedModel
+	rewritten, err := sonic.Marshal(payload)
+	if err != nil {
+		return message
+	}
+	return rewritten
+}
+
+// extractOpenAIBearerToken extracts the bearer token from the Authorization
+// header.
+func extractOpenAIBearerToken(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+}
+
+// isOpenAIWSUpgradeRequest reports whether the inbound request is a WebSocket
+// upgrade request. Mirrors sub2api's isOpenAIWSUpgradeRequest.
+func isOpenAIWSUpgradeRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") {
+		return false
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(r.Header.Get("Connection"))), "upgrade")
+}
+
+// openAIWSWriteTimeout / openAIWSIdleTimeout provide tunable timeouts with
+// sensible defaults for the relay. They can be wired to config in a follow-up.
+func (s *HTTPServer) openAIWSWriteTimeout() time.Duration { return 2 * time.Minute }
+func (s *HTTPServer) openAIWSIdleTimeout() time.Duration  { return 5 * time.Minute }
+
+// errOpenAIWSForwarderUnused is retained to keep the `errors` import meaningful
+// if future code paths add direct error construction here.
+var _ = errors.New
