@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-06-25
+
+### Added
+- 新增 Anthropic Messages API 入站端点 `POST /v1/messages`，使 relay-gateway 能直接对接 Claude Code CLI 及原生 Anthropic SDK 客户端。
+- 支持 Anthropic Messages 格式与内部 OpenAI 兼容选路/计费链路的双向转换：string/array content blocks、system prompt、tool_use / tool_result 工具调用。
+- 流式响应支持 OpenAI SSE → Anthropic SSE 事件序列转换（message_start / content_block_start / content_block_delta / content_block_stop / message_delta / message_stop）。
+- 支持 thinking-mode 模型（DeepSeek-R1、GLM-5.x），将 `reasoning_content` 转换为 Anthropic `thinking` content block。
+- 鉴权支持 `x-api-key`（Anthropic 原生）和 `Authorization: Bearer` 两种方式。
+
+### Fixed
+- 流式 SSE 中途写入错误不再触发二次 `WriteHeader`。
+- `Plan()` 失败返回 Anthropic 错误信封格式，而非 OpenAI 格式。
+- 新增 `max_tokens` 上限保护（64000），防止资源耗尽。
+
+### Security
+- gosec SAST / govulncheck SCA / gitleaks 密钥扫描全部通过（0 issues / 0 vulns / 0 leaks）。
+
+## [0.2.7] - 2026-06-24
+
 ### Added
 - 通知记录新增最后一次投递失败原因字段，notify-worker 记录发送错误，管理后台通知面板在失败通知中展示失败原因。
 
