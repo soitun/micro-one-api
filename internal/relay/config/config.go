@@ -25,6 +25,17 @@ type OpenAIWSConfig struct {
 	// FirstMessageTimeout is how long to wait for the client's first
 	// response.create frame after the upgrade completes.
 	FirstMessageTimeout string `json:"first_message_timeout" yaml:"first_message_timeout"`
+	// MaxConnsPerChannel caps idle upstream connections per channel in the pool.
+	MaxConnsPerChannel int `json:"max_conns_per_channel" yaml:"max_conns_per_channel"`
+	// FailoverMaxSwitches is how many alternative channels to try on a
+	// retryable upstream error before surfacing the error to the client.
+	FailoverMaxSwitches int `json:"failover_max_switches" yaml:"failover_max_switches"`
+	// StickyTTL is the TTL for response->channel sticky bindings (local + Redis).
+	StickyTTL string `json:"sticky_ttl" yaml:"sticky_ttl"`
+	// RedisAddr enables the cross-process sticky store. Empty = in-memory only.
+	RedisAddr string `json:"redis_addr" yaml:"redis_addr"`
+	// RedisPassword for the sticky store.
+	RedisPassword string `json:"redis_password" yaml:"redis_password"`
 }
 
 // ModelsConfig holds model mapping configuration.
@@ -147,4 +158,28 @@ func (c OpenAIWSConfig) GetOpenAIWSFirstMessageTimeout() string {
 		return "30s"
 	}
 	return c.FirstMessageTimeout
+}
+
+// GetOpenAIWSMaxConnsPerChannel returns the per-channel pool cap with default.
+func (c OpenAIWSConfig) GetOpenAIWSMaxConnsPerChannel() int {
+	if c.MaxConnsPerChannel <= 0 {
+		return 8
+	}
+	return c.MaxConnsPerChannel
+}
+
+// GetOpenAIWSFailoverMaxSwitches returns the failover switch limit with default.
+func (c OpenAIWSConfig) GetOpenAIWSFailoverMaxSwitches() int {
+	if c.FailoverMaxSwitches <= 0 {
+		return 2
+	}
+	return c.FailoverMaxSwitches
+}
+
+// GetOpenAIWSStickyTTL returns the sticky binding TTL with default.
+func (c OpenAIWSConfig) GetOpenAIWSStickyTTL() string {
+	if c.StickyTTL == "" {
+		return "1h"
+	}
+	return c.StickyTTL
 }

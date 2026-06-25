@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/bytedance/sonic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -48,6 +50,9 @@ type HTTPServer struct {
 	responsesMu     sync.RWMutex
 	responseRoutes  map[string]responseRoute
 	wsTimeouts      openAIWSTimeouts
+	wsPool          *openAIWSConnPool
+	wsSticky        *openAIWSStickyStore
+	wsPoolCfg       openAIWSPoolConfig
 }
 
 // openAIWSTimeouts holds parsed durations for the Responses WebSocket relay.
@@ -57,6 +62,14 @@ type openAIWSTimeouts struct {
 	idleTimeout         time.Duration
 	dialTimeout         time.Duration
 	firstMessageTimeout time.Duration
+}
+
+// openAIWSPoolConfig holds connection-pool + failover tunables. Zero values
+// fall back to defaults.
+type openAIWSPoolConfig struct {
+	maxConnsPerChannel  int
+	failoverMaxSwitches int
+	stickyTTL           time.Duration
 }
 
 type responseRoute struct {
@@ -102,6 +115,36 @@ func (s *HTTPServer) SetOpenAIWSTimeouts(writeTimeout, idleTimeout, dialTimeout,
 		idleTimeout:         idleTimeout,
 		dialTimeout:         dialTimeout,
 		firstMessageTimeout: firstMessageTimeout,
+	}
+}
+
+// SetOpenAIWSStickyStore configures the cross-process response->channel sticky
+// store backed by Redis. Pass a nil client to use in-memory only.
+func (s *HTTPServer) SetOpenAIWSStickyStore(rdb *redis.Client) {
+	if s == nil {
+		return
+	}
+	s.wsSticky = newOpenAIWSStickyStore(rdb)
+}
+
+// SetOpenAIWSConnPool configures the upstream connection pool. Must be called
+// after SetOpenAIWSTimeouts since it reads the dial timeout.
+func (s *HTTPServer) SetOpenAIWSConnPool() {
+	if s == nil {
+		return
+	}
+	s.wsPool = newOpenAIWSConnPool(s.openAIWSDialTimeout())
+}
+
+// SetOpenAIWSPoolConfig configures pool + failover tunables.
+func (s *HTTPServer) SetOpenAIWSPoolConfig(maxConnsPerChannel, failoverMaxSwitches int, stickyTTL time.Duration) {
+	if s == nil {
+		return
+	}
+	s.wsPoolCfg = openAIWSPoolConfig{
+		maxConnsPerChannel:  maxConnsPerChannel,
+		failoverMaxSwitches: failoverMaxSwitches,
+		stickyTTL:           stickyTTL,
 	}
 }
 

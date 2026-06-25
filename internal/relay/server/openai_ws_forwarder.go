@@ -13,6 +13,8 @@ import (
 	coderws "github.com/coder/websocket"
 	"go.uber.org/zap"
 
+	billingv1 "micro-one-api/api/billing/v1"
+	channelv1 "micro-one-api/api/channel/v1"
 	servererrors "micro-one-api/internal/pkg/errors"
 	applogger "micro-one-api/internal/pkg/logger"
 	relaybiz "micro-one-api/internal/relay/biz"
@@ -97,7 +99,11 @@ func (s *HTTPServer) handleResponsesWebSocket(ctx context.Context, w http.Respon
 	var plan *relaybiz.RelayPlan
 	previousResponseID := extractOpenAIWSPreviousResponseIDFromRequest(firstMessage)
 	if previousResponseID != "" {
-		if route, ok := s.lookupResponseRoute(previousResponseID); ok {
+		// Try the local in-memory route first, then fall back to the
+		// cross-process Redis-backed sticky store so multi-replica deployments
+		// can resume a session chain started on a different gateway pod.
+		if route, ok := s.lookupResponseRoute(previousResponseID); ok ||
+			(s.wsSticky != nil && s.lookupWSStickyRoute(ctx, token, previousResponseID, &route)) {
 			authSnapshot, authErr := s.getAuthSnapshot(ctx, token)
 			if authErr == nil && (route.UserID == 0 || route.UserID == authSnapshot.UserId) {
 				plan = &relaybiz.RelayPlan{
@@ -139,103 +145,13 @@ func (s *HTTPServer) handleResponsesWebSocket(ctx context.Context, w http.Respon
 		return
 	}
 
-	// Dial the upstream Responses WebSocket endpoint for the selected channel.
-	wsURL, headers, err := s.buildOpenAIWSUpstreamTarget(r, plan.Channel)
-	if err != nil {
-		_ = s.releaseQuota(ctx, reservation.ReservationId, "upstream dial error")
-		closeOpenAIWSClientConn(wsConn, coderws.StatusInternalError, "failed to build upstream websocket target")
-		return
-	}
-
-	dialer := newCoderWSUpstreamDialer()
-	dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
-	upstreamConn, statusCode, handshakeHeaders, err := dialer.Dial(dialCtx, wsURL, headers)
-	cancelDial()
-	if err != nil {
-		_ = s.releaseQuota(ctx, reservation.ReservationId, "upstream dial error")
-		s.closeOpenAIWSWithDialError(wsConn, statusCode, err, handshakeHeaders)
-		return
-	}
-
-	// Per-turn usage logging / quota commit. This mirrors the SSE branch of
-	// handleResponsesCreateLike (commitQuotaAfterResponse + ingestUsageLogAfterResponse).
-	turnCommits := 0
-	onTurnComplete := func(turn openAIWSTurnResult) {
-		usage := turn.usage
-		actualTotal := usage.totalTokens
-		if actualTotal <= 0 {
-			actualTotal = usage.promptTokens + usage.completionTokens
-		}
-		turnID := turn.requestID
-		if turnID == "" {
-			turnID = requestID
-		}
-		logInput := usageLogInput{
-			UserID:           plan.Auth.UserID,
-			TokenID:          plan.Auth.TokenID,
-			TokenName:        plan.Auth.TokenName,
-			RequestID:        turnID,
-			Endpoint:         "/v1/responses",
-			ModelName:        plan.ResolvedModel,
-			Quota:            actualTotal,
-			PromptTokens:     usage.promptTokens,
-			CompletionTokens: usage.completionTokens,
-			CacheReadTokens:  usage.cacheReadTokens,
-			ChannelID:        plan.Channel.ID,
-			IsStream:         true,
-		}
-		logUpstreamUsage(logInput)
-		if commitErr := s.commitQuotaAfterResponse(reservation.ReservationId, actualTotal, true, logInput); commitErr != nil {
-			if applogger.Log != nil {
-				applogger.Log.Warn("failed to commit openai ws turn quota",
-					zap.String("request_id", turnID),
-					zap.Error(commitErr),
-				)
-			}
-		} else {
-			s.ingestUsageLogAfterResponse(logInput)
-		}
-		// Bind the upstream response id to this channel so follow-up turns
-		// carrying previous_response_id route to the same upstream session.
-		if turn.requestID != "" {
-			s.storeResponseRoute(turn.requestID, responseRoute{
-				Model:         clientModel,
-				ResolvedModel: plan.ResolvedModel,
-				Channel:       *plan.Channel,
-				UserID:        plan.Auth.UserID,
-			})
-		}
-		turnCommits++
-	}
-
-	// Run the bidirectional relay. The first frame was already validated and
-	// rewritten; the relay writes it to the upstream before the pumps start.
-	relayResult, relayExit := relayOpenAIWSFrames(ctx, clientFrameConn, upstreamConn, rewrittenFirstMessage, openAIWSRelayOptions{
-		writeTimeout:   s.openAIWSWriteTimeout(),
-		idleTimeout:    s.openAIWSIdleTimeout(),
-		onTurnComplete: onTurnComplete,
-	})
-
-	// Fallback: if no terminal turn was committed (e.g. the upstream closed
-	// before completing a response), release the reservation instead of
-	// leaving it pinned.
-	if turnCommits == 0 {
-		if releaseErr := s.releaseQuota(ctx, reservation.ReservationId, "no completed ws turn"); releaseErr != nil && applogger.Log != nil {
-			applogger.Log.Warn("failed to release openai ws reservation", zap.String("request_id", requestID), zap.Error(releaseErr))
-		}
-	}
-
-	if relayExit != nil && relayExit.err != nil && applogger.Log != nil {
-		applogger.Log.Info("openai responses websocket relay ended",
-			zap.String("request_id", requestID),
-			zap.String("stage", relayExit.stage),
-			zap.Bool("graceful", relayExit.graceful),
-			zap.Bool("wrote_downstream", relayExit.wroteDownstream),
-			zap.Int64("c2u_frames", relayResult.clientToUpstream),
-			zap.Int64("u2c_frames", relayResult.upstreamToClient),
-			zap.Error(relayExit.err),
-		)
-	}
+	// Dial the upstream via the connection pool (reuses an idle conn for this
+	// channel when available, otherwise dials fresh) and run the relay with
+	// multi-channel failover: on a retryable upstream error (dial failure or a
+	// relay error before any data reached the client) we switch to a different
+	// channel and retry, up to the configured switch limit.
+	maxSwitches := s.openAIWSFailoverMaxSwitches()
+	s.runResponsesWSRelayWithFailover(ctx, wsConn, clientFrameConn, r, token, clientModel, plan, rewrittenFirstMessage, reservation, requestID, maxSwitches)
 }
 
 // buildOpenAIWSUpstreamTarget computes the upstream Responses WebSocket URL and
@@ -442,4 +358,280 @@ func extractOpenAIWSPreviousResponseIDFromRequest(payload []byte) string {
 	node, _ := sonic.Get(payload, "previous_response_id")
 	rid, _ := node.String()
 	return strings.TrimSpace(rid)
+}
+
+// openAIWSFailoverMaxSwitches returns the configured failover switch limit
+// (default 2): the number of alternative channels to try when the initial
+// channel fails before reaching the client.
+func (s *HTTPServer) openAIWSFailoverMaxSwitches() int {
+	if s != nil && s.wsPoolCfg.failoverMaxSwitches > 0 {
+		return s.wsPoolCfg.failoverMaxSwitches
+	}
+	return 2
+}
+
+// openAIWSStickyTTL returns the configured sticky binding TTL (default 1h).
+func (s *HTTPServer) openAIWSStickyTTL() time.Duration {
+	if s != nil && s.wsPoolCfg.stickyTTL > 0 {
+		return s.wsPoolCfg.stickyTTL
+	}
+	return openAIWSStickyTTL
+}
+
+// runResponsesWSRelayWithFailover dials the upstream via the pool, runs the
+// relay, and on a retryable failure retries against a freshly selected channel
+// (excluding the failed one's priority) up to maxSwitches times. It owns the
+// turn-committed usage logging / quota commit and the pool release semantics.
+//
+// Retry is only attempted before the relay has written any data downstream
+// (wroteDownstream == false); once bytes have flowed to the client, switching
+// channels mid-stream would corrupt the client's view of the response.
+func (s *HTTPServer) runResponsesWSRelayWithFailover(
+	ctx context.Context,
+	wsConn *coderws.Conn,
+	clientFrameConn *coderWSFrameConn,
+	r *http.Request,
+	token string,
+	clientModel string,
+	plan *relaybiz.RelayPlan,
+	rewrittenFirstMessage []byte,
+	reservation *billingv1.ReserveQuotaResponse,
+	requestID string,
+	maxSwitches int,
+) {
+	currentChannel := plan.Channel
+	resolvedModel := plan.ResolvedModel
+
+	for attempt := 0; ; attempt++ {
+		// Resolve the upstream target for the current channel.
+		wsURL, headers, err := s.buildOpenAIWSUpstreamTarget(r, currentChannel)
+		if err != nil {
+			_ = s.releaseQuota(ctx, reservation.ReservationId, "upstream target error")
+			closeOpenAIWSClientConn(wsConn, coderws.StatusInternalError, "failed to build upstream websocket target")
+			return
+		}
+
+		// Acquire a (possibly pooled) upstream connection.
+		pooledConn, err := s.acquireOpenAIWSUpstreamConn(ctx, currentChannel.ID, wsURL, headers)
+		if err != nil {
+			// Dial failed. Try failover if we haven't exhausted switches.
+			if attempt < maxSwitches && s.maybeFailoverChannel(ctx, wsConn, plan, currentChannel, clientModel, &currentChannel) {
+				if applogger.Log != nil {
+					applogger.Log.Info("openai ws failover after dial error",
+						zap.String("request_id", requestID),
+						zap.Int("attempt", attempt+1),
+						zap.Int64("failed_channel", currentChannel.ID),
+						zap.Error(err),
+					)
+				}
+				continue
+			}
+			_ = s.releaseQuota(ctx, reservation.ReservationId, "upstream dial error")
+			closeOpenAIWSClientConn(wsConn, coderws.StatusInternalError, "upstream dial failed")
+			return
+		}
+
+		turnCommits := 0
+		// Per-turn usage logging / quota commit. Closure captures the current
+		// channel so failover switches log against the right channel.
+		onTurnComplete := func(turn openAIWSTurnResult) {
+			usage := turn.usage
+			actualTotal := usage.totalTokens
+			if actualTotal <= 0 {
+				actualTotal = usage.promptTokens + usage.completionTokens
+			}
+			turnID := turn.requestID
+			if turnID == "" {
+				turnID = requestID
+			}
+			logInput := usageLogInput{
+				UserID:           plan.Auth.UserID,
+				TokenID:          plan.Auth.TokenID,
+				TokenName:        plan.Auth.TokenName,
+				RequestID:        turnID,
+				Endpoint:         "/v1/responses",
+				ModelName:        resolvedModel,
+				Quota:            actualTotal,
+				PromptTokens:     usage.promptTokens,
+				CompletionTokens: usage.completionTokens,
+				CacheReadTokens:  usage.cacheReadTokens,
+				ChannelID:        currentChannel.ID,
+				IsStream:         true,
+			}
+			logUpstreamUsage(logInput)
+			if commitErr := s.commitQuotaAfterResponse(reservation.ReservationId, actualTotal, true, logInput); commitErr != nil {
+				if applogger.Log != nil {
+					applogger.Log.Warn("failed to commit openai ws turn quota",
+						zap.String("request_id", turnID),
+						zap.Error(commitErr),
+					)
+				}
+			} else {
+				s.ingestUsageLogAfterResponse(logInput)
+			}
+			// Bind the upstream response id -> channel both locally and in the
+			// cross-process sticky store (Redis) so multi-replica deployments
+			// resume the chain on the same channel.
+			if turn.requestID != "" {
+				s.storeResponseRoute(turn.requestID, responseRoute{
+					Model:         clientModel,
+					ResolvedModel: resolvedModel,
+					Channel:       *currentChannel,
+					UserID:        plan.Auth.UserID,
+				})
+				if s.wsSticky != nil {
+					s.wsSticky.BindResponseChannel(ctx, plan.Auth.Group, turn.requestID, currentChannel.ID, s.openAIWSStickyTTL())
+				}
+			}
+			turnCommits++
+		}
+
+		relayResult, relayExit := relayOpenAIWSFrames(ctx, clientFrameConn, pooledConn.FrameConn(), rewrittenFirstMessage, openAIWSRelayOptions{
+			writeTimeout:   s.openAIWSWriteTimeout(),
+			idleTimeout:    s.openAIWSIdleTimeout(),
+			onTurnComplete: onTurnComplete,
+		})
+
+		// Release the pooled connection. Mark broken if the relay errored so the
+		// pool doesn't hand a dead conn to the next request.
+		broken := relayExit != nil && relayExit.err != nil && !relayExit.graceful
+		s.releaseOpenAIWSUpstreamConn(pooledConn, broken)
+
+		// Failover decision: only retry if nothing was written downstream yet
+		// and we haven't exhausted switches. A relay that wrote bytes must
+		// terminate; retrying would double-send to the client.
+		canFailover := relayExit != nil &&
+			relayExit.err != nil &&
+			!relayExit.wroteDownstream &&
+			turnCommits == 0 &&
+			attempt < maxSwitches
+
+		if canFailover {
+			if applogger.Log != nil {
+				applogger.Log.Info("openai ws failover after relay error",
+					zap.String("request_id", requestID),
+					zap.Int("attempt", attempt+1),
+					zap.String("stage", relayExit.stage),
+					zap.Int64("failed_channel", currentChannel.ID),
+					zap.Error(relayExit.err),
+				)
+			}
+			if s.maybeFailoverChannel(ctx, wsConn, plan, currentChannel, clientModel, &currentChannel) {
+				continue
+			}
+		}
+
+		// Terminal path: either success or unrecoverable failure.
+		if turnCommits == 0 {
+			if releaseErr := s.releaseQuota(ctx, reservation.ReservationId, "no completed ws turn"); releaseErr != nil && applogger.Log != nil {
+				applogger.Log.Warn("failed to release openai ws reservation", zap.String("request_id", requestID), zap.Error(releaseErr))
+			}
+		}
+		if relayExit != nil && relayExit.err != nil && applogger.Log != nil {
+			applogger.Log.Info("openai responses websocket relay ended",
+				zap.String("request_id", requestID),
+				zap.String("stage", relayExit.stage),
+				zap.Bool("graceful", relayExit.graceful),
+				zap.Bool("wrote_downstream", relayExit.wroteDownstream),
+				zap.Int64("c2u_frames", relayResult.clientToUpstream),
+				zap.Int64("u2c_frames", relayResult.upstreamToClient),
+				zap.Error(relayExit.err),
+			)
+		}
+		return
+	}
+}
+
+// acquireOpenAIWSUpstreamConn returns a usable upstream connection. It prefers
+// the connection pool (reusing idle conns for the channel) and falls back to a
+// direct dial when the pool is disabled (e.g. in tests).
+func (s *HTTPServer) acquireOpenAIWSUpstreamConn(ctx context.Context, channelID int64, wsURL string, headers http.Header) (*openAIWSPooledConn, error) {
+	if s.wsPool != nil {
+		return s.wsPool.AcquireOrDial(ctx, channelID, wsURL, headers)
+	}
+	// Pool disabled: dial directly.
+	dialer := newCoderWSUpstreamDialer()
+	dialCtx, cancel := context.WithTimeout(ctx, s.openAIWSDialTimeout())
+	defer cancel()
+	conn, statusCode, _, err := dialer.Dial(dialCtx, wsURL, headers)
+	if err != nil {
+		_ = statusCode
+		return nil, err
+	}
+	pc := &openAIWSPooledConn{conn: conn, channelID: channelID, lastUsedAt: time.Now()}
+	pc.inUse.Store(true)
+	return pc, nil
+}
+
+// releaseOpenAIWSUpstreamConn returns a connection to the pool, or closes it
+// when no pool is configured.
+func (s *HTTPServer) releaseOpenAIWSUpstreamConn(pc *openAIWSPooledConn, broken bool) {
+	if s.wsPool != nil {
+		s.wsPool.Release(pc, broken)
+		return
+	}
+	if pc != nil {
+		_ = pc.conn.Close()
+	}
+}
+
+// maybeFailoverChannel selects an alternative channel for the model/group,
+// excluding the failed channel's priority tier so the selector picks a
+// different upstream. On success it sets *next to the new channel and returns
+// true; on failure (no alternative available) it returns false and the caller
+// must surface the original error to the client.
+func (s *HTTPServer) maybeFailoverChannel(ctx context.Context, wsConn *coderws.Conn, plan *relaybiz.RelayPlan, failed *relaybiz.Channel, clientModel string, next **relaybiz.Channel) bool {
+	retryExecutor := s.relayUsecase.NewRetryExecutor()
+	retryResult := retryExecutor.ExecuteWithInitialChannel(ctx, plan.Auth.Group, plan.ResolvedModel, failed, func(ctx context.Context, ch *relaybiz.Channel) error {
+		// The executor selects a channel for us; we accept it by returning nil.
+		// It excludes the failed channel's priority automatically.
+		*next = ch
+		return nil
+	})
+	if retryResult.Err != nil || *next == nil || (*next).ID == failed.ID {
+		return false
+	}
+	return true
+}
+
+// lookupWSStickyRoute resolves a previous_response_id via the Redis-backed
+// sticky store. On a channel-id hit it fetches the full channel info (via the
+// channel gRPC client) and authenticates the token, then populates *route and
+// returns true. Returns false on any miss/error (caller falls through to
+// normal channel selection).
+func (s *HTTPServer) lookupWSStickyRoute(ctx context.Context, token, responseID string, route *responseRoute) bool {
+	if s == nil || s.wsSticky == nil || route == nil {
+		return false
+	}
+	// Need the auth group to scope the Redis lookup.
+	authSnapshot, err := s.getAuthSnapshot(ctx, token)
+	if err != nil {
+		return false
+	}
+	channelID := s.wsSticky.LookupResponseChannel(ctx, authSnapshot.Group, responseID)
+	if channelID <= 0 {
+		return false
+	}
+	chInfo, err := s.channelClient.GetChannel(ctx, &channelv1.GetChannelRequest{ChannelId: channelID})
+	if err != nil || chInfo == nil || chInfo.Channel == nil {
+		return false
+	}
+	ch := relaybiz.Channel{
+		ID:       chInfo.Channel.Id,
+		Type:     chInfo.Channel.Type,
+		Name:     chInfo.Channel.Name,
+		Status:   chInfo.Channel.Status,
+		BaseURL:  chInfo.Channel.BaseUrl,
+		Group:    chInfo.Channel.Group,
+		Priority: chInfo.Channel.Priority,
+		Key:      chInfo.Channel.Key,
+	}
+	if chInfo.Channel.Config != nil {
+		ch.Config = relaybiz.ChannelConfig{APIVersion: chInfo.Channel.Config.ApiVersion}
+	}
+	*route = responseRoute{
+		Channel: ch,
+		UserID:  authSnapshot.UserId,
+	}
+	return true
 }
