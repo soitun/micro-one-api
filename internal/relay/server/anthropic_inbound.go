@@ -54,11 +54,12 @@ type anthropicMessagesResponse struct {
 }
 
 type anthropicRespContent struct {
-	Type  string `json:"type"`
-	Text  string `json:"text,omitempty"`
-	ID    string `json:"id,omitempty"`
-	Name  string `json:"name,omitempty"`
-	Input any    `json:"input,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Input    any    `json:"input,omitempty"`
 }
 
 type anthropicRespUsage struct {
@@ -314,6 +315,14 @@ func convertChatCompletionsToAnthropic(resp *relayprovider.ChatCompletionsRespon
 
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
+		// Thinking mode (e.g. DeepSeek-R1, GLM-5.x): reasoning_content comes
+		// before the final text answer, mirroring Anthropic's "thinking" block.
+		if reasoning := reasoningContentString(choice.Message.ReasoningContent); reasoning != "" {
+			contents = append(contents, anthropicRespContent{
+				Type:     "thinking",
+				Thinking: reasoning,
+			})
+		}
 		if choice.Message.Content != "" {
 			contents = append(contents, anthropicRespContent{
 				Type: "text",
@@ -569,6 +578,9 @@ func (s *HTTPServer) handleAnthropicStreamingResponse(
 
 	blockOpen := true
 
+	// thinkingIndex tracks whether the thinking content block is currently open.
+	thinkingIndex := -1
+
 	for chunk := range chunkChan {
 		if chunk.Usage.TotalTokens > 0 {
 			totalTokens = int64(chunk.Usage.TotalTokens)
@@ -578,25 +590,91 @@ func (s *HTTPServer) handleAnthropicStreamingResponse(
 		}
 
 		for _, choice := range chunk.Choices {
+			// Reasoning content (thinking mode) — emit as a separate thinking
+			// content block that opens before the text block and closes once
+			// normal text starts arriving.
+			if reasoning := reasoningContentString(choice.Delta.ReasoningContent); reasoning != "" {
+				estimatedTokens += int64(len(reasoning) / 4)
+				if thinkingIndex == -1 {
+					// close the text block placeholder, open a thinking block
+					if blockOpen {
+						writeSSEEvent(w, "content_block_stop", map[string]interface{}{"type": "content_block_stop", "index": 0})
+						flusher.Flush()
+						blockOpen = false
+					}
+					thinkingIndex = 1
+					writeSSEEvent(w, "content_block_start", map[string]interface{}{
+						"type":  "content_block_start",
+						"index": thinkingIndex,
+						"content_block": map[string]interface{}{
+							"type":    "thinking",
+							"thinking": "",
+						},
+					})
+					flusher.Flush()
+				}
+				writeSSEEvent(w, "content_block_delta", map[string]interface{}{
+					"type":  "content_block_delta",
+					"index": thinkingIndex,
+					"delta": map[string]interface{}{
+						"type":     "thinking_delta",
+						"thinking": reasoning,
+					},
+				})
+				flusher.Flush()
+			}
+
 			if choice.Delta.Content != "" {
 				estimatedTokens += int64(len(choice.Delta.Content) / 4)
-				deltaEvent := map[string]interface{}{
+				// If we were emitting thinking, close that block and reopen text.
+				if thinkingIndex != -1 {
+					writeSSEEvent(w, "content_block_stop", map[string]interface{}{"type": "content_block_stop", "index": thinkingIndex})
+					flusher.Flush()
+					thinkingIndex = -1
+					writeSSEEvent(w, "content_block_start", map[string]interface{}{
+						"type":  "content_block_start",
+						"index": 0,
+						"content_block": map[string]interface{}{
+							"type": "text",
+							"text": "",
+						},
+					})
+					flusher.Flush()
+					blockOpen = true
+				}
+				if !blockOpen {
+					writeSSEEvent(w, "content_block_start", map[string]interface{}{
+						"type":  "content_block_start",
+						"index": 0,
+						"content_block": map[string]interface{}{
+							"type": "text",
+							"text": "",
+						},
+					})
+					flusher.Flush()
+					blockOpen = true
+				}
+				writeSSEEvent(w, "content_block_delta", map[string]interface{}{
 					"type":  "content_block_delta",
 					"index": 0,
 					"delta": map[string]interface{}{
 						"type": "text_delta",
 						"text": choice.Delta.Content,
 					},
-				}
-				if e := writeSSEEvent(w, "content_block_delta", deltaEvent); e != nil {
-					return e
-				}
+				})
 				flusher.Flush()
 			}
 			if choice.FinishReason != nil {
 				stopReason = mapFinishReasonStringToAnthropic(*choice.FinishReason)
 			}
 		}
+	}
+
+	// If the stream ended while a thinking block was still open, close it.
+	if thinkingIndex != -1 {
+		writeSSEEvent(w, "content_block_stop", map[string]interface{}{"type": "content_block_stop", "index": thinkingIndex})
+		flusher.Flush()
+		thinkingIndex = -1
 	}
 
 	if stopReason == "" {
@@ -724,6 +802,21 @@ func parseJSONToAny(s string) interface{} {
 		return map[string]interface{}{}
 	}
 	return v
+}
+
+// reasoningContentString extracts a string value from the reasoning_content
+// field. Upstream providers use various formats: a plain string, or a JSON
+// object/array with a "content"/"text" key.
+func reasoningContentString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	default:
+		return marshalJSONString(val)
+	}
 }
 
 // writeSSEEvent writes a single Anthropic SSE event with an optional type.
