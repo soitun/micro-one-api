@@ -27,6 +27,7 @@ import (
 	"micro-one-api/internal/pkg/xconfig"
 	"micro-one-api/internal/pkg/xdb"
 	"micro-one-api/internal/pkg/xhttp"
+	relayadaptor "micro-one-api/internal/relay/adaptor"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaycfg "micro-one-api/internal/relay/config"
 	relaydata "micro-one-api/internal/relay/data"
@@ -201,6 +202,11 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	logClient = logv1.NewLogServiceClient(logConn)
 
 	providerFactory := relayprovider.NewProviderFactory(providerTimeout)
+	// Wire the adaptor registry with the shared provider factory so the
+	// hybrid adaptor layer (relay/adaptor) can dispatch to the same upstream
+	// providers. Existing server code still calls providerFactory directly;
+	// the registry is exercised by the feature-flag-controlled new path.
+	relayadaptor.SetProviderFactory(providerFactory)
 	modelMapper := newModelMapper(cfg)
 	retryPolicy := newRetryPolicy(cfg)
 
