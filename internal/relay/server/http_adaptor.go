@@ -81,8 +81,7 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 	meta := fallbackSubscriptionAccountMetadata(plan, plan.Channel)
 	if plan.Account != nil {
 		meta = subscriptionAccountMetadataFromPlan(plan.Account)
-	}
-	if s.accountResolver != nil {
+	} else if s.accountResolver != nil {
 		if resolved, err := s.accountResolver.Resolve(r.Context(), plan.Channel.ID); err == nil && resolved != nil {
 			meta = resolved
 		}

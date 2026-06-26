@@ -36,12 +36,13 @@ func (testChannelClient) RecordChannelHealth(_ context.Context, _ int64, _ bool,
 }
 
 type recordingChannelClient struct {
-	models             []string
-	failModels         map[string]error
-	channelName        string
-	subscriptionModels []string
-	subscription       *SubscriptionAccount
-	subscriptionErr    error
+	models                []string
+	failModels            map[string]error
+	channelName           string
+	subscriptionModels    []string
+	subscriptionPlatforms []string
+	subscription          *SubscriptionAccount
+	subscriptionErr       error
 }
 
 func (c *recordingChannelClient) SelectChannel(_ context.Context, group, model string, _ bool) (*Channel, error) {
@@ -66,6 +67,7 @@ func (c *recordingChannelClient) RecordChannelHealth(_ context.Context, _ int64,
 
 func (c *recordingChannelClient) SelectSubscriptionAccount(_ context.Context, group, model, platform string, _ bool) (*SubscriptionAccount, error) {
 	c.subscriptionModels = append(c.subscriptionModels, model)
+	c.subscriptionPlatforms = append(c.subscriptionPlatforms, platform)
 	if c.subscriptionErr != nil {
 		return nil, c.subscriptionErr
 	}
@@ -229,6 +231,35 @@ func TestRelayUsecasePlan_SelectsSubscriptionAccountWhenNoAPIKeyChannel(t *testi
 	}
 	if len(channelClient.subscriptionModels) != 1 || channelClient.subscriptionModels[0] != "gpt-5" {
 		t.Fatalf("subscription selected models = %v", channelClient.subscriptionModels)
+	}
+	if len(channelClient.subscriptionPlatforms) != 1 || channelClient.subscriptionPlatforms[0] != "codex" {
+		t.Fatalf("subscription selected platforms = %v", channelClient.subscriptionPlatforms)
+	}
+}
+
+func TestRelayUsecasePlan_SelectsClaudeSubscriptionWithPlatformFilter(t *testing.T) {
+	channelClient := &recordingChannelClient{
+		failModels: map[string]error{"claude-sonnet-4-20250514": errors.New("no channel available")},
+		subscription: &SubscriptionAccount{
+			ID:       9,
+			Name:     "claude-sub",
+			Platform: "claude",
+			Status:   1,
+			Group:    "default",
+			Models:   []string{"claude-sonnet-4-20250514"},
+		},
+	}
+	uc := NewRelayUsecase(&testIdentityClientAllowAll{}, channelClient, nil, nil)
+
+	plan, err := uc.Plan(context.Background(), RelayRequest{Token: "demo-token", Model: "claude-sonnet-4-20250514"})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Channel == nil || plan.Channel.Type != relayprovider.ChannelTypeClaudeOAuth {
+		t.Fatalf("unexpected subscription channel projection: %+v", plan.Channel)
+	}
+	if len(channelClient.subscriptionPlatforms) != 1 || channelClient.subscriptionPlatforms[0] != "claude" {
+		t.Fatalf("subscription selected platforms = %v", channelClient.subscriptionPlatforms)
 	}
 }
 

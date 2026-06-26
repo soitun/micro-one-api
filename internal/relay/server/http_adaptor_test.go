@@ -69,6 +69,60 @@ func TestHandleChatCompletionsViaAdaptor_UsesFallbackMetadata(t *testing.T) {
 	}
 }
 
+func TestHandleChatCompletionsViaAdaptor_PlanAccountWinsOverResolver(t *testing.T) {
+	httpServer := NewHTTPServer(nil, nil, nil, nil, nil)
+	httpServer.SetHybridAdaptorEnabled(true)
+	var seenAuth, seenAccountID string
+	httpServer.SetOAuthHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			seenAuth = req.Header.Get("Authorization")
+			seenAccountID = req.Header.Get("chatgpt-account-id")
+			return newJSONResponse(`{"id":"resp_1","object":"response","model":"gpt-5","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`), nil
+		}),
+	})
+	httpServer.SetSubscriptionAccountResolver(testSubscriptionResolver{meta: &relaycredential.SubscriptionAccountMetadata{
+		ID:          99,
+		Platform:    relaycredential.PlatformCodex,
+		AccountType: "oauth",
+		AccessToken: "resolver-token",
+		AccountID:   "resolver-account",
+	}})
+
+	plan := &relaybiz.RelayPlan{
+		Auth: &relaybiz.AuthSnapshot{UserID: 42, Group: "default"},
+		Channel: &relaybiz.Channel{
+			ID:      12,
+			Type:    relayprovider.ChannelTypeCodexOAuth,
+			BaseURL: "https://example.invalid",
+			Group:   "default",
+		},
+		Account: &relaybiz.SubscriptionAccount{
+			ID:          12,
+			Platform:    "codex",
+			AccountType: "oauth",
+			AccessToken: "plan-token",
+			AccountID:   "plan-account",
+			Group:       "default",
+		},
+		ResolvedModel: "gpt-5",
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+
+	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if seenAuth != "Bearer plan-token" {
+		t.Fatalf("Authorization = %q", seenAuth)
+	}
+	if seenAccountID != "plan-account" {
+		t.Fatalf("chatgpt-account-id = %q", seenAccountID)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }

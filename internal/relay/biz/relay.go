@@ -3,6 +3,7 @@ package biz
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	relayprovider "micro-one-api/internal/relay/provider"
 )
@@ -187,9 +188,9 @@ func (uc *RelayUsecase) selectSubscriptionChannel(ctx context.Context, group, cl
 	if uc.subscription == nil {
 		return nil, nil, fmt.Errorf("subscription account selector is not configured")
 	}
-	account, err := uc.subscription.SelectSubscriptionAccount(ctx, group, clientModel, "", false)
+	account, err := uc.selectSubscriptionAccountForModel(ctx, group, clientModel)
 	if err != nil && resolvedModel != clientModel {
-		account, err = uc.subscription.SelectSubscriptionAccount(ctx, group, resolvedModel, "", false)
+		account, err = uc.selectSubscriptionAccountForModel(ctx, group, resolvedModel)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -199,6 +200,33 @@ func (uc *RelayUsecase) selectSubscriptionChannel(ctx context.Context, group, cl
 		return nil, nil, err
 	}
 	return ch, account, nil
+}
+
+func (uc *RelayUsecase) selectSubscriptionAccountForModel(ctx context.Context, group, model string) (*SubscriptionAccount, error) {
+	var lastErr error
+	for _, platform := range subscriptionPlatformsForModel(model) {
+		account, err := uc.subscription.SelectSubscriptionAccount(ctx, group, model, platform, false)
+		if err == nil {
+			return account, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("subscription account platform cannot be inferred for model %q", model)
+}
+
+func subscriptionPlatformsForModel(model string) []string {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.HasPrefix(lower, "claude-"):
+		return []string{"claude"}
+	case strings.HasPrefix(lower, "gpt-"), strings.HasPrefix(lower, "codex-"), strings.HasPrefix(lower, "o1"), strings.HasPrefix(lower, "o3"), strings.HasPrefix(lower, "o4"):
+		return []string{"codex"}
+	default:
+		return []string{"codex", "claude"}
+	}
 }
 
 func subscriptionAccountToChannel(account *SubscriptionAccount) (*Channel, error) {
