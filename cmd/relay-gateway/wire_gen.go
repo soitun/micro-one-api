@@ -223,12 +223,21 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	// boot without a subscription-account RPC. A full deployment replaces this
 	// with a gRPC-backed lookup against the channel-service.
 	accountLookup := relaycredential.NewNoopAccountLookup()
+
+	// Construct each platform's TokenProvider exactly once so the request-path
+	// factory and the background refresh task share the same instance (and
+	// therefore the same in-process token cache + per-account mutex). Creating
+	// two separate instances per platform would defeat the refresh task's
+	// pre-warming, since the cache is per-instance.
+	claudeTokenProvider := relaycredential.NewClaudeTokenProvider(accountLookup)
+	codexTokenProvider := relaycredential.NewOpenAITokenProvider(accountLookup)
+
 	tokenFactory := func(platform relayidentity.Platform) relaycredential.TokenProvider {
 		switch platform {
 		case relayidentity.PlatformClaude:
-			return relaycredential.NewClaudeTokenProvider(accountLookup)
+			return claudeTokenProvider
 		case relayidentity.PlatformCodex:
-			return relaycredential.NewOpenAITokenProvider(accountLookup)
+			return codexTokenProvider
 		default:
 			return nil
 		}
@@ -240,8 +249,8 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	if cfg.HybridAdaptor.GetHybridAdaptorEnabled() {
 		refreshTask = relaycredential.NewRefreshTask(
 			map[relaycredential.Platform]relaycredential.TokenProvider{
-				relaycredential.PlatformClaude: relaycredential.NewClaudeTokenProvider(accountLookup),
-				relaycredential.PlatformCodex:  relaycredential.NewOpenAITokenProvider(accountLookup),
+				relaycredential.PlatformClaude: claudeTokenProvider,
+				relaycredential.PlatformCodex:  codexTokenProvider,
 			},
 			accountLookup,
 			func(accountID int64) relaycredential.Platform {

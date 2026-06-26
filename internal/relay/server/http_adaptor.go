@@ -1,17 +1,16 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/bytedance/sonic"
-	"go.uber.org/zap"
 
 	relayadaptor "micro-one-api/internal/relay/adaptor"
 	relaybiz "micro-one-api/internal/relay/biz"
+	relayprovider "micro-one-api/internal/relay/provider"
 )
 
 // handleChatCompletionsViaAdaptor is the feature-flag-gated request path for
@@ -83,8 +82,7 @@ func (s *HTTPServer) handleChatCompletionsViaAdaptor(
 		}
 	}
 
-	client := upstreamHTTPClientFor(rc)
-	resp, err := client.Do(upstreamReq)
+	resp, err := http.DefaultClient.Do(upstreamReq)
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("upstream call: %v", err))
 		return
@@ -99,16 +97,12 @@ func (s *HTTPServer) handleChatCompletionsViaAdaptor(
 	}
 
 	if isStream {
-		outFmt, reader, err := ad.ConvertStreamResponse(rc, upstreamFmt, resp)
+		_, reader, err := ad.ConvertStreamResponse(rc, upstreamFmt, resp)
 		if err != nil {
 			s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("adaptor convert stream: %v", err))
 			return
 		}
-		contentType := "text/event-stream"
-		if outFmt == relayadaptor.FormatAnthropicMessages {
-			contentType = "text/event-stream"
-		}
-		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.WriteHeader(http.StatusOK)
@@ -121,43 +115,27 @@ func (s *HTTPServer) handleChatCompletionsViaAdaptor(
 	}
 
 	// Non-streaming: convert and write.
-	outFmt, outBody, err := ad.ConvertResponse(rc, upstreamFmt, resp)
+	_, outBody, err := ad.ConvertResponse(rc, upstreamFmt, resp)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("adaptor convert response: %v", err))
 		return
 	}
-	contentType := "application/json"
-	_ = outFmt
-	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(outBody)
 }
 
 // platformTagFromChannelType maps a subscription channel type to its platform
-// tag. The constants mirror provider.ChannelTypeCodexOAuth (32) and
-// provider.ChannelTypeClaudeOAuth (33); they are duplicated locally to avoid a
-// server -> provider import for just two values.
+// tag. It uses the provider package's channel-type constants directly.
 func platformTagFromChannelType(t int32) string {
 	switch t {
-	case 32: // provider.ChannelTypeCodexOAuth
+	case relayprovider.ChannelTypeCodexOAuth:
 		return "codex"
-	case 33: // provider.ChannelTypeClaudeOAuth
+	case relayprovider.ChannelTypeClaudeOAuth:
 		return "claude"
 	default:
 		return ""
 	}
 }
 
-// upstreamHTTPClientFor returns the HTTP client used for the upstream call.
-// The adaptor path uses the server's provider-timeout-derived client; a nil
-// client falls back to http.DefaultClient.
-func upstreamHTTPClientFor(rc *relayadaptor.RelayContext) *http.Client {
-	if rc != nil && rc.HTTPClient != nil {
-		return rc.HTTPClient
-	}
-	return http.DefaultClient
-}
 
-// Compile-time check that the adaptor path is wired correctly.
-var _ = context.TODO
-var _ = zap.NewNop

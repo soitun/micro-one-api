@@ -170,9 +170,10 @@ func (a *CodexOAuthAdaptor) BuildUpstreamRequest(ctx context.Context, rc *RelayC
 }
 
 // ConvertResponse converts a non-streaming Responses response back to the
-// client's inbound format.
+// client's inbound format. It reads resp.Body but does NOT close it —
+// resp.Body ownership belongs to the caller (the server handler), which closes
+// it once.
 func (a *CodexOAuthAdaptor) ConvertResponse(rc *RelayContext, upstream Format, resp *http.Response) (Format, []byte, error) {
-	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", nil, fmt.Errorf("codex_oauth: read upstream response: %w", err)
@@ -231,9 +232,10 @@ func (a *CodexOAuthAdaptor) ConvertStreamResponse(rc *RelayContext, upstream For
 	}
 }
 
-// applyCodexFingerprintHeaders stamps the codex_cli_rs identity headers.
+// applyCodexFingerprintHeaders stamps the codex_cli_rs identity headers. The
+// version is carried inside fp.UserAgent (codex_cli_rs/{version} ...), so no
+// separate "version" header is set.
 func applyCodexFingerprintHeaders(h http.Header, fp identity.Fingerprint) {
 	h.Set("User-Agent", fp.UserAgent)
-	h.Set("version", "0.39.0")
 	h.Set("originator", "codex_cli_rs")
 }

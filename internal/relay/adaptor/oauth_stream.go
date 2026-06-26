@@ -40,6 +40,12 @@ func pumpAnthropicToResponses(src io.Reader, w *io.PipeWriter) {
 			}
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		// Upstream stream broke mid-way (disconnect / oversized line). The
+		// finalize below will emit synthetic termination events so the client
+		// still receives a well-formed stream end.
+		_ = err
+	}
 	for _, rse := range apicompat.FinalizeAnthropicResponsesStream(state) {
 		sse, err := apicompat.ResponsesEventToSSE(rse)
 		if err != nil {
@@ -81,6 +87,9 @@ func pumpAnthropicToChat(src io.Reader, w *io.PipeWriter, model string) {
 				}
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		_ = err
 	}
 	// Finalize both chains.
 	for _, rse := range apicompat.FinalizeAnthropicResponsesStream(anthState) {
@@ -130,6 +139,9 @@ func pumpResponsesToAnthropic(src io.Reader, w *io.PipeWriter) {
 			}
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		_ = err
+	}
 	for _, ase := range apicompat.FinalizeResponsesAnthropicStream(state) {
 		sse, err := apicompat.ResponsesAnthropicEventToSSE(ase)
 		if err != nil {
@@ -167,6 +179,9 @@ func pumpResponsesToChat(src io.Reader, w *io.PipeWriter, model string) {
 				return
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		_ = err
 	}
 	for _, chunk := range apicompat.FinalizeResponsesChatStream(state) {
 		sse, err := apicompat.ChatChunkToSSE(chunk)

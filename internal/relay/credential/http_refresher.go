@@ -29,9 +29,6 @@ type refresher struct {
 	// clientID is the OAuth client_id. For Claude it is the published Claude
 	// Code client_id; for Codex it is the ChatGPT client_id.
 	clientID string
-	// extraForm are appended to the standard grant_type=refresh_token body
-	// (e.g. Claude's "client_secret" is empty for CC, Codex may add scope).
-	extraForm url.Values
 }
 
 // refresh exchanges the given refresh token for a new access token. It returns
@@ -42,11 +39,6 @@ func (r *refresher) refresh(ctx context.Context, refreshURL, refreshToken string
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
 	form.Set("client_id", r.clientID)
-	for k, vs := range r.extraForm {
-		for _, v := range vs {
-			form.Set(k, v)
-		}
-	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, refreshURL, strings.NewReader(form.Encode()))
 	if err != nil {

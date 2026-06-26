@@ -188,9 +188,10 @@ func (a *ClaudeOAuthAdaptor) BuildUpstreamRequest(ctx context.Context, rc *Relay
 }
 
 // ConvertResponse converts a non-streaming Anthropic Messages response back to
-// the client's inbound format.
+// the client's inbound format. It reads resp.Body but does NOT close it —
+// resp.Body ownership belongs to the caller (the server handler), which closes
+// it once.
 func (a *ClaudeOAuthAdaptor) ConvertResponse(rc *RelayContext, upstream Format, resp *http.Response) (Format, []byte, error) {
-	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", nil, fmt.Errorf("claude_oauth: read upstream response: %w", err)
