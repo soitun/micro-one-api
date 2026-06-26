@@ -31,6 +31,7 @@ import (
 	applogger "micro-one-api/internal/pkg/logger"
 	"micro-one-api/internal/pkg/metrics"
 	relaybiz "micro-one-api/internal/relay/biz"
+	relaycredential "micro-one-api/internal/relay/credential"
 	relayprovider "micro-one-api/internal/relay/provider"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
@@ -57,6 +58,16 @@ type HTTPServer struct {
 	// hybridAdaptorEnabled gates the new adaptor-based request path (plan §十).
 	// When false the gateway uses the legacy provider-factory path unchanged.
 	hybridAdaptorEnabled bool
+
+	// accountResolver resolves subscription-account metadata (real account id,
+	// upstream account id, fingerprint) for subscription-typed channels. nil
+	// when the hybrid path is disabled.
+	accountResolver relaycredential.SubscriptionAccountResolver
+
+	// oauthHTTPClient is the HTTP client used for subscription-account
+	// upstream calls. It mirrors the provider-factory timeout so OAuth calls
+	// don't outlive the configured upstream timeout.
+	oauthHTTPClient *http.Client
 }
 
 // openAIWSTimeouts holds parsed durations for the Responses WebSocket relay.
@@ -116,6 +127,26 @@ func (s *HTTPServer) SetHybridAdaptorEnabled(enabled bool) {
 		return
 	}
 	s.hybridAdaptorEnabled = enabled
+}
+
+// SetSubscriptionAccountResolver wires the resolver that maps a
+// subscription-typed channel to the underlying subscription-account metadata.
+// Required when the hybrid adaptor path is enabled.
+func (s *HTTPServer) SetSubscriptionAccountResolver(r relaycredential.SubscriptionAccountResolver) {
+	if s == nil {
+		return
+	}
+	s.accountResolver = r
+}
+
+// SetOAuthHTTPClient sets the HTTP client used for subscription-account
+// upstream calls. It should carry the gateway's upstream timeout so OAuth
+// calls do not hang indefinitely.
+func (s *HTTPServer) SetOAuthHTTPClient(c *http.Client) {
+	if s == nil {
+		return
+	}
+	s.oauthHTTPClient = c
 }
 
 // isSubscriptionChannel reports whether the channel type is a subscription

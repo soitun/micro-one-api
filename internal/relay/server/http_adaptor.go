@@ -10,14 +10,15 @@ import (
 
 	relayadaptor "micro-one-api/internal/relay/adaptor"
 	relaybiz "micro-one-api/internal/relay/biz"
+	relaycredential "micro-one-api/internal/relay/credential"
 	relayprovider "micro-one-api/internal/relay/provider"
 )
 
 // handleChatCompletionsViaAdaptor is the feature-flag-gated request path for
-// subscription-account channels (Codex / Claude OAuth). It builds a
-// RelayContext, resolves the adaptor for the channel type, and drives the full
-// ConvertRequest → BuildUpstreamRequest → upstream call → ConvertResponse /
-// ConvertStreamResponse pipeline.
+// subscription-account channels (Codex / Claude OAuth). It resolves the real
+// subscription-account metadata from the selected channel, builds a
+// RelayContext, and drives the full ConvertRequest → BuildUpstreamRequest →
+// upstream call → ConvertResponse / ConvertStreamResponse pipeline.
 //
 // It is intentionally a thin, self-contained path: it does not participate in
 // the RetryExecutor (subscription accounts are selected explicitly and retried
@@ -42,20 +43,39 @@ func (s *HTTPServer) handleChatCompletionsViaAdaptor(
 		return
 	}
 
+	meta := fallbackSubscriptionAccountMetadata(plan, plan.Channel)
+	if s.accountResolver != nil {
+		if resolved, err := s.accountResolver.Resolve(r.Context(), plan.Channel.ID); err == nil && resolved != nil {
+			meta = resolved
+		}
+	}
+
+	// Build the relay context with the real account identity. Account.ID keys
+	// the credential/identity caches; AccountID is the upstream account id
+	// (chatgpt-account-id / Claude metadata user_id).
 	rc := &relayadaptor.RelayContext{
 		InboundFormat: relayadaptor.FormatOpenAIChatCompletions,
 		ClientModel:   clientModel,
 		ResolvedModel: plan.ResolvedModel,
 		Channel:       plan.Channel,
 		Account: &relayadaptor.AccountRef{
-			ID:          plan.Channel.ID,
-			Platform:    platformTagFromChannelType(plan.Channel.Type),
+			ID:          meta.ID,
+			Platform:    string(meta.Platform),
 			AccountType: "oauth",
-			GroupID:     plan.Auth.Group,
+			GroupID:     meta.GroupID,
+			AccountID:   meta.AccountID,
+			AccessToken: meta.AccessToken,
+			Fingerprint: meta.Fingerprint,
 		},
 		UserID:        plan.Auth.UserID,
 		InboundHeader: r.Header.Clone(),
 		RawBody:       rawBody,
+	}
+	// Carry the configured upstream HTTP client so the OAuth path respects the
+	// gateway's timeout/proxy/transport settings instead of silently falling
+	// back to http.DefaultClient.
+	if s.oauthHTTPClient != nil {
+		rc.HTTPClient = s.oauthHTTPClient
 	}
 	ad.Init(rc)
 
@@ -82,7 +102,14 @@ func (s *HTTPServer) handleChatCompletionsViaAdaptor(
 		}
 	}
 
-	resp, err := http.DefaultClient.Do(upstreamReq)
+	// Use the relay context's client (configured timeout/transport) rather than
+	// http.DefaultClient so the OAuth path inherits the gateway's upstream
+	// settings. Fall back to DefaultClient only when none is configured.
+	client := rc.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(upstreamReq)
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("upstream call: %v", err))
 		return
@@ -125,6 +152,23 @@ func (s *HTTPServer) handleChatCompletionsViaAdaptor(
 	_, _ = w.Write(outBody)
 }
 
+func fallbackSubscriptionAccountMetadata(plan *relaybiz.RelayPlan, ch *relaybiz.Channel) *relaycredential.SubscriptionAccountMetadata {
+	meta := &relaycredential.SubscriptionAccountMetadata{
+		ID:       ch.ID,
+		GroupID:  ch.Group,
+		Platform: relaycredential.PlatformClaude,
+	}
+	meta.AccountID = fmt.Sprintf("%d", ch.ID)
+	switch ch.Type {
+	case relayprovider.ChannelTypeCodexOAuth:
+		meta.Platform = relaycredential.PlatformCodex
+	case relayprovider.ChannelTypeClaudeOAuth:
+		meta.Platform = relaycredential.PlatformClaude
+	}
+	meta.AccessToken = ch.Key
+	return meta
+}
+
 // platformTagFromChannelType maps a subscription channel type to its platform
 // tag. It uses the provider package's channel-type constants directly.
 func platformTagFromChannelType(t int32) string {
@@ -137,5 +181,3 @@ func platformTagFromChannelType(t int32) string {
 		return ""
 	}
 }
-
-

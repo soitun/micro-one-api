@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -244,6 +245,18 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	}
 	relayadaptor.SetTokenProviderFactory(tokenFactory)
 
+	// Subscription-account resolver: maps a subscription-typed channel id to
+	// the real subscription-account metadata (account id, upstream account id,
+	// fingerprint). The MVP uses the noop resolver (seeded via the admin API
+	// in a full deployment); a gRPC-backed resolver replaces it once the
+	// channel-service SelectSubscriptionAccount RPC is implemented (plan §4.6.3).
+	accountResolver := relaycredential.NewNoopAccountResolver()
+
+	// OAuth upstream HTTP client: shares the gateway's upstream timeout so
+	// subscription-account calls do not outlive the configured provider
+	// timeout. Mirrors the client the provider factory builds internally.
+	oauthHTTPClient := &http.Client{Timeout: providerTimeout}
+
 	// Background token-refresh task. Started only when the feature flag is on.
 	var refreshTask *relaycredential.RefreshTask
 	if cfg.HybridAdaptor.GetHybridAdaptorEnabled() {
@@ -274,6 +287,8 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 
 	httpServer := server.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase, logClient)
 	httpServer.SetHybridAdaptorEnabled(cfg.HybridAdaptor.GetHybridAdaptorEnabled())
+	httpServer.SetSubscriptionAccountResolver(accountResolver)
+	httpServer.SetOAuthHTTPClient(oauthHTTPClient)
 
 	// Configure Responses WebSocket relay timeouts from config (with defaults).
 	{

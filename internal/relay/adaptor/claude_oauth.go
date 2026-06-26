@@ -125,13 +125,16 @@ func (a *ClaudeOAuthAdaptor) BuildUpstreamRequest(ctx context.Context, rc *Relay
 	if rc == nil || rc.Account == nil {
 		return nil, fmt.Errorf("claude_oauth: relay context has no subscription account")
 	}
-	if a.tokens == nil {
-		return nil, fmt.Errorf("claude_oauth: no token provider configured")
-	}
-
-	token, err := a.tokens.GetAccessToken(ctx, rc.Account.ID)
-	if err != nil {
-		return nil, fmt.Errorf("claude_oauth: resolve access token: %w", err)
+	token := rc.Account.AccessToken
+	var err error
+	if token == "" {
+		if a.tokens == nil {
+			return nil, fmt.Errorf("claude_oauth: no token provider configured")
+		}
+		token, err = a.tokens.GetAccessToken(ctx, rc.Account.ID)
+		if err != nil {
+			return nil, fmt.Errorf("claude_oauth: resolve access token: %w", err)
+		}
 	}
 
 	// Resolve fingerprint for the account.

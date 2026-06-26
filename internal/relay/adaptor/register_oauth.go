@@ -79,12 +79,9 @@ func (l *lazyOAuthAdaptor) Init(rc *RelayContext) {
 }
 
 func (l *lazyOAuthAdaptor) build(rc *RelayContext) (Adaptor, error) {
-	if globalTokenProviderFactory == nil {
-		return nil, errNoTokenProviderFactory
-	}
-	tp := globalTokenProviderFactory(l.platform)
-	if tp == nil {
-		return nil, errNoTokenProviderFactory
+	var tp credential.TokenProvider
+	if globalTokenProviderFactory != nil {
+		tp = globalTokenProviderFactory(l.platform)
 	}
 	httpc := globalOAuthHTTPClient
 	models := rc.Channel.Models

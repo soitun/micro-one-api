@@ -57,8 +57,8 @@ func TestRegistry_HasOAuthTypes(t *testing.T) {
 }
 
 func TestOAuthAdaptorFactoryRequiresWiring(t *testing.T) {
-	// With no TokenProviderFactory wired, the lazy adaptor surfaces a clear
-	// error on first use.
+	// With no TokenProviderFactory wired, the lazy adaptor now falls back to
+	// inline account credentials instead of failing at init time.
 	prev := globalTokenProviderFactory
 	globalTokenProviderFactory = nil
 	defer func() { globalTokenProviderFactory = prev }()
@@ -68,9 +68,8 @@ func TestOAuthAdaptorFactoryRequiresWiring(t *testing.T) {
 		t.Fatal("expected registered claude oauth adaptor")
 	}
 	ad.Init(accountCtx(provider.ChannelTypeClaudeOAuth, FormatAnthropicMessages, []byte(`{}`)))
-	_, _, err := ad.ConvertRequest(accountCtx(provider.ChannelTypeClaudeOAuth, FormatAnthropicMessages, []byte(`{}`)), FormatAnthropicMessages, []byte(`{}`))
-	if err == nil {
-		t.Fatal("expected error when token provider factory not wired")
+	if _, _, err := ad.ConvertRequest(accountCtx(provider.ChannelTypeClaudeOAuth, FormatAnthropicMessages, []byte(`{}`)), FormatAnthropicMessages, []byte(`{}`)); err != nil {
+		t.Fatalf("ConvertRequest: %v", err)
 	}
 }
 
@@ -165,6 +164,19 @@ func TestClaudeOAuth_BuildUpstreamRequest_Mimicry(t *testing.T) {
 	}
 }
 
+func TestClaudeOAuth_BuildUpstreamRequest_UsesInlineAccessToken(t *testing.T) {
+	ad := NewClaudeOAuthAdaptor(nil, nil, http.DefaultClient, nil)
+	ctx := accountCtx(provider.ChannelTypeClaudeOAuth, FormatAnthropicMessages, []byte(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
+	ctx.Account.AccessToken = "inline-token"
+	req, err := ad.BuildUpstreamRequest(context.Background(), ctx, FormatAnthropicMessages, []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer inline-token" {
+		t.Fatalf("Authorization = %q, want Bearer inline-token", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Codex OAuth: ConvertRequest bridges all inbound formats to responses
 // ---------------------------------------------------------------------------
@@ -226,6 +238,19 @@ func TestCodexOAuth_BuildUpstreamRequest(t *testing.T) {
 	}
 	if got := req.Header.Get("OpenAI-Beta"); got != "responses=experimental" {
 		t.Fatalf("OpenAI-Beta = %q", got)
+	}
+}
+
+func TestCodexOAuth_BuildUpstreamRequest_UsesInlineAccessToken(t *testing.T) {
+	ad := NewCodexOAuthAdaptor(nil, nil, http.DefaultClient, nil)
+	ctx := accountCtx(provider.ChannelTypeCodexOAuth, FormatOpenAIResponses, nil)
+	ctx.Account.AccessToken = "inline-token"
+	req, err := ad.BuildUpstreamRequest(context.Background(), ctx, FormatOpenAIResponses, []byte(`{"model":"gpt-5","input":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer inline-token" {
+		t.Fatalf("Authorization = %q, want Bearer inline-token", got)
 	}
 }
 
