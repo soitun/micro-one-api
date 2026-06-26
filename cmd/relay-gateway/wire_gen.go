@@ -220,10 +220,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	identityService := relayidentity.NewIdentityService(identityTTL)
 	relayadaptor.SetIdentityService(identityService)
 
-	// AccountLookup: the MVP uses an in-process noop lookup so the gateway can
-	// boot without a subscription-account RPC. A full deployment replaces this
-	// with a gRPC-backed lookup against the channel-service.
-	accountLookup := relaycredential.NewNoopAccountLookup()
+	accountLookup := relaydata.NewChannelSubscriptionAccountStore(channelClient)
 
 	// Construct each platform's TokenProvider exactly once so the request-path
 	// factory and the background refresh task share the same instance (and
@@ -245,12 +242,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	}
 	relayadaptor.SetTokenProviderFactory(tokenFactory)
 
-	// Subscription-account resolver: maps a subscription-typed channel id to
-	// the real subscription-account metadata (account id, upstream account id,
-	// fingerprint). The MVP uses the noop resolver (seeded via the admin API
-	// in a full deployment); a gRPC-backed resolver replaces it once the
-	// channel-service SelectSubscriptionAccount RPC is implemented (plan §4.6.3).
-	accountResolver := relaycredential.NewNoopAccountResolver()
+	accountResolver := accountLookup
 
 	// OAuth upstream HTTP client: shares the gateway's upstream timeout so
 	// subscription-account calls do not outlive the configured provider
@@ -267,7 +259,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 			},
 			accountLookup,
 			func(accountID int64) relaycredential.Platform {
-				return accountLookup.PlatformOf(accountID)
+				return accountLookup.PlatformOf(context.Background(), accountID)
 			},
 			relaycredential.RefreshTaskConfig{
 				Interval:  parseDurationOrDefault(cfg.HybridAdaptor.GetRefreshInterval(), 10*time.Minute),

@@ -32,6 +32,37 @@ func (s *HTTPServer) handleChatCompletionsViaAdaptor(
 	clientModel string,
 	rawBody []byte,
 ) {
+	s.handleSubscriptionAccountViaAdaptor(w, r, plan, clientModel, rawBody, relayadaptor.FormatOpenAIChatCompletions)
+}
+
+func (s *HTTPServer) handleAnthropicMessagesViaAdaptor(
+	w http.ResponseWriter,
+	r *http.Request,
+	plan *relaybiz.RelayPlan,
+	clientModel string,
+	rawBody []byte,
+) {
+	s.handleSubscriptionAccountViaAdaptor(w, r, plan, clientModel, rawBody, relayadaptor.FormatAnthropicMessages)
+}
+
+func (s *HTTPServer) handleResponsesCreateLikeViaAdaptor(
+	w http.ResponseWriter,
+	r *http.Request,
+	plan *relaybiz.RelayPlan,
+	clientModel string,
+	rawBody []byte,
+) {
+	s.handleSubscriptionAccountViaAdaptor(w, r, plan, clientModel, rawBody, relayadaptor.FormatOpenAIResponses)
+}
+
+func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
+	w http.ResponseWriter,
+	r *http.Request,
+	plan *relaybiz.RelayPlan,
+	clientModel string,
+	rawBody []byte,
+	inbound relayadaptor.Format,
+) {
 	if plan == nil || plan.Channel == nil {
 		s.writeError(w, http.StatusInternalServerError, "no channel selected")
 		return
@@ -54,7 +85,7 @@ func (s *HTTPServer) handleChatCompletionsViaAdaptor(
 	// the credential/identity caches; AccountID is the upstream account id
 	// (chatgpt-account-id / Claude metadata user_id).
 	rc := &relayadaptor.RelayContext{
-		InboundFormat: relayadaptor.FormatOpenAIChatCompletions,
+		InboundFormat: inbound,
 		ClientModel:   clientModel,
 		ResolvedModel: plan.ResolvedModel,
 		Channel:       plan.Channel,
@@ -79,8 +110,8 @@ func (s *HTTPServer) handleChatCompletionsViaAdaptor(
 	}
 	ad.Init(rc)
 
-	// Convert the inbound ChatCompletions body to the upstream format.
-	upstreamFmt, upstreamBody, err := ad.ConvertRequest(rc, relayadaptor.FormatOpenAIChatCompletions, rawBody)
+	// Convert the inbound request body to the upstream format.
+	upstreamFmt, upstreamBody, err := ad.ConvertRequest(rc, inbound, rawBody)
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("adaptor convert request: %v", err))
 		return

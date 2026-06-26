@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	billingv1 "micro-one-api/api/billing/v1"
-	relaybiz "micro-one-api/internal/relay/biz"
 	"micro-one-api/internal/pkg/errors"
+	relaybiz "micro-one-api/internal/relay/biz"
 	relayprovider "micro-one-api/internal/relay/provider"
 )
 
@@ -431,6 +431,12 @@ func (s *HTTPServer) handleAnthropicMessages(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if s.hybridAdaptorEnabled && plan.Channel != nil && isSubscriptionChannel(plan.Channel.Type) {
+		rawBody, _ := sonic.Marshal(anthropicReq)
+		s.handleAnthropicMessagesViaAdaptor(w, r, plan, anthropicReq.Model, rawBody)
+		return
+	}
+
 	clientModel := anthropicReq.Model
 	ccReq.Model = plan.ResolvedModel
 
@@ -614,7 +620,7 @@ func (s *HTTPServer) handleAnthropicStreamingResponse(
 						"type":  "content_block_start",
 						"index": thinkingIndex,
 						"content_block": map[string]interface{}{
-							"type":    "thinking",
+							"type":     "thinking",
 							"thinking": "",
 						},
 					})

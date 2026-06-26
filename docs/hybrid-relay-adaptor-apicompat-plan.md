@@ -2,7 +2,7 @@
 
 > 分支：`feature/hybrid-relay-adaptor-apicompat`（基于 `develop`）
 > 创建日期：2026-06-26
-> 状态：已评审
+> 状态：进行中
 
 ## 一、背景与目标
 
@@ -483,12 +483,12 @@ service ChannelService {
 
 **目标**：引入 Adaptor 接口，将现有 Provider 实现包装为 Adaptor，存量行为不变。
 
-- [ ] 新建 `internal/relay/adaptor/` 包，定义接口 + 注册表
-- [ ] 实现 `OpenAICompatibleAdaptor`（包装现有 `OpenAIProvider`）
-- [ ] 实现 `AnthropicAdaptor`（包装现有 `AnthropicProvider`）
-- [ ] 实现 `GeminiAdaptor`、`AzureAdaptor`
-- [ ] server 层改为 `GetAdaptor(ch.Type)` 调用，删除 `providerFactory.CreateProvider` 直接调用
-- [ ] 全量回归测试，确保存量 API Key 渠道行为不变
+- [x] 新建 `internal/relay/adaptor/` 包，定义接口 + 注册表
+- [x] 实现 `OpenAICompatibleAdaptor`（包装现有 `OpenAIProvider`）
+- [x] 实现 `AnthropicAdaptor`（包装现有 `AnthropicProvider`）
+- [x] 实现 `GeminiAdaptor`、`AzureAdaptor`
+- [x] server 层改为 `GetAdaptor(ch.Type)` 调用，删除 `providerFactory.CreateProvider` 直接调用
+- [x] 全量回归测试，确保存量 API Key 渠道行为不变
 
 **交付物**：Adaptor 层 + 存量功能回归通过
 
@@ -496,11 +496,11 @@ service ChannelService {
 
 **目标**：引入四格式转换矩阵，替换现有简陋的 anthropic_inbound 转换。
 
-- [ ] 移植 sub2api `pkg/apicompat/` → `internal/relay/apicompat/`（gjson→sonic）
-- [ ] 流式 SSE 状态机适配 micro-one-api 的 stream writer
-- [ ] 改造 `anthropic_inbound.go` 使用 apicompat 替代手写转换
-- [ ] 新增 `/v1/messages` → Codex/OpenAI 上游的转换路径
-- [ ] 单元测试：四种格式两两转换 + 流式事件序列
+- [x] 移植 sub2api `pkg/apicompat/` → `internal/relay/apicompat/`（gjson→sonic）
+- [x] 流式 SSE 状态机适配 micro-one-api 的 stream writer
+- [x] 改造 `anthropic_inbound.go` 使用 apicompat 替代手写转换
+- [x] 新增 `/v1/messages` → Codex/OpenAI 上游的转换路径
+- [x] 单元测试：四种格式两两转换 + 流式事件序列
 
 **交付物**：apicompat 包 + 转换测试通过
 
@@ -508,11 +508,11 @@ service ChannelService {
 
 **目标**：支持存储和管理 OAuth 订阅账号。
 
-- [ ] migration 创建 `subscription_accounts` 表
-- [ ] channel-service 新增 SubscriptionAccount CRUD RPC
-- [ ] admin-service 新增订阅账号管理 API
-- [ ] relay/biz 新增 `SelectSubscriptionAccount`
-- [ ] relay/biz 将订阅账号选择与 API Key 渠道选择分离
+- [x] migration 创建 `subscription_accounts` 表
+- [x] channel-service 新增 SubscriptionAccount CRUD RPC
+- [x] admin-service 新增订阅账号管理 API
+- [x] relay/biz 新增 `SelectSubscriptionAccount`
+- [x] relay/biz 将订阅账号选择与 API Key 渠道选择分离
 
 **交付物**：订阅账号可创建、存储、选择
 
@@ -520,10 +520,10 @@ service ChannelService {
 
 **目标**：Claude Code / Codex 订阅账号可正常调用，含伪装和刷新。
 
-- [ ] 移植 `identity/`（Fingerprint + Mimicry + Metadata 重写）
-- [ ] 移植 `credential/`（TokenProvider + 后台刷新任务）
-- [ ] 实现 `ClaudeOAuthAdaptor`（集成 apicompat + identity + credential）
-- [ ] 实现 `CodexOAuthAdaptor`（集成 apicompat + credential）
+- [x] 移植 `identity/`（Fingerprint + Mimicry + Metadata 重写）
+- [x] 移植 `credential/`（TokenProvider + 后台刷新任务）
+- [x] 实现 `ClaudeOAuthAdaptor`（集成 apicompat + identity + credential）
+- [x] 实现 `CodexOAuthAdaptor`（集成 apicompat + credential）
 - [ ] 端到端测试：真实订阅账号调用
 
 **交付物**：首批两类订阅账号可深度利用

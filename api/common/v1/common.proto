@@ -91,6 +91,42 @@ message ChannelInfo {
   int64 circuit_opened_until = 27;
 }
 
+// ========== 订阅账号 ==========
+
+message SubscriptionAccountInfo {
+  int64 id = 1;
+  string name = 2;
+  string platform = 3;
+  string account_type = 4;
+  int32 status = 5;
+  string group = 6;
+  string models = 7;
+  int64 priority = 8;
+  string base_url = 9;
+  string access_token = 10;
+  string refresh_token = 11;
+  int64 expires_at = 12;
+  string account_id = 13;
+  string fingerprint = 14;
+  string metadata = 15;
+  int64 created_at = 16;
+  int64 updated_at = 17;
+}
+
+message SubscriptionAccountSummary {
+  int64 id = 1;
+  string name = 2;
+  string platform = 3;
+  string account_type = 4;
+  int32 status = 5;
+  string group = 6;
+  string models = 7;
+  int64 priority = 8;
+  string account_id = 9;
+  int64 expires_at = 10;
+  int64 updated_at = 11;
+}
+
 // ========== 账户快照 ==========
 
 message AccountSnapshot {

@@ -31,6 +31,14 @@ func (s *ChannelService) ListAvailableModelsModel(ctx context.Context, group str
 	return s.uc.ListAvailableModels(ctx, group)
 }
 
+func (s *ChannelService) SelectSubscriptionAccountModel(ctx context.Context, group, model, platform string, excludeFirstPriority bool) (*biz.SubscriptionAccount, error) {
+	return s.uc.SelectSubscriptionAccount(ctx, group, model, platform, excludeFirstPriority)
+}
+
+func (s *ChannelService) GetSubscriptionAccountModel(ctx context.Context, accountID int64) (*biz.SubscriptionAccount, error) {
+	return s.uc.GetSubscriptionAccount(ctx, accountID)
+}
+
 func (s *ChannelService) SelectChannel(ctx context.Context, req *channelv1.SelectChannelRequest) (*channelv1.SelectChannelReply, error) {
 	channel, err := s.uc.SelectChannel(ctx, req.Group, req.Model, req.ExcludeFirstPriority)
 	if err != nil {
@@ -62,6 +70,50 @@ func (s *ChannelService) ListAvailableModels(ctx context.Context, req *channelv1
 	return &channelv1.ListAvailableModelsReply{
 		Models: models,
 	}, nil
+}
+
+func toSubscriptionAccountInfo(account *biz.SubscriptionAccount) *commonv1.SubscriptionAccountInfo {
+	if account == nil {
+		return nil
+	}
+	return &commonv1.SubscriptionAccountInfo{
+		Id:           account.ID,
+		Name:         account.Name,
+		Platform:     account.Platform,
+		AccountType:  account.AccountType,
+		Status:       account.Status,
+		Group:        account.Group,
+		Models:       account.ModelsCSV(),
+		Priority:     account.Priority,
+		BaseUrl:      account.BaseURL,
+		AccessToken:  account.AccessToken,
+		RefreshToken: account.RefreshToken,
+		ExpiresAt:    account.ExpiresAt,
+		AccountId:    account.AccountID,
+		Fingerprint:  account.Fingerprint,
+		Metadata:     account.Metadata,
+		CreatedAt:    account.CreatedAt,
+		UpdatedAt:    account.UpdatedAt,
+	}
+}
+
+func toSubscriptionAccountSummary(account *biz.SubscriptionAccount) *commonv1.SubscriptionAccountSummary {
+	if account == nil {
+		return nil
+	}
+	return &commonv1.SubscriptionAccountSummary{
+		Id:          account.ID,
+		Name:        account.Name,
+		Platform:    account.Platform,
+		AccountType: account.AccountType,
+		Status:      account.Status,
+		Group:       account.Group,
+		Models:      account.ModelsCSV(),
+		Priority:    account.Priority,
+		AccountId:   account.AccountID,
+		ExpiresAt:   account.ExpiresAt,
+		UpdatedAt:   account.UpdatedAt,
+	}
 }
 
 func toChannelInfo(channel *biz.Channel) *commonv1.ChannelInfo {
@@ -141,6 +193,156 @@ func (s *ChannelService) ListChannels(ctx context.Context, req *channelv1.ListCh
 	return &channelv1.ListChannelsResponse{
 		Channels: result,
 		Total:    total,
+	}, nil
+}
+
+func (s *ChannelService) SelectSubscriptionAccount(ctx context.Context, req *channelv1.SelectSubscriptionAccountRequest) (*channelv1.SelectSubscriptionAccountReply, error) {
+	account, err := s.uc.SelectSubscriptionAccount(ctx, req.Group, req.Model, req.Platform, req.ExcludeFirstPriority)
+	if err != nil {
+		mappedErr := errors.MapChannelError(err)
+		return nil, mappedErr
+	}
+	return &channelv1.SelectSubscriptionAccountReply{
+		Account: toSubscriptionAccountInfo(account),
+	}, nil
+}
+
+func (s *ChannelService) GetSubscriptionAccount(ctx context.Context, req *channelv1.GetSubscriptionAccountRequest) (*channelv1.GetSubscriptionAccountReply, error) {
+	account, err := s.uc.GetSubscriptionAccount(ctx, req.AccountId)
+	if err != nil {
+		mappedErr := errors.MapChannelError(err)
+		return nil, mappedErr
+	}
+	return &channelv1.GetSubscriptionAccountReply{
+		Account: toSubscriptionAccountInfo(account),
+	}, nil
+}
+
+func (s *ChannelService) ListSubscriptionAccounts(ctx context.Context, req *channelv1.ListSubscriptionAccountsRequest) (*channelv1.ListSubscriptionAccountsResponse, error) {
+	accounts, total, err := s.uc.ListSubscriptionAccounts(ctx, req.Page, req.PageSize, req.Keyword, req.Group, req.Status, req.Platform)
+	if err != nil {
+		mappedErr := errors.MapChannelError(err)
+		return nil, mappedErr
+	}
+	result := make([]*commonv1.SubscriptionAccountSummary, len(accounts))
+	for i, account := range accounts {
+		result[i] = toSubscriptionAccountSummary(account)
+	}
+	return &channelv1.ListSubscriptionAccountsResponse{
+		Accounts: result,
+		Total:    total,
+	}, nil
+}
+
+func (s *ChannelService) CreateSubscriptionAccount(ctx context.Context, req *channelv1.CreateSubscriptionAccountRequest) (*channelv1.CreateSubscriptionAccountResponse, error) {
+	account := &biz.SubscriptionAccount{
+		Name:         req.Name,
+		Platform:     req.Platform,
+		AccountType:  req.AccountType,
+		Group:        req.Group,
+		Models:       biz.SplitCSV(req.Models),
+		Priority:     req.Priority,
+		BaseURL:      req.BaseUrl,
+		AccessToken:  req.AccessToken,
+		RefreshToken: req.RefreshToken,
+		ExpiresAt:    req.ExpiresAt,
+		AccountID:    req.AccountId,
+		Fingerprint:  req.Fingerprint,
+		Metadata:     req.Metadata,
+		Status:       biz.ChannelStatusEnabled,
+	}
+	if err := s.uc.CreateSubscriptionAccount(ctx, account); err != nil {
+		return &channelv1.CreateSubscriptionAccountResponse{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
+	return &channelv1.CreateSubscriptionAccountResponse{
+		Success:   true,
+		Message:   "ok",
+		AccountId: account.ID,
+	}, nil
+}
+
+func (s *ChannelService) UpdateSubscriptionAccount(ctx context.Context, req *channelv1.UpdateSubscriptionAccountRequest) (*channelv1.UpdateSubscriptionAccountResponse, error) {
+	account, err := s.uc.GetSubscriptionAccount(ctx, req.Id)
+	if err != nil {
+		return &channelv1.UpdateSubscriptionAccountResponse{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
+	if req.Name != "" {
+		account.Name = req.Name
+	}
+	if req.AccountType != "" {
+		account.AccountType = req.AccountType
+	}
+	if req.Group != "" {
+		account.Group = req.Group
+	}
+	if req.Models != "" {
+		account.Models = biz.SplitCSV(req.Models)
+	}
+	if req.Priority != 0 {
+		account.Priority = req.Priority
+	}
+	if req.BaseUrl != "" {
+		account.BaseURL = req.BaseUrl
+	}
+	if req.AccessToken != "" {
+		account.AccessToken = req.AccessToken
+	}
+	if req.RefreshToken != "" {
+		account.RefreshToken = req.RefreshToken
+	}
+	if req.ExpiresAt != 0 {
+		account.ExpiresAt = req.ExpiresAt
+	}
+	if req.AccountId != "" {
+		account.AccountID = req.AccountId
+	}
+	if req.Fingerprint != "" {
+		account.Fingerprint = req.Fingerprint
+	}
+	if req.Metadata != "" {
+		account.Metadata = req.Metadata
+	}
+	if err := s.uc.UpdateSubscriptionAccount(ctx, account); err != nil {
+		return &channelv1.UpdateSubscriptionAccountResponse{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
+	return &channelv1.UpdateSubscriptionAccountResponse{
+		Success: true,
+		Message: "ok",
+	}, nil
+}
+
+func (s *ChannelService) DeleteSubscriptionAccount(ctx context.Context, req *channelv1.DeleteSubscriptionAccountRequest) (*channelv1.DeleteSubscriptionAccountResponse, error) {
+	if err := s.uc.DeleteSubscriptionAccount(ctx, req.AccountId); err != nil {
+		return &channelv1.DeleteSubscriptionAccountResponse{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
+	return &channelv1.DeleteSubscriptionAccountResponse{
+		Success: true,
+		Message: "ok",
+	}, nil
+}
+
+func (s *ChannelService) ChangeSubscriptionAccountStatus(ctx context.Context, req *channelv1.ChangeSubscriptionAccountStatusRequest) (*channelv1.ChangeSubscriptionAccountStatusResponse, error) {
+	if err := s.uc.ChangeSubscriptionAccountStatus(ctx, req.AccountId, req.Status); err != nil {
+		return &channelv1.ChangeSubscriptionAccountStatusResponse{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
+	return &channelv1.ChangeSubscriptionAccountStatusResponse{
+		Success: true,
+		Message: "ok",
 	}, nil
 }
 

@@ -457,6 +457,10 @@ func (s *HTTPServer) handleResponsesCreateLike(w http.ResponseWriter, r *http.Re
 		s.handleRelayPlanError(w, err)
 		return
 	}
+	if s.hybridAdaptorEnabled && plan.Channel != nil && isSubscriptionChannel(plan.Channel.Type) {
+		s.handleResponsesCreateLikeViaAdaptor(w, r, plan, clientModel, body)
+		return
+	}
 	upstreamBody := rewriteRawModel(body, plan.ResolvedModel)
 
 	var upstreamResp *relayprovider.RawResponse
@@ -2374,4 +2378,3 @@ func generateRequestID() string {
 	}
 	return fmt.Sprintf("req_%x", b)
 }
-

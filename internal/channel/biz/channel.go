@@ -31,6 +31,7 @@ const (
 )
 
 var ErrChannelNotFound = errors.New("channel not found")
+var ErrSubscriptionAccountNotFound = errors.New("subscription account not found")
 
 type ChannelConfig struct {
 	APIVersion        string
@@ -72,10 +73,42 @@ type Channel struct {
 	Config                            ChannelConfig
 }
 
+// SubscriptionAccount describes an OAuth-backed upstream subscription account.
+// It is selected separately from API-key channels but uses the same group,
+// model and priority semantics for routing.
+type SubscriptionAccount struct {
+	ID           int64
+	Name         string
+	Platform     string
+	AccountType  string
+	Status       int32
+	Group        string
+	Models       []string
+	Priority     int64
+	BaseURL      string
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    int64
+	AccountID    string
+	Fingerprint  string
+	Metadata     string
+	CreatedAt    int64
+	UpdatedAt    int64
+}
+
 type Ability struct {
 	Group     string
 	Model     string
 	ChannelID int64
+	Enabled   bool
+	Priority  int64
+}
+
+type SubscriptionAccountAbility struct {
+	Group     string
+	Model     string
+	Platform  string
+	AccountID int64
 	Enabled   bool
 	Priority  int64
 }
@@ -101,6 +134,13 @@ type HealthAlertConfig struct {
 type ChannelRepo interface {
 	FindByID(ctx context.Context, channelID int64) (*Channel, error)
 	ListAbilitiesByGroupAndModel(ctx context.Context, group, model string) ([]Ability, error)
+	FindSubscriptionAccountByID(ctx context.Context, accountID int64) (*SubscriptionAccount, error)
+	ListSubscriptionAccountAbilities(ctx context.Context, group, model, platform string) ([]SubscriptionAccountAbility, error)
+	ListSubscriptionAccounts(ctx context.Context, page, pageSize int32, keyword, group string, status int32, platform string) ([]*SubscriptionAccount, int64, error)
+	CreateSubscriptionAccount(ctx context.Context, account *SubscriptionAccount) error
+	UpdateSubscriptionAccount(ctx context.Context, account *SubscriptionAccount) error
+	DeleteSubscriptionAccount(ctx context.Context, accountID int64) error
+	ChangeSubscriptionAccountStatus(ctx context.Context, accountID int64, status int32) error
 	ListAvailableModels(ctx context.Context, group string) ([]string, error)
 	ListChannels(ctx context.Context, page, pageSize int32, keyword, group string, status, chType int32) ([]*Channel, int64, error)
 	CreateChannel(ctx context.Context, channel *Channel) error
@@ -193,6 +233,92 @@ func (uc *ChannelUsecase) SelectChannel(ctx context.Context, group, model string
 
 func (uc *ChannelUsecase) GetChannel(ctx context.Context, channelID int64) (*Channel, error) {
 	return uc.repo.FindByID(ctx, channelID)
+}
+
+func (uc *ChannelUsecase) SelectSubscriptionAccount(ctx context.Context, group, model, platform string, excludeFirstPriority bool) (*SubscriptionAccount, error) {
+	abilities, err := uc.repo.ListSubscriptionAccountAbilities(ctx, group, model, platform)
+	if err != nil {
+		return nil, err
+	}
+	if len(abilities) == 0 {
+		return nil, ErrSubscriptionAccountNotFound
+	}
+	sort.Slice(abilities, func(i, j int) bool {
+		return abilities[i].Priority > abilities[j].Priority
+	})
+
+	skipPriority := int64(0)
+	if excludeFirstPriority {
+		skipPriority = abilities[0].Priority
+	}
+	for i := 0; i < len(abilities); {
+		priority := abilities[i].Priority
+		tier := make([]*SubscriptionAccount, 0)
+		for i < len(abilities) && abilities[i].Priority == priority {
+			ability := abilities[i]
+			i++
+			if excludeFirstPriority && priority == skipPriority {
+				continue
+			}
+			account, err := uc.repo.FindSubscriptionAccountByID(ctx, ability.AccountID)
+			if err != nil {
+				continue
+			}
+			if account.Status == ChannelStatusEnabled {
+				tier = append(tier, account)
+			}
+		}
+		if len(tier) == 0 {
+			continue
+		}
+		nBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(tier))))
+		if err != nil {
+			return nil, err
+		}
+		return tier[nBig.Int64()], nil
+	}
+
+	return nil, ErrSubscriptionAccountNotFound
+}
+
+func (uc *ChannelUsecase) GetSubscriptionAccount(ctx context.Context, accountID int64) (*SubscriptionAccount, error) {
+	return uc.repo.FindSubscriptionAccountByID(ctx, accountID)
+}
+
+func (uc *ChannelUsecase) ListSubscriptionAccounts(ctx context.Context, page, pageSize int32, keyword, group string, status int32, platform string) ([]*SubscriptionAccount, int64, error) {
+	return uc.repo.ListSubscriptionAccounts(ctx, page, pageSize, keyword, group, status, platform)
+}
+
+func (uc *ChannelUsecase) CreateSubscriptionAccount(ctx context.Context, account *SubscriptionAccount) error {
+	if err := uc.repo.CreateSubscriptionAccount(ctx, account); err != nil {
+		return err
+	}
+	_ = uc.eventBus.Publish(ctx, events.TopicChannelChanged, account)
+	return nil
+}
+
+func (uc *ChannelUsecase) UpdateSubscriptionAccount(ctx context.Context, account *SubscriptionAccount) error {
+	if err := uc.repo.UpdateSubscriptionAccount(ctx, account); err != nil {
+		return err
+	}
+	_ = uc.eventBus.Publish(ctx, events.TopicChannelChanged, account)
+	return nil
+}
+
+func (uc *ChannelUsecase) DeleteSubscriptionAccount(ctx context.Context, accountID int64) error {
+	if err := uc.repo.DeleteSubscriptionAccount(ctx, accountID); err != nil {
+		return err
+	}
+	_ = uc.eventBus.Publish(ctx, events.TopicChannelChanged, &SubscriptionAccount{ID: accountID})
+	return nil
+}
+
+func (uc *ChannelUsecase) ChangeSubscriptionAccountStatus(ctx context.Context, accountID int64, status int32) error {
+	if err := uc.repo.ChangeSubscriptionAccountStatus(ctx, accountID, status); err != nil {
+		return err
+	}
+	_ = uc.eventBus.Publish(ctx, events.TopicChannelChanged, &SubscriptionAccount{ID: accountID, Status: status})
+	return nil
 }
 
 func (uc *ChannelUsecase) ListAvailableModels(ctx context.Context, group string) ([]string, error) {
@@ -291,6 +417,10 @@ func DecodeChannelConfig(input string) ChannelConfig {
 
 func (c *Channel) ModelsCSV() string {
 	return strings.Join(c.Models, ",")
+}
+
+func (a *SubscriptionAccount) ModelsCSV() string {
+	return strings.Join(a.Models, ",")
 }
 
 func (c *Channel) EffectiveHealthStatus() string {

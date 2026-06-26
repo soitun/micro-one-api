@@ -3,6 +3,8 @@ package biz
 import (
 	"context"
 	"fmt"
+
+	relayprovider "micro-one-api/internal/relay/provider"
 )
 
 type IdentityClient interface {
@@ -12,6 +14,10 @@ type IdentityClient interface {
 type ChannelClient interface {
 	SelectChannel(ctx context.Context, group, model string, excludeFirstPriority bool) (*Channel, error)
 	RecordChannelHealth(ctx context.Context, channelID int64, success bool, err string, responseTime int64) error
+}
+
+type SubscriptionAccountClient interface {
+	SelectSubscriptionAccount(ctx context.Context, group, model, platform string, excludeFirstPriority bool) (*SubscriptionAccount, error)
 }
 
 type RelayRequest struct {
@@ -46,6 +52,21 @@ type ChannelConfig struct {
 	APIVersion string
 }
 
+type SubscriptionAccount struct {
+	ID          int64
+	Name        string
+	Platform    string
+	AccountType string
+	Status      int32
+	BaseURL     string
+	Group       string
+	Models      []string
+	Priority    int64
+	AccessToken string
+	AccountID   string
+	Fingerprint string
+}
+
 // RelayPlan is the result of relay planning, containing all resolved
 // information needed to execute an upstream provider call.
 type RelayPlan struct {
@@ -57,10 +78,11 @@ type RelayPlan struct {
 // RelayUsecase orchestrates the relay planning flow:
 // model mapping → auth → model validation → channel selection.
 type RelayUsecase struct {
-	identity    IdentityClient
-	channel     ChannelClient
-	modelMapper *ModelMapper
-	retryPolicy *RetryPolicy
+	identity     IdentityClient
+	channel      ChannelClient
+	subscription SubscriptionAccountClient
+	modelMapper  *ModelMapper
+	retryPolicy  *RetryPolicy
 }
 
 // NewRelayUsecase creates a RelayUsecase with the given dependencies.
@@ -69,11 +91,16 @@ func NewRelayUsecase(identity IdentityClient, channel ChannelClient, modelMapper
 	if retryPolicy == nil {
 		retryPolicy = DefaultRetryPolicy()
 	}
+	var subscription SubscriptionAccountClient
+	if selector, ok := channel.(SubscriptionAccountClient); ok {
+		subscription = selector
+	}
 	return &RelayUsecase{
-		identity:    identity,
-		channel:     channel,
-		modelMapper: modelMapper,
-		retryPolicy: retryPolicy,
+		identity:     identity,
+		channel:      channel,
+		subscription: subscription,
+		modelMapper:  modelMapper,
+		retryPolicy:  retryPolicy,
 	}
 }
 
@@ -112,11 +139,23 @@ func (uc *RelayUsecase) Plan(ctx context.Context, req RelayRequest) (*RelayPlan,
 	// model so deployments can expose aliases without duplicating abilities.
 	channel, err := uc.channel.SelectChannel(ctx, authSnapshot.Group, req.Model, false)
 	if err != nil {
-		if resolvedModel == req.Model {
-			return nil, err
+		channelErr := err
+		if resolvedModel != req.Model {
+			channel, err = uc.channel.SelectChannel(ctx, authSnapshot.Group, resolvedModel, false)
+			if err == nil {
+				return &RelayPlan{
+					Auth:          authSnapshot,
+					Channel:       channel,
+					ResolvedModel: resolvedModel,
+				}, nil
+			}
+			channelErr = err
 		}
-		channel, err = uc.channel.SelectChannel(ctx, authSnapshot.Group, resolvedModel, false)
+		channel, err = uc.selectSubscriptionChannel(ctx, authSnapshot.Group, req.Model, resolvedModel)
 		if err != nil {
+			if uc.subscription == nil {
+				return nil, channelErr
+			}
 			return nil, err
 		}
 	}
@@ -126,6 +165,52 @@ func (uc *RelayUsecase) Plan(ctx context.Context, req RelayRequest) (*RelayPlan,
 		Channel:       channel,
 		ResolvedModel: resolvedModel,
 	}, nil
+}
+
+func (uc *RelayUsecase) selectSubscriptionChannel(ctx context.Context, group, clientModel, resolvedModel string) (*Channel, error) {
+	if uc.subscription == nil {
+		return nil, fmt.Errorf("subscription account selector is not configured")
+	}
+	account, err := uc.subscription.SelectSubscriptionAccount(ctx, group, clientModel, "", false)
+	if err != nil && resolvedModel != clientModel {
+		account, err = uc.subscription.SelectSubscriptionAccount(ctx, group, resolvedModel, "", false)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return subscriptionAccountToChannel(account)
+}
+
+func subscriptionAccountToChannel(account *SubscriptionAccount) (*Channel, error) {
+	if account == nil {
+		return nil, fmt.Errorf("subscription account is nil")
+	}
+	channelType := subscriptionPlatformChannelType(account.Platform)
+	if channelType == 0 {
+		return nil, fmt.Errorf("unsupported subscription platform %q", account.Platform)
+	}
+	return &Channel{
+		ID:       account.ID,
+		Type:     channelType,
+		Name:     account.Name,
+		Status:   account.Status,
+		BaseURL:  account.BaseURL,
+		Group:    account.Group,
+		Models:   append([]string(nil), account.Models...),
+		Priority: account.Priority,
+		Key:      account.AccessToken,
+	}, nil
+}
+
+func subscriptionPlatformChannelType(platform string) int32 {
+	switch platform {
+	case "codex":
+		return relayprovider.ChannelTypeCodexOAuth
+	case "claude":
+		return relayprovider.ChannelTypeClaudeOAuth
+	default:
+		return 0
+	}
 }
 
 // NewRetryExecutor creates a RetryExecutor using this use case's retry policy

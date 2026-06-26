@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	relayprovider "micro-one-api/internal/relay/provider"
 )
 
 type testIdentityClient struct{}
@@ -34,9 +36,12 @@ func (testChannelClient) RecordChannelHealth(_ context.Context, _ int64, _ bool,
 }
 
 type recordingChannelClient struct {
-	models      []string
-	failModels  map[string]error
-	channelName string
+	models             []string
+	failModels         map[string]error
+	channelName        string
+	subscriptionModels []string
+	subscription       *SubscriptionAccount
+	subscriptionErr    error
 }
 
 func (c *recordingChannelClient) SelectChannel(_ context.Context, group, model string, _ bool) (*Channel, error) {
@@ -57,6 +62,14 @@ func (c *recordingChannelClient) SelectChannel(_ context.Context, group, model s
 
 func (c *recordingChannelClient) RecordChannelHealth(_ context.Context, _ int64, _ bool, _ string, _ int64) error {
 	return nil
+}
+
+func (c *recordingChannelClient) SelectSubscriptionAccount(_ context.Context, group, model, platform string, _ bool) (*SubscriptionAccount, error) {
+	c.subscriptionModels = append(c.subscriptionModels, model)
+	if c.subscriptionErr != nil {
+		return nil, c.subscriptionErr
+	}
+	return c.subscription, nil
 }
 
 func TestRelayUsecasePlan(t *testing.T) {
@@ -181,6 +194,55 @@ func TestRelayUsecasePlan_SelectsResolvedModelWhenClientModelHasNoChannel(t *tes
 		if channelClient.models[i] != want {
 			t.Fatalf("selected models = %v, want %v", channelClient.models, wantModels)
 		}
+	}
+}
+
+func TestRelayUsecasePlan_SelectsSubscriptionAccountWhenNoAPIKeyChannel(t *testing.T) {
+	channelClient := &recordingChannelClient{
+		failModels: map[string]error{"gpt-5": errors.New("no channel available")},
+		subscription: &SubscriptionAccount{
+			ID:          8,
+			Name:        "codex-sub",
+			Platform:    "codex",
+			AccountType: "oauth",
+			Status:      1,
+			BaseURL:     "https://chatgpt.example/backend-api/codex",
+			Group:       "default",
+			Models:      []string{"gpt-5"},
+			Priority:    20,
+			AccessToken: "access-token",
+			AccountID:   "chatgpt-account",
+		},
+	}
+	uc := NewRelayUsecase(&testIdentityClientAllowAll{}, channelClient, nil, nil)
+
+	plan, err := uc.Plan(context.Background(), RelayRequest{Token: "demo-token", Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Channel == nil || plan.Channel.Type != relayprovider.ChannelTypeCodexOAuth || plan.Channel.ID != 8 || plan.Channel.Key != "access-token" {
+		t.Fatalf("unexpected subscription channel projection: %+v", plan.Channel)
+	}
+	if len(channelClient.subscriptionModels) != 1 || channelClient.subscriptionModels[0] != "gpt-5" {
+		t.Fatalf("subscription selected models = %v", channelClient.subscriptionModels)
+	}
+}
+
+func TestRelayUsecasePlan_APIKeyChannelWinsOverSubscriptionAccount(t *testing.T) {
+	channelClient := &recordingChannelClient{
+		subscription: &SubscriptionAccount{ID: 8, Platform: "codex"},
+	}
+	uc := NewRelayUsecase(&testIdentityClientAllowAll{}, channelClient, nil, nil)
+
+	plan, err := uc.Plan(context.Background(), RelayRequest{Token: "demo-token", Model: "gpt-4o"})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Channel == nil || plan.Channel.Name != "default:gpt-4o" {
+		t.Fatalf("unexpected channel: %+v", plan.Channel)
+	}
+	if len(channelClient.subscriptionModels) != 0 {
+		t.Fatalf("subscription selector should not be called, got %v", channelClient.subscriptionModels)
 	}
 }
 

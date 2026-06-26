@@ -294,6 +294,12 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandlePrefix("/v1/channels/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleChannelByID(w, r, svc)
 	}))
+	srv.HandleFunc("/v1/subscription-accounts", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleSubscriptionAccounts(w, r, svc)
+	}))
+	srv.HandlePrefix("/v1/subscription-accounts/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleSubscriptionAccountByID(w, r, svc)
+	}))
 
 	srv.HandleFunc("/v1/system/options", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleGetSystemOptions(w, r, svc)
@@ -1670,6 +1676,34 @@ func handleChannels(w http.ResponseWriter, r *http.Request, svc *service.AdminSe
 	}
 }
 
+func handleSubscriptionAccounts(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	switch r.Method {
+	case http.MethodGet:
+		resp, err := svc.ListSubscriptionAccounts(r.Context(), &adminv1.AdminListSubscriptionAccountsRequest{
+			Page:     getQueryInt32(r, "page", 1),
+			PageSize: getQueryInt32(r, "page_size", 20),
+			Keyword:  r.URL.Query().Get("keyword"),
+			Group:    r.URL.Query().Get("group"),
+			Status:   getQueryInt32(r, "status", 0),
+			Platform: r.URL.Query().Get("platform"),
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	case http.MethodPost:
+		var req adminv1.AdminCreateSubscriptionAccountRequest
+		if !decodeBody(w, r, &req) {
+			return
+		}
+		resp, err := svc.CreateSubscriptionAccount(r.Context(), &req)
+		writeServiceResponse(w, resp, err)
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
 func handleOneAPIChannels(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	trimmed := strings.Trim(r.URL.Path, "/")
 	switch trimmed {
@@ -1715,6 +1749,58 @@ func handleOneAPIChannels(w http.ResponseWriter, r *http.Request, svc *service.A
 		}
 		resp, err := svc.UpdateChannel(r.Context(), &req)
 		writeOneAPIServiceResponse(w, resp, err)
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func handleSubscriptionAccountByID(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/subscription-accounts/")
+	if strings.HasSuffix(rest, "/status") {
+		idPart := strings.TrimSuffix(rest, "/status")
+		accountID, err := strconv.ParseInt(strings.Trim(idPart, "/"), 10, 64)
+		if err != nil || accountID <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid subscription account id"})
+			return
+		}
+		if r.Method != http.MethodPut {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		var req adminv1.AdminChangeSubscriptionAccountStatusRequest
+		if !decodeBody(w, r, &req) {
+			return
+		}
+		req.AccountId = accountID
+		resp, err := svc.ChangeSubscriptionAccountStatus(r.Context(), &req)
+		writeServiceResponse(w, resp, err)
+		return
+	}
+
+	accountID, ok := parsePathID(r.URL.Path, "/v1/subscription-accounts/")
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid subscription account id"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		account, err := svc.GetSubscriptionAccount(r.Context(), accountID)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, account)
+	case http.MethodDelete:
+		resp, err := svc.DeleteSubscriptionAccount(r.Context(), &adminv1.AdminDeleteSubscriptionAccountRequest{AccountId: accountID})
+		writeServiceResponse(w, resp, err)
+	case http.MethodPut:
+		var req adminv1.AdminUpdateSubscriptionAccountRequest
+		if !decodeBody(w, r, &req) {
+			return
+		}
+		req.Id = accountID
+		resp, err := svc.UpdateSubscriptionAccount(r.Context(), &req)
+		writeServiceResponse(w, resp, err)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
