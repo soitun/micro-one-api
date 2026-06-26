@@ -3,8 +3,8 @@ package apicompat
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"strings"
 	"time"
 )
@@ -66,7 +66,7 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 		msg.ToolCalls = toolCalls
 	}
 	if contentText != "" {
-		raw, _ := json.Marshal(contentText)
+		raw, _ := sonic.Marshal(contentText)
 		msg.Content = raw
 	}
 	if reasoningText != "" {
@@ -196,7 +196,7 @@ func FinalizeResponsesChatStream(state *ResponsesEventToChatState) []ChatComplet
 
 // ChatChunkToSSE formats a ChatCompletionsChunk as an SSE data line.
 func ChatChunkToSSE(chunk ChatCompletionsChunk) (string, error) {
-	data, err := json.Marshal(chunk)
+	data, err := sonic.Marshal(chunk)
 	if err != nil {
 		return "", err
 	}

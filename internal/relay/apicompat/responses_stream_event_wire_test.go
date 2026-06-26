@@ -1,7 +1,7 @@
 package apicompat
 
 import (
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,10 +11,10 @@ import (
 // object plus the set of top-level keys.
 func marshalEvent(t *testing.T, e ResponsesStreamEvent) map[string]any {
 	t.Helper()
-	b, err := json.Marshal(e)
+	b, err := sonic.Marshal(e)
 	require.NoError(t, err)
 	var m map[string]any
-	require.NoError(t, json.Unmarshal(b, &m))
+	require.NoError(t, sonic.Unmarshal(b, &m))
 	return m
 }
 

@@ -4,7 +4,11 @@
 // formats can be served through a unified gateway.
 package apicompat
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/bytedance/sonic"
+)
 
 // ---------------------------------------------------------------------------
 // Anthropic Messages API types
@@ -83,17 +87,17 @@ func (b AnthropicContentBlock) MarshalJSON() ([]byte, error) {
 
 	switch b.Type {
 	case "text":
-		return json.Marshal(struct {
+		return sonic.Marshal(struct {
 			Text string `json:"text"`
 			anthropicContentBlock
 		}{Text: b.Text, anthropicContentBlock: anthropicContentBlock(b)})
 	case "thinking":
-		return json.Marshal(struct {
+		return sonic.Marshal(struct {
 			Thinking string `json:"thinking"`
 			anthropicContentBlock
 		}{Thinking: b.Thinking, anthropicContentBlock: anthropicContentBlock(b)})
 	default:
-		return json.Marshal(base)
+		return sonic.Marshal(base)
 	}
 }
 
@@ -337,7 +341,7 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 		PromptTokensDetails     *ResponsesInputTokensDetails  `json:"prompt_tokens_details,omitempty"`
 		CompletionTokensDetails *ResponsesOutputTokensDetails `json:"completion_tokens_details,omitempty"`
 	}
-	if err := json.Unmarshal(data, &aux); err != nil {
+	if err := sonic.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	*u = ResponsesUsage(aux.responsesUsageAlias)

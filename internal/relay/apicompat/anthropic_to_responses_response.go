@@ -3,8 +3,8 @@ package apicompat
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"time"
 )
 
@@ -216,7 +216,7 @@ func FinalizeAnthropicResponsesStream(state *AnthropicEventToResponsesState) []R
 
 // ResponsesEventToSSE formats a ResponsesStreamEvent as an SSE data line.
 func ResponsesEventToSSE(evt ResponsesStreamEvent) (string, error) {
-	data, err := json.Marshal(evt)
+	data, err := sonic.Marshal(evt)
 	if err != nil {
 		return "", err
 	}

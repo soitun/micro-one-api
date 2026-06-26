@@ -3,6 +3,7 @@ package apicompat
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"strings"
 )
 
@@ -16,7 +17,7 @@ func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {
 		return nil, err
 	}
 
-	inputJSON, err := json.Marshal(input)
+	inputJSON, err := sonic.Marshal(input)
 	if err != nil {
 		return nil, err
 	}
@@ -91,19 +92,19 @@ func convertAnthropicToolChoiceToResponses(raw json.RawMessage) (json.RawMessage
 		Type string `json:"type"`
 		Name string `json:"name"`
 	}
-	if err := json.Unmarshal(raw, &tc); err != nil {
+	if err := sonic.Unmarshal(raw, &tc); err != nil {
 		return nil, err
 	}
 
 	switch tc.Type {
 	case "auto":
-		return json.Marshal("auto")
+		return sonic.Marshal("auto")
 	case "any":
-		return json.Marshal("required")
+		return sonic.Marshal("required")
 	case "none":
-		return json.Marshal("none")
+		return sonic.Marshal("none")
 	case "tool":
-		return json.Marshal(map[string]any{
+		return sonic.Marshal(map[string]any{
 			"type": "function",
 			"name": tc.Name,
 		})
@@ -127,7 +128,7 @@ func convertAnthropicToResponsesInput(system json.RawMessage, msgs []AnthropicMe
 			return nil, err
 		}
 		if len(sysParts) > 0 {
-			content, _ := json.Marshal(sysParts)
+			content, _ := sonic.Marshal(sysParts)
 			out = append(out, ResponsesInputItem{
 				Type:    "message",
 				Role:    "developer",
@@ -151,14 +152,14 @@ func convertAnthropicToResponsesInput(system json.RawMessage, msgs []AnthropicMe
 // x-anthropic-billing-header block; airgate drops it before sending to Codex.
 func parseAnthropicSystemContentParts(raw json.RawMessage) ([]ResponsesContentPart, error) {
 	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
+	if err := sonic.Unmarshal(raw, &s); err == nil {
 		if isAnthropicBillingHeaderText(s) || s == "" {
 			return nil, nil
 		}
 		return []ResponsesContentPart{{Type: "input_text", Text: s}}, nil
 	}
 	var blocks []AnthropicContentBlock
-	if err := json.Unmarshal(raw, &blocks); err != nil {
+	if err := sonic.Unmarshal(raw, &blocks); err != nil {
 		return nil, err
 	}
 	var parts []ResponsesContentPart
@@ -193,9 +194,9 @@ func anthropicMsgToResponsesItems(m AnthropicMessage) ([]ResponsesInputItem, err
 func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error) {
 	// Try plain string.
 	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
+	if err := sonic.Unmarshal(raw, &s); err == nil {
 		parts := []ResponsesContentPart{{Type: "input_text", Text: s}}
-		partsJSON, err := json.Marshal(parts)
+		partsJSON, err := sonic.Marshal(parts)
 		if err != nil {
 			return nil, err
 		}
@@ -203,7 +204,7 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 	}
 
 	var blocks []AnthropicContentBlock
-	if err := json.Unmarshal(raw, &blocks); err != nil {
+	if err := sonic.Unmarshal(raw, &blocks); err != nil {
 		return nil, err
 	}
 
@@ -244,7 +245,7 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 	parts = append(parts, toolResultImageParts...)
 
 	if len(parts) > 0 {
-		content, err := json.Marshal(parts)
+		content, err := sonic.Marshal(parts)
 		if err != nil {
 			return nil, err
 		}
@@ -261,9 +262,9 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, error) {
 	// Try plain string.
 	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
+	if err := sonic.Unmarshal(raw, &s); err == nil {
 		parts := []ResponsesContentPart{{Type: "output_text", Text: s}}
-		partsJSON, err := json.Marshal(parts)
+		partsJSON, err := sonic.Marshal(parts)
 		if err != nil {
 			return nil, err
 		}
@@ -271,7 +272,7 @@ func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, e
 	}
 
 	var blocks []AnthropicContentBlock
-	if err := json.Unmarshal(raw, &blocks); err != nil {
+	if err := sonic.Unmarshal(raw, &blocks); err != nil {
 		return nil, err
 	}
 
@@ -281,7 +282,7 @@ func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, e
 	text := extractAnthropicTextFromBlocks(blocks)
 	if text != "" {
 		parts := []ResponsesContentPart{{Type: "output_text", Text: text}}
-		partsJSON, err := json.Marshal(parts)
+		partsJSON, err := sonic.Marshal(parts)
 		if err != nil {
 			return nil, err
 		}
@@ -352,7 +353,7 @@ func convertToolResultOutput(b AnthropicContentBlock) (string, []ResponsesConten
 
 	// Try plain string content.
 	var s string
-	if err := json.Unmarshal(b.Content, &s); err == nil {
+	if err := sonic.Unmarshal(b.Content, &s); err == nil {
 		if s == "" {
 			s = "(empty)"
 		}
@@ -361,7 +362,7 @@ func convertToolResultOutput(b AnthropicContentBlock) (string, []ResponsesConten
 
 	// Array of content blocks — may contain text and/or images.
 	var inner []AnthropicContentBlock
-	if err := json.Unmarshal(b.Content, &inner); err != nil {
+	if err := sonic.Unmarshal(b.Content, &inner); err != nil {
 		return "(empty)", nil
 	}
 
@@ -464,7 +465,7 @@ func normalizeToolParameters(schema json.RawMessage) json.RawMessage {
 	}
 
 	var m map[string]json.RawMessage
-	if err := json.Unmarshal(schema, &m); err != nil {
+	if err := sonic.Unmarshal(schema, &m); err != nil {
 		return schema
 	}
 
@@ -478,7 +479,7 @@ func normalizeToolParameters(schema json.RawMessage) json.RawMessage {
 	}
 
 	m["properties"] = json.RawMessage(`{}`)
-	out, err := json.Marshal(m)
+	out, err := sonic.Marshal(m)
 	if err != nil {
 		return schema
 	}
