@@ -69,9 +69,18 @@ type SubscriptionAccount struct {
 
 // RelayPlan is the result of relay planning, containing all resolved
 // information needed to execute an upstream provider call.
+//
+// For API-key channels only Channel is set. For subscription accounts the
+// account is selected as a first-class entity and exposed on Account (NOT
+// projected onto Channel): the selected Channel is a thin view carrying only
+// the channel type + base URL + models, while the real account identity
+// (access token, upstream account id, fingerprint) lives on Account. This
+// keeps the access token out of Channel.Key, where it could otherwise leak
+// through logging, health reporting or the OneAPI-compatible admin API.
 type RelayPlan struct {
 	Auth          *AuthSnapshot
 	Channel       *Channel
+	Account       *SubscriptionAccount
 	ResolvedModel string
 }
 
@@ -151,13 +160,20 @@ func (uc *RelayUsecase) Plan(ctx context.Context, req RelayRequest) (*RelayPlan,
 			}
 			channelErr = err
 		}
-		channel, err = uc.selectSubscriptionChannel(ctx, authSnapshot.Group, req.Model, resolvedModel)
-		if err != nil {
+		subChannel, subAccount, subErr := uc.selectSubscriptionChannel(ctx, authSnapshot.Group, req.Model, resolvedModel)
+		if subErr != nil {
 			if uc.subscription == nil {
 				return nil, channelErr
 			}
-			return nil, err
+			return nil, subErr
 		}
+		channel = subChannel
+		return &RelayPlan{
+			Auth:          authSnapshot,
+			Channel:       channel,
+			Account:       subAccount,
+			ResolvedModel: resolvedModel,
+		}, nil
 	}
 
 	return &RelayPlan{
@@ -167,18 +183,22 @@ func (uc *RelayUsecase) Plan(ctx context.Context, req RelayRequest) (*RelayPlan,
 	}, nil
 }
 
-func (uc *RelayUsecase) selectSubscriptionChannel(ctx context.Context, group, clientModel, resolvedModel string) (*Channel, error) {
+func (uc *RelayUsecase) selectSubscriptionChannel(ctx context.Context, group, clientModel, resolvedModel string) (*Channel, *SubscriptionAccount, error) {
 	if uc.subscription == nil {
-		return nil, fmt.Errorf("subscription account selector is not configured")
+		return nil, nil, fmt.Errorf("subscription account selector is not configured")
 	}
 	account, err := uc.subscription.SelectSubscriptionAccount(ctx, group, clientModel, "", false)
 	if err != nil && resolvedModel != clientModel {
 		account, err = uc.subscription.SelectSubscriptionAccount(ctx, group, resolvedModel, "", false)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return subscriptionAccountToChannel(account)
+	ch, err := subscriptionAccountToChannel(account)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ch, account, nil
 }
 
 func subscriptionAccountToChannel(account *SubscriptionAccount) (*Channel, error) {
@@ -198,7 +218,11 @@ func subscriptionAccountToChannel(account *SubscriptionAccount) (*Channel, error
 		Group:    account.Group,
 		Models:   append([]string(nil), account.Models...),
 		Priority: account.Priority,
-		Key:      account.AccessToken,
+		// Key intentionally left empty: the access token is NOT projected onto
+		// the generic Channel.Key field. The server layer resolves it via the
+		// SubscriptionAccountResolver (plan.Account) / credential store so it
+		// cannot leak through code paths that treat Channel.Key as a plain
+		// API key.
 	}, nil
 }
 

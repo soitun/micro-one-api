@@ -12,6 +12,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"runtime"
+
+	"github.com/bytedance/sonic"
 )
 
 // Platform identifies a subscription-account platform.
@@ -40,11 +42,11 @@ type Fingerprint struct {
 	// Stainless* fields mirror the x-stainless-* headers emitted by the
 	// official SDKs. They make a request look like it originated from the
 	// native Anthropic/OpenAI SDK rather than a generic HTTP client.
-	StainlessLang          string `json:"stainless_lang"`
+	StainlessLang           string `json:"stainless_lang"`
 	StainlessPackageVersion string `json:"stainless_package_version"`
-	StainlessOS            string `json:"stainless_os"`
-	StainlessArch          string `json:"stainless_arch"`
-	StainlessRuntime       string `json:"stainless_runtime"`
+	StainlessOS             string `json:"stainless_os"`
+	StainlessArch           string `json:"stainless_arch"`
+	StainlessRuntime        string `json:"stainless_runtime"`
 	StainlessRuntimeVersion string `json:"stainless_runtime_version"`
 }
 
@@ -54,11 +56,24 @@ type Fingerprint struct {
 // interprets it.
 type FingerprintSnapshot string
 
-// Snapshot serializes the fingerprint into an opaque cache token. The MVP
-// uses a compact hex encoding of the ClientID + a version tag; a full
-// implementation would encrypt/sign this. It is stable for a given ClientID.
+// Snapshot serializes the fingerprint into an opaque cache token that encodes
+// the *full* fingerprint (not just the ClientID). This is critical for
+// stability: when the in-process cache expires or the process restarts, the
+// fingerprint is reconstructed from the snapshot stored alongside the account
+// (DB column / Redis). If only the ClientID survived, every cache miss would
+// regenerate the Stainless*/UserAgent fields from defaults and the upstream
+// would see a drifting client identity — defeating the purpose of mimicry.
+//
+// The token is versioned ("v2:") and contains a compact JSON blob. It is
+// opaque to callers; only RestoreFromSnapshot interprets it.
 func (f Fingerprint) Snapshot() FingerprintSnapshot {
-	return FingerprintSnapshot(fmt.Sprintf("v1:%s", f.ClientID))
+	b, err := sonic.Marshal(f)
+	if err != nil {
+		// Marshalling a plain struct should never fail; fall back to the
+		// legacy v1 token (ClientID only) so we never return an empty snapshot.
+		return FingerprintSnapshot(fmt.Sprintf("v1:%s", f.ClientID))
+	}
+	return FingerprintSnapshot("v2:" + string(b))
 }
 
 // DefaultClaudeCodeFingerprint builds a Fingerprint that resembles a recent
@@ -66,13 +81,13 @@ func (f Fingerprint) Snapshot() FingerprintSnapshot {
 // @anthropic-ai/sdk defaults.
 func DefaultClaudeCodeFingerprint() Fingerprint {
 	return Fingerprint{
-		ClientID:               randomClientID(),
-		UserAgent:              "claude-cli/1.0.128 (external, cli)",
-		StainlessLang:          "js",
+		ClientID:                randomClientID(),
+		UserAgent:               "claude-cli/1.0.128 (external, cli)",
+		StainlessLang:           "js",
 		StainlessPackageVersion: "0.52.0",
-		StainlessOS:            stainlessOS(),
-		StainlessArch:          stainlessArch(),
-		StainlessRuntime:       "node",
+		StainlessOS:             stainlessOS(),
+		StainlessArch:           stainlessArch(),
+		StainlessRuntime:        "node",
 		StainlessRuntimeVersion: "v22.11.0",
 	}
 }
@@ -81,13 +96,13 @@ func DefaultClaudeCodeFingerprint() Fingerprint {
 // codex_cli_rs client.
 func DefaultCodexFingerprint() Fingerprint {
 	return Fingerprint{
-		ClientID:               randomClientID(),
-		UserAgent:              fmt.Sprintf("codex_cli_rs/0.39.0 (%s; %s) zsh", stainlessOS(), stainlessArch()),
-		StainlessLang:          "rust",
+		ClientID:                randomClientID(),
+		UserAgent:               fmt.Sprintf("codex_cli_rs/0.39.0 (%s; %s) zsh", stainlessOS(), stainlessArch()),
+		StainlessLang:           "rust",
 		StainlessPackageVersion: "0.39.0",
-		StainlessOS:            stainlessOS(),
-		StainlessArch:          stainlessArch(),
-		StainlessRuntime:       "rustc",
+		StainlessOS:             stainlessOS(),
+		StainlessArch:           stainlessArch(),
+		StainlessRuntime:        "rustc",
 		StainlessRuntimeVersion: "1.82.0",
 	}
 }
@@ -103,19 +118,28 @@ func DefaultFingerprintForPlatform(p Platform) Fingerprint {
 	}
 }
 
-// RestoreFromSnapshot is a best-effort inverse of Snapshot: it materializes a
-// Fingerprint from a cached snapshot. Fields that are not encoded in the
-// snapshot (everything except ClientID) are filled with the platform defaults.
+// RestoreFromSnapshot is the inverse of Snapshot: it materializes a Fingerprint
+// from a cached snapshot. v2 snapshots restore the full fingerprint; legacy v1
+// snapshots only carry the ClientID so the remaining fields fall back to the
+// platform defaults. An empty snapshot yields a fresh default fingerprint.
 func RestoreFromSnapshot(snap FingerprintSnapshot, p Platform) Fingerprint {
-	fp := DefaultFingerprintForPlatform(p)
 	if snap == "" {
+		return DefaultFingerprintForPlatform(p)
+	}
+	const v2prefix = "v2:"
+	if len(snap) > len(v2prefix) && string(snap[:len(v2prefix)]) == v2prefix {
+		var fp Fingerprint
+		if err := sonic.UnmarshalString(string(snap[len(v2prefix):]), &fp); err == nil && fp.ClientID != "" {
+			return fp
+		}
+	}
+	const v1prefix = "v1:"
+	if len(snap) > len(v1prefix) && string(snap[:len(v1prefix)]) == v1prefix {
+		fp := DefaultFingerprintForPlatform(p)
+		fp.ClientID = string(snap[len(v1prefix):])
 		return fp
 	}
-	const prefix = "v1:"
-	if len(snap) > len(prefix) && string(snap[:len(prefix)]) == prefix {
-		fp.ClientID = string(snap[len(prefix):])
-	}
-	return fp
+	return DefaultFingerprintForPlatform(p)
 }
 
 func randomClientID() string {

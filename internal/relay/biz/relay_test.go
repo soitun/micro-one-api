@@ -220,8 +220,12 @@ func TestRelayUsecasePlan_SelectsSubscriptionAccountWhenNoAPIKeyChannel(t *testi
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
-	if plan.Channel == nil || plan.Channel.Type != relayprovider.ChannelTypeCodexOAuth || plan.Channel.ID != 8 || plan.Channel.Key != "access-token" {
+	if plan.Channel == nil || plan.Channel.Type != relayprovider.ChannelTypeCodexOAuth || plan.Channel.ID != 8 || plan.Channel.Key != "" {
 		t.Fatalf("unexpected subscription channel projection: %+v", plan.Channel)
+	}
+	// The access token lives on the first-class Account, NOT on Channel.Key.
+	if plan.Account == nil || plan.Account.ID != 8 || plan.Account.AccessToken != "access-token" || plan.Account.AccountID != "chatgpt-account" {
+		t.Fatalf("unexpected subscription account: %+v", plan.Account)
 	}
 	if len(channelClient.subscriptionModels) != 1 || channelClient.subscriptionModels[0] != "gpt-5" {
 		t.Fatalf("subscription selected models = %v", channelClient.subscriptionModels)

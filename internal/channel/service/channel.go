@@ -7,6 +7,7 @@ import (
 	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/internal/channel/biz"
 	"micro-one-api/internal/pkg/errors"
+	relaycredential "micro-one-api/internal/relay/credential"
 )
 
 // ChannelService is the transport layer entry for channel-service.
@@ -86,8 +87,8 @@ func toSubscriptionAccountInfo(account *biz.SubscriptionAccount) *commonv1.Subsc
 		Models:       account.ModelsCSV(),
 		Priority:     account.Priority,
 		BaseUrl:      account.BaseURL,
-		AccessToken:  account.AccessToken,
-		RefreshToken: account.RefreshToken,
+		AccessToken:  relaycredential.MaskSecret(account.AccessToken),
+		RefreshToken: relaycredential.MaskSecret(account.RefreshToken),
 		ExpiresAt:    account.ExpiresAt,
 		AccountId:    account.AccountID,
 		Fingerprint:  account.Fingerprint,
@@ -347,9 +348,15 @@ func (s *ChannelService) ChangeSubscriptionAccountStatus(ctx context.Context, re
 }
 
 func (s *ChannelService) CreateChannel(ctx context.Context, req *channelv1.CreateChannelRequest) (*channelv1.CreateChannelResponse, error) {
-	cfg := commonv1.ChannelConfig{}
+	// Read config fields by accessors on the pointer rather than copying the
+	// protobuf value (it embeds protoimpl.MessageState which contains a mutex).
+	var apiVersion, region, libraryID, plugin, vertexProjectID string
 	if req.Config != nil {
-		cfg = *req.Config
+		apiVersion = req.Config.GetApiVersion()
+		region = req.Config.GetRegion()
+		libraryID = req.Config.GetLibraryId()
+		plugin = req.Config.GetPlugin()
+		vertexProjectID = req.Config.GetVertexAiProjectId()
 	}
 	channel := &biz.Channel{
 		Type:         req.Type,
@@ -364,11 +371,11 @@ func (s *ChannelService) CreateChannel(ctx context.Context, req *channelv1.Creat
 		ModelMapping: req.ModelMapping,
 		SystemPrompt: req.SystemPrompt,
 		Config: biz.ChannelConfig{
-			APIVersion:        cfg.ApiVersion,
-			Region:            cfg.Region,
-			LibraryID:         cfg.LibraryId,
-			Plugin:            cfg.Plugin,
-			VertexAIProjectID: cfg.VertexAiProjectId,
+			APIVersion:        apiVersion,
+			Region:            region,
+			LibraryID:         libraryID,
+			Plugin:            plugin,
+			VertexAIProjectID: vertexProjectID,
 		},
 	}
 	if err := s.uc.CreateChannel(ctx, channel); err != nil {

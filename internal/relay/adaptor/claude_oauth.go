@@ -32,7 +32,6 @@ type ClaudeOAuthAdaptor struct {
 	baseAdaptor
 	tokens   credential.TokenProvider
 	identity *identity.IdentityService
-	httpc    *http.Client
 	models   []string
 }
 
@@ -44,16 +43,14 @@ var claudeOAuthModels = []string{
 
 // NewClaudeOAuthAdaptor builds an adaptor for Claude Code subscription
 // accounts. tokens resolves the OAuth access token; svc resolves the account
-// fingerprint and drives mimicry. httpc is used for the upstream call; a nil
-// client falls back to http.DefaultClient.
-func NewClaudeOAuthAdaptor(tokens credential.TokenProvider, svc *identity.IdentityService, httpc *http.Client, models []string) *ClaudeOAuthAdaptor {
+// fingerprint and drives mimicry. The upstream HTTP call is issued by the
+// server layer using RelayContext.HTTPClient, so the adaptor does not own a
+// client.
+func NewClaudeOAuthAdaptor(tokens credential.TokenProvider, svc *identity.IdentityService, models []string) *ClaudeOAuthAdaptor {
 	if len(models) == 0 {
 		models = claudeOAuthModels
 	}
-	if httpc == nil {
-		httpc = http.DefaultClient
-	}
-	return &ClaudeOAuthAdaptor{tokens: tokens, identity: svc, httpc: httpc, models: models}
+	return &ClaudeOAuthAdaptor{tokens: tokens, identity: svc, models: models}
 }
 
 func (a *ClaudeOAuthAdaptor) Init(_ *RelayContext) {}
@@ -200,7 +197,7 @@ func (a *ClaudeOAuthAdaptor) ConvertResponse(rc *RelayContext, upstream Format, 
 		return "", nil, fmt.Errorf("claude_oauth: read upstream response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", nil, fmt.Errorf("claude_oauth: upstream status=%d body=%s", resp.StatusCode, string(body))
+		return "", nil, fmt.Errorf("claude_oauth: upstream status=%d body=%s", resp.StatusCode, truncateBody(body))
 	}
 	if rc == nil {
 		return FormatAnthropicMessages, body, nil

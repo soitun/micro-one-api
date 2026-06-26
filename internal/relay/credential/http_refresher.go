@@ -54,7 +54,7 @@ func (r *refresher) refresh(ctx context.Context, refreshURL, refreshToken string
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MiB safety cap
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%w: status=%d body=%s", ErrRefreshFailed, resp.StatusCode, string(body))
+		return nil, fmt.Errorf("%w: status=%d", ErrRefreshFailed, resp.StatusCode)
 	}
 	var tr tokenRefreshResponse
 	if err := json.Unmarshal(body, &tr); err != nil {

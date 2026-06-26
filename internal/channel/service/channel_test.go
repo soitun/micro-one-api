@@ -203,15 +203,17 @@ func TestChannelServiceOneAPIFields(t *testing.T) {
 func TestChannelServiceSubscriptionAccountCRUD(t *testing.T) {
 	repo := &channelServiceRepo{
 		account: &biz.SubscriptionAccount{
-			ID:          11,
-			Name:        "codex",
-			Platform:    "codex",
-			AccountType: "oauth",
-			Status:      biz.ChannelStatusEnabled,
-			Group:       "default",
-			Models:      []string{"gpt-5"},
-			Priority:    9,
-			AccountID:   "acc_123",
+			ID:           11,
+			Name:         "codex",
+			Platform:     "codex",
+			AccountType:  "oauth",
+			Status:       biz.ChannelStatusEnabled,
+			Group:        "default",
+			Models:       []string{"gpt-5"},
+			Priority:     9,
+			AccountID:    "acc_123",
+			AccessToken:  "sk-secret-access-token-value",
+			RefreshToken: "rt-secret-refresh-token-value",
 		},
 	}
 	svc := NewChannelService(biz.NewChannelUsecase(repo, nil))
@@ -232,6 +234,10 @@ func TestChannelServiceSubscriptionAccountCRUD(t *testing.T) {
 	getResp, err := svc.GetSubscriptionAccount(context.Background(), &channelv1.GetSubscriptionAccountRequest{AccountId: 11})
 	if err != nil || getResp.Account == nil || getResp.Account.Name != "codex" {
 		t.Fatalf("GetSubscriptionAccount() mismatch: resp=%+v err=%v", getResp, err)
+	}
+	// H3: the management surface must never return cleartext OAuth tokens.
+	if getResp.Account.AccessToken == "sk-secret-access-token-value" || getResp.Account.RefreshToken == "rt-secret-refresh-token-value" {
+		t.Fatalf("GetSubscriptionAccount() leaked cleartext tokens: access=%q refresh=%q", getResp.Account.AccessToken, getResp.Account.RefreshToken)
 	}
 
 	updateResp, err := svc.UpdateSubscriptionAccount(context.Background(), &channelv1.UpdateSubscriptionAccountRequest{

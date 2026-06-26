@@ -4,12 +4,12 @@ import appregistry "micro-one-api/internal/pkg/registry"
 
 // Config holds the relay-gateway configuration.
 type Config struct {
-	Server        ServerConfig       `json:"server"`
-	Clients       ClientsConfig      `json:"clients"`
-	Retry         RetryConfig        `json:"retry"`
-	Models        ModelsConfig       `json:"models" yaml:"models"`
-	Registry      appregistry.Config `json:"registry"`
-	OpenAIWS      OpenAIWSConfig     `json:"openai_ws" yaml:"openai_ws"`
+	Server        ServerConfig        `json:"server"`
+	Clients       ClientsConfig       `json:"clients"`
+	Retry         RetryConfig         `json:"retry"`
+	Models        ModelsConfig        `json:"models" yaml:"models"`
+	Registry      appregistry.Config  `json:"registry"`
+	OpenAIWS      OpenAIWSConfig      `json:"openai_ws" yaml:"openai_ws"`
 	HybridAdaptor HybridAdaptorConfig `json:"hybrid_adaptor" yaml:"hybrid_adaptor"`
 }
 

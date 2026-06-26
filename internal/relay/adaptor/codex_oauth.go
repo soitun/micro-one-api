@@ -27,7 +27,6 @@ type CodexOAuthAdaptor struct {
 	baseAdaptor
 	tokens   credential.TokenProvider
 	identity *identity.IdentityService
-	httpc    *http.Client
 	models   []string
 }
 
@@ -40,14 +39,11 @@ var codexOAuthModels = []string{
 
 // NewCodexOAuthAdaptor builds an adaptor for Codex/ChatGPT subscription
 // accounts.
-func NewCodexOAuthAdaptor(tokens credential.TokenProvider, svc *identity.IdentityService, httpc *http.Client, models []string) *CodexOAuthAdaptor {
+func NewCodexOAuthAdaptor(tokens credential.TokenProvider, svc *identity.IdentityService, models []string) *CodexOAuthAdaptor {
 	if len(models) == 0 {
 		models = codexOAuthModels
 	}
-	if httpc == nil {
-		httpc = http.DefaultClient
-	}
-	return &CodexOAuthAdaptor{tokens: tokens, identity: svc, httpc: httpc, models: models}
+	return &CodexOAuthAdaptor{tokens: tokens, identity: svc, models: models}
 }
 
 func (a *CodexOAuthAdaptor) Init(_ *RelayContext) {}
@@ -182,7 +178,7 @@ func (a *CodexOAuthAdaptor) ConvertResponse(rc *RelayContext, upstream Format, r
 		return "", nil, fmt.Errorf("codex_oauth: read upstream response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", nil, fmt.Errorf("codex_oauth: upstream status=%d body=%s", resp.StatusCode, string(body))
+		return "", nil, fmt.Errorf("codex_oauth: upstream status=%d body=%s", resp.StatusCode, truncateBody(body))
 	}
 	if rc == nil {
 		return FormatOpenAIResponses, body, nil
@@ -191,23 +187,23 @@ func (a *CodexOAuthAdaptor) ConvertResponse(rc *RelayContext, upstream Format, r
 	case FormatOpenAIChatCompletions:
 		var rr apicompat.ResponsesResponse
 		if err := sonic.Unmarshal(body, &rr); err != nil {
-			return FormatOpenAIResponses, body, nil
+			return "", nil, fmt.Errorf("codex_oauth: parse responses response: %w", err)
 		}
 		cr := apicompat.ResponsesToChatCompletions(&rr, rc.ClientModel)
 		out, err := sonic.Marshal(cr)
 		if err != nil {
-			return FormatOpenAIResponses, body, nil
+			return "", nil, fmt.Errorf("codex_oauth: marshal chat response: %w", err)
 		}
 		return FormatOpenAIChatCompletions, out, nil
 	case FormatAnthropicMessages:
 		var rr apicompat.ResponsesResponse
 		if err := sonic.Unmarshal(body, &rr); err != nil {
-			return FormatOpenAIResponses, body, nil
+			return "", nil, fmt.Errorf("codex_oauth: parse responses response: %w", err)
 		}
 		ar := apicompat.ResponsesToAnthropic(&rr, rc.ClientModel)
 		out, err := sonic.Marshal(ar)
 		if err != nil {
-			return FormatOpenAIResponses, body, nil
+			return "", nil, fmt.Errorf("codex_oauth: marshal anthropic response: %w", err)
 		}
 		return FormatAnthropicMessages, out, nil
 	default:

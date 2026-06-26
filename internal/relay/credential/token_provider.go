@@ -30,12 +30,12 @@ const (
 // It is the in-memory view of the encrypted `credentials` blob stored in the
 // SubscriptionAccount record.
 type AccountCredentials struct {
-	AccountID      string // upstream account id (e.g. chatgpt-account-id)
-	AccessToken    string
-	RefreshToken   string
-	ExpiresAt      time.Time // access-token expiry
-	ClientID       string    // OAuth client_id (for refresh)
-	RefreshURL     string    // token endpoint URL
+	AccountID    string // upstream account id (e.g. chatgpt-account-id)
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    time.Time // access-token expiry
+	ClientID     string    // OAuth client_id (for refresh)
+	RefreshURL   string    // token endpoint URL
 }
 
 // TokenProvider returns a valid access token for an account, refreshing when

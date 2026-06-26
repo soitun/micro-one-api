@@ -1373,16 +1373,20 @@ func handleOneAPIUsers(w http.ResponseWriter, r *http.Request, svc *service.Admi
 	case http.MethodPut:
 		var raw struct {
 			ID int64 `json:"id"`
-			adminv1.AdminUpdateUserRequest
+			*adminv1.AdminUpdateUserRequest
 		}
 		if !decodeBody(w, r, &raw) {
+			return
+		}
+		if raw.AdminUpdateUserRequest == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
 		req := raw.AdminUpdateUserRequest
 		if req.UserId == 0 {
 			req.UserId = raw.ID
 		}
-		resp, err := svc.UpdateUser(r.Context(), &req)
+		resp, err := svc.UpdateUser(r.Context(), req)
 		writeOneAPIServiceResponse(w, resp, err)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -1738,16 +1742,20 @@ func handleOneAPIChannels(w http.ResponseWriter, r *http.Request, svc *service.A
 	case http.MethodPut:
 		var raw struct {
 			ID int64 `json:"id"`
-			adminv1.AdminUpdateChannelRequest
+			*adminv1.AdminUpdateChannelRequest
 		}
 		if !decodeBody(w, r, &raw) {
+			return
+		}
+		if raw.AdminUpdateChannelRequest == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
 		req := raw.AdminUpdateChannelRequest
 		if req.ChannelId == 0 {
 			req.ChannelId = raw.ID
 		}
-		resp, err := svc.UpdateChannel(r.Context(), &req)
+		resp, err := svc.UpdateChannel(r.Context(), req)
 		writeOneAPIServiceResponse(w, resp, err)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})

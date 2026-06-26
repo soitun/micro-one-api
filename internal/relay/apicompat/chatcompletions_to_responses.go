@@ -13,9 +13,10 @@ type chatMessageContent struct {
 }
 
 // ChatCompletionsToResponses converts a Chat Completions request into a
-// Responses API request. The upstream always streams, so Stream is forced to
-// true. store is always false and reasoning.encrypted_content is always
-// included so that the response translator has full context.
+// Responses API request. The client's stream preference is preserved so the
+// caller can distinguish streaming and non-streaming upstream calls; forcing
+// stream=true here would break the non-streaming ConvertResponse path in the
+// OAuth adaptors, which expects a single JSON object rather than an SSE stream.
 func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest, error) {
 	input, err := convertChatMessagesToResponsesInput(req.Messages)
 	if err != nil {
@@ -31,7 +32,7 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 		Model:        req.Model,
 		Instructions: req.Instructions,
 		Input:        inputJSON,
-		Stream:       true, // upstream always streams
+		Stream:       req.Stream,
 		Include:      []string{"reasoning.encrypted_content"},
 		ServiceTier:  req.ServiceTier,
 	}

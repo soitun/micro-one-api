@@ -76,6 +76,7 @@ func (s *ChannelSubscriptionAccountStore) Resolve(ctx context.Context, channelID
 		AccessToken: account.GetAccessToken(),
 		AccountID:   account.GetAccountId(),
 		Platform:    relaycredential.Platform(account.GetPlatform()),
+		AccountType: account.GetAccountType(),
 		Fingerprint: account.GetFingerprint(),
 		GroupID:     account.GetGroup(),
 	}, nil
@@ -96,3 +97,46 @@ var (
 	_ relaycredential.AccountLookup               = (*ChannelSubscriptionAccountStore)(nil)
 	_ relaycredential.SubscriptionAccountResolver = (*ChannelSubscriptionAccountStore)(nil)
 )
+
+// ExpiringSoon implements credential.ExpiringScanner. It scans subscription
+// accounts via the channel-service ListSubscriptionAccounts RPC and returns
+// the IDs whose access token expires within the given duration. This is the
+// production counterpart of the test-only NoopAccountLookup.ExpiringSoon and
+// makes the background refresh task actually do work in a real deployment
+// (without it, sweep() is a no-op and only request-time refresh covers
+// correctness).
+//
+// The scan pages through all accounts (page size 200). It does not filter by
+// status/platform: expired-but-stored tokens are still refreshed by the
+// provider-level Refresh, which marks the account unschedulable on failure.
+func (s *ChannelSubscriptionAccountStore) ExpiringSoon(ctx context.Context, within time.Duration) ([]int64, error) {
+	if s == nil || s.client == nil {
+		return nil, relaycredential.ErrNotConfigured
+	}
+	threshold := time.Now().Add(within).Unix()
+	var ids []int64
+	page := int32(1)
+	const pageSize = int32(200)
+	for {
+		resp, err := s.client.ListSubscriptionAccounts(ctx, &channelv1.ListSubscriptionAccountsRequest{
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range resp.GetAccounts() {
+			if a.GetExpiresAt() > 0 && a.GetExpiresAt() <= threshold {
+				ids = append(ids, a.GetId())
+			}
+		}
+		if int32(len(resp.GetAccounts())) < pageSize {
+			break
+		}
+		page++
+	}
+	return ids, nil
+}
+
+// compile-time interface check.
+var _ relaycredential.ExpiringScanner = (*ChannelSubscriptionAccountStore)(nil)

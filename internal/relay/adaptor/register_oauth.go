@@ -24,9 +24,6 @@ var (
 	// globalIdentityService is the shared IdentityService used by the OAuth
 	// adaptors to resolve fingerprints.
 	globalIdentityService *identity.IdentityService
-	// globalOAuthHTTPClient is the HTTP client used by the OAuth adaptors for
-	// the upstream call. Defaults to http.DefaultClient when nil.
-	globalOAuthHTTPClient *http.Client
 )
 
 // TokenProviderFactory returns a TokenProvider for a platform. Set once at
@@ -43,12 +40,6 @@ func SetTokenProviderFactory(f TokenProviderFactory) {
 // adaptors to resolve account fingerprints.
 func SetIdentityService(svc *identity.IdentityService) {
 	globalIdentityService = svc
-}
-
-// SetOAuthHTTPClient overrides the HTTP client used by the OAuth adaptors for
-// upstream calls. Optional; when not called http.DefaultClient is used.
-func SetOAuthHTTPClient(c *http.Client) {
-	globalOAuthHTTPClient = c
 }
 
 func init() {
@@ -83,13 +74,12 @@ func (l *lazyOAuthAdaptor) build(rc *RelayContext) (Adaptor, error) {
 	if globalTokenProviderFactory != nil {
 		tp = globalTokenProviderFactory(l.platform)
 	}
-	httpc := globalOAuthHTTPClient
 	models := rc.Channel.Models
 	switch l.platform {
 	case identity.PlatformClaude:
-		return NewClaudeOAuthAdaptor(tp, globalIdentityService, httpc, models), nil
+		return NewClaudeOAuthAdaptor(tp, globalIdentityService, models), nil
 	case identity.PlatformCodex:
-		return NewCodexOAuthAdaptor(tp, globalIdentityService, httpc, models), nil
+		return NewCodexOAuthAdaptor(tp, globalIdentityService, models), nil
 	default:
 		return nil, errUnknownOAuthPlatform
 	}

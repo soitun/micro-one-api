@@ -181,7 +181,7 @@ func TestRefreshSkew(t *testing.T) {
 		t.Fatal("token 1m in future should be considered stale (within 3m skew)")
 	}
 	// A token 10 minutes in the future is fresh.
-	c.set(2, "tok", time.Now().Add(10 * time.Minute))
+	c.set(2, "tok", time.Now().Add(10*time.Minute))
 	if c.stale(2) {
 		t.Fatal("token 10m in future should not be stale")
 	}

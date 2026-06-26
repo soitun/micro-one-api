@@ -19,14 +19,14 @@ import (
 // codex_credential_refresh_task.go: every interval it asks the AccountLookup
 // for the set of accounts expiring soon and refreshes each in turn.
 type RefreshTask struct {
-	providers   map[Platform]TokenProvider
-	lookup      AccountLookup
-	interval    time.Duration
-	lookahead   time.Duration
-	stopCh      chan struct{}
-	wg          sync.WaitGroup
-	platformOf  func(accountID int64) Platform
-	logger      *zap.Logger
+	providers  map[Platform]TokenProvider
+	lookup     AccountLookup
+	interval   time.Duration
+	lookahead  time.Duration
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
+	platformOf func(accountID int64) Platform
+	logger     *zap.Logger
 }
 
 // RefreshTaskConfig configures the background refresh task.

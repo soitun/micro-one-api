@@ -8,21 +8,6 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-// MimicryOptions controls how the Claude OAuth mimicry layer rewrites a
-// request body before it is forwarded to the upstream Anthropic Messages API.
-type MimicryOptions struct {
-	// AccountUUID is the stable upstream account identifier (e.g. the
-	// chatgpt-account-id or the UUID portion of metadata.user_id).
-	AccountUUID string
-	// ClientID is the per-account client identifier used to derive a unique
-	// metadata.user_id suffix.
-	ClientID string
-	// ApplySystemPrompt controls whether the Claude Code system-prompt block is
-	// injected. Real Claude Code clients already carry it; third-party clients
-	// need it injected so the upstream classifies the request as a CC session.
-	ApplySystemPrompt bool
-}
-
 // claudeCodeSystemPrompt is the canonical system-prompt block prepended to
 // mimicked Claude OAuth requests so the upstream sees a request shape
 // consistent with a genuine Claude Code CLI session. It is intentionally

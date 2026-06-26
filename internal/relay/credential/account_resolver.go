@@ -26,6 +26,9 @@ type SubscriptionAccountMetadata struct {
 	AccountID string
 	// Platform is "codex" | "claude".
 	Platform Platform
+	// AccountType is the subscription credential type ("oauth" |
+	// "setup_token"). It controls whether identity mimicry is applied.
+	AccountType string
 	// Fingerprint is the cached fingerprint snapshot (opaque blob).
 	Fingerprint string
 	// GroupID is the quota/billing group the account belongs to.

@@ -80,7 +80,7 @@ func TestOAuthAdaptorFactoryRequiresWiring(t *testing.T) {
 func TestClaudeOAuth_ConvertRequest(t *testing.T) {
 	svc := identity.NewIdentityService(0)
 	tp := &staticTokenProvider{token: "claude-tok"}
-	ad := NewClaudeOAuthAdaptor(tp, svc, http.DefaultClient, nil)
+	ad := NewClaudeOAuthAdaptor(tp, svc, nil)
 	ad.Init(nil)
 
 	t.Run("anthropic passthrough", func(t *testing.T) {
@@ -124,7 +124,7 @@ func TestClaudeOAuth_ConvertRequest(t *testing.T) {
 }
 
 func TestClaudeOAuth_UpstreamURL(t *testing.T) {
-	ad := NewClaudeOAuthAdaptor(&staticTokenProvider{token: "x"}, nil, nil, nil)
+	ad := NewClaudeOAuthAdaptor(&staticTokenProvider{token: "x"}, nil, nil)
 	ctx := accountCtx(provider.ChannelTypeClaudeOAuth, FormatAnthropicMessages, nil)
 	url, err := ad.GetUpstreamURL(ctx)
 	if err != nil {
@@ -137,7 +137,7 @@ func TestClaudeOAuth_UpstreamURL(t *testing.T) {
 
 func TestClaudeOAuth_BuildUpstreamRequest_Mimicry(t *testing.T) {
 	svc := identity.NewIdentityService(0)
-	ad := NewClaudeOAuthAdaptor(&staticTokenProvider{token: "tok"}, svc, http.DefaultClient, nil)
+	ad := NewClaudeOAuthAdaptor(&staticTokenProvider{token: "tok"}, svc, nil)
 	ctx := accountCtx(provider.ChannelTypeClaudeOAuth, FormatAnthropicMessages, []byte(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
 	body := []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`)
 	req, err := ad.BuildUpstreamRequest(context.Background(), ctx, FormatAnthropicMessages, body)
@@ -165,7 +165,7 @@ func TestClaudeOAuth_BuildUpstreamRequest_Mimicry(t *testing.T) {
 }
 
 func TestClaudeOAuth_BuildUpstreamRequest_UsesInlineAccessToken(t *testing.T) {
-	ad := NewClaudeOAuthAdaptor(nil, nil, http.DefaultClient, nil)
+	ad := NewClaudeOAuthAdaptor(nil, nil, nil)
 	ctx := accountCtx(provider.ChannelTypeClaudeOAuth, FormatAnthropicMessages, []byte(`{"model":"claude-sonnet-4-20250514","messages":[]}`))
 	ctx.Account.AccessToken = "inline-token"
 	req, err := ad.BuildUpstreamRequest(context.Background(), ctx, FormatAnthropicMessages, []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
@@ -182,7 +182,7 @@ func TestClaudeOAuth_BuildUpstreamRequest_UsesInlineAccessToken(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCodexOAuth_ConvertRequest(t *testing.T) {
-	ad := NewCodexOAuthAdaptor(&staticTokenProvider{token: "x"}, nil, nil, nil)
+	ad := NewCodexOAuthAdaptor(&staticTokenProvider{token: "x"}, nil, nil)
 	ad.Init(nil)
 
 	t.Run("responses passthrough", func(t *testing.T) {
@@ -220,7 +220,7 @@ func TestCodexOAuth_ConvertRequest(t *testing.T) {
 }
 
 func TestCodexOAuth_BuildUpstreamRequest(t *testing.T) {
-	ad := NewCodexOAuthAdaptor(&staticTokenProvider{token: "codex-tok"}, identity.NewIdentityService(0), http.DefaultClient, nil)
+	ad := NewCodexOAuthAdaptor(&staticTokenProvider{token: "codex-tok"}, identity.NewIdentityService(0), nil)
 	ctx := accountCtx(provider.ChannelTypeCodexOAuth, FormatOpenAIResponses, nil)
 	ctx.Account.AccountID = "acct-123"
 	req, err := ad.BuildUpstreamRequest(context.Background(), ctx, FormatOpenAIResponses, []byte(`{"model":"gpt-5","input":"hi"}`))
@@ -242,7 +242,7 @@ func TestCodexOAuth_BuildUpstreamRequest(t *testing.T) {
 }
 
 func TestCodexOAuth_BuildUpstreamRequest_UsesInlineAccessToken(t *testing.T) {
-	ad := NewCodexOAuthAdaptor(nil, nil, http.DefaultClient, nil)
+	ad := NewCodexOAuthAdaptor(nil, nil, nil)
 	ctx := accountCtx(provider.ChannelTypeCodexOAuth, FormatOpenAIResponses, nil)
 	ctx.Account.AccessToken = "inline-token"
 	req, err := ad.BuildUpstreamRequest(context.Background(), ctx, FormatOpenAIResponses, []byte(`{"model":"gpt-5","input":"hi"}`))
@@ -330,7 +330,7 @@ func TestClaudeOAuth_EndToEnd_NonStreaming(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	ad := NewClaudeOAuthAdaptor(&staticTokenProvider{token: "tok"}, identity.NewIdentityService(0), upstream.Client(), nil)
+	ad := NewClaudeOAuthAdaptor(&staticTokenProvider{token: "tok"}, identity.NewIdentityService(0), nil)
 	ctx := accountCtx(provider.ChannelTypeClaudeOAuth, FormatOpenAIChatCompletions, nil)
 	ctx.Channel.BaseURL = upstream.URL
 

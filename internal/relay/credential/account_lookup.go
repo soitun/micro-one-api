@@ -88,6 +88,6 @@ func (n *NoopAccountLookup) ExpiringSoon(_ context.Context, within time.Duration
 
 // compile-time interface checks.
 var (
-	_ AccountLookup    = (*NoopAccountLookup)(nil)
-	_ ExpiringScanner  = (*NoopAccountLookup)(nil)
+	_ AccountLookup   = (*NoopAccountLookup)(nil)
+	_ ExpiringScanner = (*NoopAccountLookup)(nil)
 )

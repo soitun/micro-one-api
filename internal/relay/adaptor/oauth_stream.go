@@ -14,6 +14,65 @@ import (
 // writes a Responses SSE stream to w. It is the streaming bridge used by the
 // ClaudeOAuthAdaptor when the client inbound format is Responses. The pipe
 // writer is closed when the stream ends or an error occurs.
+
+// streamError is emitted when the upstream SSE stream breaks mid-way (network
+// disconnect or an oversized line exceeded the scanner buffer). Rather than
+// silently finalizing as if the stream ended cleanly, we emit a terminal
+// error event so the client knows the response was truncated.
+const streamErrorMessage = "upstream stream interrupted"
+
+// writeResponsesStreamError emits a Responses-style error event followed by
+// the terminal "response.done" marker, then closes the pipe.
+func writeResponsesStreamError(w *io.PipeWriter) {
+	evt := apicompat.ResponsesStreamEvent{
+		Type: "response.failed",
+		Response: &apicompat.ResponsesResponse{
+			Status: "failed",
+			Error:  &apicompat.ResponsesError{Code: "stream_interrupted", Message: streamErrorMessage},
+		},
+	}
+	if sse, err := apicompat.ResponsesEventToSSE(evt); err == nil {
+		_, _ = io.WriteString(w, sse)
+	}
+}
+
+// writeChatStreamError emits a ChatCompletions-style error chunk followed by
+// the [DONE] sentinel, then closes the pipe.
+func writeChatStreamError(w *io.PipeWriter) {
+	chunk := apicompat.ChatCompletionsChunk{
+		ID:      "chatcmpl-stream-error",
+		Object:  "chat.completion.chunk",
+		Created: 0,
+		Model:   "",
+		Choices: []apicompat.ChatChunkChoice{{
+			Index:        0,
+			FinishReason: strPtr("error"),
+			Delta:        apicompat.ChatDelta{Role: "assistant", Content: strPtr(streamErrorMessage)},
+		}},
+	}
+	if sse, err := apicompat.ChatChunkToSSE(chunk); err == nil {
+		_, _ = io.WriteString(w, sse)
+	}
+	_, _ = io.WriteString(w, "data: [DONE]\n\n")
+}
+
+// writeAnthropicStreamError emits an Anthropic-style error event then closes
+// the pipe.
+func writeAnthropicStreamError(w *io.PipeWriter) {
+	evt := apicompat.AnthropicStreamEvent{
+		Type: "error",
+		Delta: &apicompat.AnthropicDelta{
+			Type: "error",
+			Text: streamErrorMessage,
+		},
+	}
+	if sse, err := apicompat.ResponsesAnthropicEventToSSE(evt); err == nil {
+		_, _ = io.WriteString(w, sse)
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
 func pumpAnthropicToResponses(src io.Reader, w *io.PipeWriter) {
 	defer w.Close()
 	scanner := bufio.NewScanner(src)
@@ -41,10 +100,12 @@ func pumpAnthropicToResponses(src io.Reader, w *io.PipeWriter) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		// Upstream stream broke mid-way (disconnect / oversized line). The
-		// finalize below will emit synthetic termination events so the client
-		// still receives a well-formed stream end.
-		_ = err
+		// Upstream stream broke mid-way (disconnect / oversized line). Emit a
+		// terminal error event so the client knows the response was truncated,
+		// then stop — do NOT emit synthetic finalize events that would imply a
+		// clean stream end.
+		writeResponsesStreamError(w)
+		return
 	}
 	for _, rse := range apicompat.FinalizeAnthropicResponsesStream(state) {
 		sse, err := apicompat.ResponsesEventToSSE(rse)
@@ -89,7 +150,8 @@ func pumpAnthropicToChat(src io.Reader, w *io.PipeWriter, model string) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		_ = err
+		writeChatStreamError(w)
+		return
 	}
 	// Finalize both chains.
 	for _, rse := range apicompat.FinalizeAnthropicResponsesStream(anthState) {
@@ -140,7 +202,8 @@ func pumpResponsesToAnthropic(src io.Reader, w *io.PipeWriter) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		_ = err
+		writeAnthropicStreamError(w)
+		return
 	}
 	for _, ase := range apicompat.FinalizeResponsesAnthropicStream(state) {
 		sse, err := apicompat.ResponsesAnthropicEventToSSE(ase)
@@ -181,7 +244,8 @@ func pumpResponsesToChat(src io.Reader, w *io.PipeWriter, model string) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		_ = err
+		writeChatStreamError(w)
+		return
 	}
 	for _, chunk := range apicompat.FinalizeResponsesChatStream(state) {
 		sse, err := apicompat.ChatChunkToSSE(chunk)

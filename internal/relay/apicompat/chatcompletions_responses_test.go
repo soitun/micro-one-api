@@ -24,7 +24,7 @@ func TestChatCompletionsToResponses_BasicText(t *testing.T) {
 	resp, err := ChatCompletionsToResponses(req)
 	require.NoError(t, err)
 	assert.Equal(t, "gpt-4o", resp.Model)
-	assert.True(t, resp.Stream) // always forced true
+	assert.False(t, resp.Stream) // stream defaults to false (client stream preference preserved)
 	assert.False(t, *resp.Store)
 
 	var items []ResponsesInputItem

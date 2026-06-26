@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"micro-one-api/internal/relay/provider"
 )
@@ -147,8 +146,3 @@ func apiKeyFromContext(ctx *RelayContext) string {
 	}
 	return ctx.Channel.Key
 }
-
-// defaultTimeout is the fallback HTTP timeout for adaptors that build their own
-// provider when none is supplied. It matches provider.NewOpenAIProvider's
-// default.
-const defaultTimeout = 30 * time.Second
