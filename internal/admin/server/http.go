@@ -117,6 +117,7 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandleFunc("/admin/reconciliation", handlePage)
 	srv.HandleFunc("/admin/redemptions", handlePage)
 	srv.HandleFunc("/admin/options", handlePage)
+	srv.HandleFunc("/admin/subscription-accounts", handlePage)
 	// Static assets bundled by Vite
 	srv.HandlePrefix("/assets/", http.HandlerFunc(handlePage))
 	srv.HandleFunc("/favicon.svg", handlePage)
@@ -298,6 +299,17 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 		handleSubscriptionAccounts(w, r, svc)
 	}))
 	srv.HandlePrefix("/v1/subscription-accounts/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleSubscriptionAccountByID(w, r, svc)
+	}))
+
+	// /api/subscription-accounts aliases reuse the canonical /v1/subscription-accounts
+	// handlers so the web admin client (baseURL /api) can manage subscription accounts
+	// through the same code path. Unlike the one-api compat shims (/api/channel), these
+	// mirrors are thin: the request/response shapes already match the web client.
+	srv.HandleFunc("/api/subscription-accounts", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleSubscriptionAccounts(w, r, svc)
+	}))
+	srv.HandlePrefix("/api/subscription-accounts/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleSubscriptionAccountByID(w, r, svc)
 	}))
 
@@ -1762,8 +1774,24 @@ func handleOneAPIChannels(w http.ResponseWriter, r *http.Request, svc *service.A
 	}
 }
 
+// parseSubscriptionAccountID extracts the numeric account id from either the
+// canonical /v1/subscription-accounts/{id} path or the /api alias used by the
+// web admin client.
+func parseSubscriptionAccountID(path string) (int64, bool) {
+	for _, prefix := range []string{"/v1/subscription-accounts/", "/api/subscription-accounts/"} {
+		if id, ok := parsePathID(path, prefix); ok {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 func handleSubscriptionAccountByID(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
-	rest := strings.TrimPrefix(r.URL.Path, "/v1/subscription-accounts/")
+	// Support both the canonical /v1/subscription-accounts and the /api alias
+	// used by the web admin client (baseURL /api).
+	path := r.URL.Path
+	rest := strings.TrimPrefix(path, "/v1/subscription-accounts/")
+	rest = strings.TrimPrefix(rest, "/api/subscription-accounts/")
 	if strings.HasSuffix(rest, "/status") {
 		idPart := strings.TrimSuffix(rest, "/status")
 		accountID, err := strconv.ParseInt(strings.Trim(idPart, "/"), 10, 64)
@@ -1785,7 +1813,7 @@ func handleSubscriptionAccountByID(w http.ResponseWriter, r *http.Request, svc *
 		return
 	}
 
-	accountID, ok := parsePathID(r.URL.Path, "/v1/subscription-accounts/")
+	accountID, ok := parseSubscriptionAccountID(path)
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid subscription account id"})
 		return

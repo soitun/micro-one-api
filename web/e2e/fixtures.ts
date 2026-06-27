@@ -272,4 +272,67 @@ export async function mockApi(page: Page) {
       },
     });
   });
+
+  // Subscription accounts (hybrid relay) - list + create + detail + status + delete
+  await page.route('**/api/subscription-accounts**', async (route) => {
+    const method = route.request().method();
+    const url = route.request().url();
+    const pathname = new URL(url).pathname;
+    if (method === 'GET' && /\/api\/subscription-accounts\/?$/.test(pathname)) {
+      await route.fulfill({
+        json: {
+          accounts: [
+            {
+              id: 1,
+              name: 'claude-pro-1',
+              platform: 'claude',
+              accountType: 'oauth',
+              status: 1,
+              group: 'default',
+              models: 'claude-sonnet-4-5',
+              priority: 0,
+              accountId: 'acct-123',
+              expiresAt: 1800000000,
+              updatedAt: 1700000000,
+            },
+          ],
+          total: 1,
+        },
+      });
+      return;
+    }
+    if (method === 'POST') {
+      await route.fulfill({ json: { success: true, message: '', account_id: 2 } });
+      return;
+    }
+    if (method === 'PUT' && url.endsWith('/status')) {
+      await route.fulfill({ json: { success: true, message: '' } });
+      return;
+    }
+    if (method === 'DELETE') {
+      await route.fulfill({ json: { success: true, message: '' } });
+      return;
+    }
+    await route.fulfill({
+      json: {
+        id: 1,
+        name: 'claude-pro-1',
+        platform: 'claude',
+        accountType: 'oauth',
+        status: 1,
+        group: 'default',
+        models: 'claude-sonnet-4-5',
+        priority: 0,
+        baseUrl: '',
+        accessToken: 'abcd****wxyz',
+        refreshToken: 'efgh****uvwx',
+        expiresAt: 1800000000,
+        accountId: 'acct-123',
+        fingerprint: '',
+        metadata: '',
+        createdAt: 1700000000,
+        updatedAt: 1700000000,
+      },
+    });
+  });
 }
