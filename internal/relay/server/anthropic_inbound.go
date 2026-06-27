@@ -445,7 +445,7 @@ func (s *HTTPServer) handleAnthropicMessages(w http.ResponseWriter, r *http.Requ
 		startedAt := time.Now()
 		requestID := generateRequestID()
 		estimatedTokens := s.estimateTokens(ccReq)
-		reservation, reserveErr := s.reserveQuota(ctx, fmt.Sprintf("%d", plan.Auth.UserID), requestID, estimatedTokens, plan.ResolvedModel, fmt.Sprintf("%d", ch.ID))
+		reservation, reserveErr := s.reserveQuota(ctx, fmt.Sprintf("%d", plan.Auth.UserID), requestID, estimatedTokens, plan.ResolvedModel, fmt.Sprintf("%d", ch.ID), subscriptionAccountIDFromPlan(plan))
 		if reserveErr != nil {
 			return &relaybiz.RetryableError{Status: http.StatusPaymentRequired, Err: reserveErr}
 		}
@@ -491,6 +491,7 @@ func (s *HTTPServer) handleAnthropicMessages(w http.ResponseWriter, r *http.Requ
 			CompletionTokens: int64(resp.Usage.CompletionTokens),
 			CacheReadTokens:  cacheReadTokensFromProviderUsage(resp.Usage),
 			ChannelID:        ch.ID,
+			SubscriptionAccountID: subscriptionAccountIDFromPlan(plan),
 			ElapsedTime:      time.Since(startedAt).Milliseconds(),
 			IsStream:         false,
 		}

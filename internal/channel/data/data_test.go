@@ -83,7 +83,12 @@ func setupChannelTestDB(t *testing.T) *Repository {
 			fingerprint TEXT,
 			metadata TEXT,
 			created_at INTEGER DEFAULT 0,
-			updated_at INTEGER DEFAULT 0
+			updated_at INTEGER DEFAULT 0,
+			last_used_at INTEGER DEFAULT 0,
+			rate_limited_until INTEGER DEFAULT 0,
+			quota_used_percent REAL DEFAULT 0,
+			quota_reset_at INTEGER DEFAULT 0,
+			concurrency INTEGER DEFAULT 1
 		)
 	`).Error)
 

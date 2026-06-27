@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -542,6 +543,10 @@ func handleAdminSummary(w http.ResponseWriter, r *http.Request, svc *service.Adm
 	if err != nil {
 		topTokens = []service.UsageAggregateView{}
 	}
+	topSubscriptionAccounts, err := svc.AggregateUsageTopN(r.Context(), "subscription_account", 5)
+	if err != nil {
+		topSubscriptionAccounts = []service.UsageAggregateView{}
+	}
 	reconciliation, err := svc.ListReconciliationRuns(r.Context(), 1, 1)
 	if err != nil {
 		reconciliation = &service.ListReconciliationRunsResult{}
@@ -617,6 +622,7 @@ func handleAdminSummary(w http.ResponseWriter, r *http.Request, svc *service.Adm
 		"top_channels":          enrichChannelUsage(topChannels, channels.GetChannels()),
 		"top_users":             usageAggregateViewsToMaps(topUsers),
 		"top_tokens":            usageAggregateViewsToMaps(topTokens),
+		"top_subscription_accounts": enrichSubscriptionAccountUsage(topSubscriptionAccounts, subscriptionAccounts.GetAccounts()),
 		"alerts":                adminSummaryAlerts(channels.GetChannels(), topChannels, reconciliation),
 		"latest_reconciliation": latestReconciliationRun(reconciliation),
 		"model_catalog":         oneAPIChannelModelCatalog(),
@@ -651,8 +657,9 @@ func usageAggregateViewToMap(item service.UsageAggregateView) map[string]interfa
 	return map[string]interface{}{
 		"key":               item.Key,
 		"user_id":           item.UserID,
-		"channel_id":        item.ChannelID,
-		"model":             item.Model,
+		"channel_id":             item.ChannelID,
+		"subscription_account_id": item.SubscriptionAccountID,
+		"model":                  item.Model,
 		"token_name":        item.TokenName,
 		"type":              item.Type,
 		"quota":             item.Quota,
@@ -680,6 +687,35 @@ func enrichChannelUsage(items []service.UsageAggregateView, channels []*commonv1
 			row["balance"] = channel.GetBalance()
 			row["balance_updated_time"] = channel.GetBalanceUpdatedTime()
 			row["used_quota"] = channel.GetUsedQuota()
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// enrichSubscriptionAccountUsage attaches the subscription account name,
+// platform, status and lifecycle metadata to each usage-aggregate row keyed by
+// subscription_account_id, so the cost-analysis dashboard can render
+// human-readable rows instead of bare numeric ids.
+func enrichSubscriptionAccountUsage(items []service.UsageAggregateView, accounts []*commonv1.SubscriptionAccountSummary) []map[string]interface{} {
+	accountByID := map[int64]*commonv1.SubscriptionAccountSummary{}
+	for _, account := range accounts {
+		accountByID[account.GetId()] = account
+	}
+	// The summary only fetches 5 accounts (the overview list); fetch a fuller
+	// window via the same client when available to resolve more ids. We keep
+	// best-effort: unresolved ids still surface as rows with a fallback label.
+	out := make([]map[string]interface{}, 0, len(items))
+	for _, item := range items {
+		row := usageAggregateViewToMap(item)
+		if account := accountByID[item.SubscriptionAccountID]; account != nil {
+			row["name"] = account.GetName()
+			row["platform"] = account.GetPlatform()
+			row["status"] = account.GetStatus()
+			row["account_id"] = account.GetAccountId()
+			row["expires_at"] = account.GetExpiresAt()
+		} else if item.SubscriptionAccountID != 0 {
+			row["name"] = fmt.Sprintf("订阅账号 #%d", item.SubscriptionAccountID)
 		}
 		out = append(out, row)
 	}

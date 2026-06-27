@@ -88,10 +88,11 @@ type openAIWSPoolConfig struct {
 }
 
 type responseRoute struct {
-	Model         string
-	ResolvedModel string
-	Channel       relaybiz.Channel
-	UserID        int64
+	Model                  string
+	ResolvedModel          string
+	Channel                relaybiz.Channel
+	UserID                 int64
+	SubscriptionAccountID  int64
 }
 
 // NewHTTPServer creates a new HTTP server for Kratos.
@@ -322,6 +323,7 @@ func (s *HTTPServer) handleRawRelay(upstreamPath string, requireModel bool) http
 				estimateRawTokens(body),
 				plan.ResolvedModel,
 				fmt.Sprintf("%d", ch.ID),
+			subscriptionAccountIDFromPlan(plan),
 			)
 			if reserveErr != nil {
 				return &relaybiz.RetryableError{Status: http.StatusPaymentRequired, Err: reserveErr}
@@ -476,7 +478,8 @@ func (s *HTTPServer) handleResponsesCreateLike(w http.ResponseWriter, r *http.Re
 			estimateRawTokens(upstreamBody),
 			plan.ResolvedModel,
 			fmt.Sprintf("%d", ch.ID),
-		)
+		subscriptionAccountIDFromPlan(plan),
+			)
 		if reserveErr != nil {
 			return &relaybiz.RetryableError{Status: http.StatusPaymentRequired, Err: reserveErr}
 		}
@@ -514,7 +517,7 @@ func (s *HTTPServer) handleResponsesCreateLike(w http.ResponseWriter, r *http.Re
 						upstreamResp = &relayprovider.RawResponse{StatusCode: fallbackResp.Stream.StatusCode}
 						responseChannel = ch
 						if responseID := usage.ResponseID(); responseID != "" {
-							s.storeResponseRoute(responseID, responseRoute{Model: clientModel, ResolvedModel: plan.ResolvedModel, Channel: *ch, UserID: plan.Auth.UserID})
+							s.storeResponseRoute(responseID, responseRoute{Model: clientModel, ResolvedModel: plan.ResolvedModel, Channel: *ch, UserID: plan.Auth.UserID, SubscriptionAccountID: subscriptionAccountIDFromPlan(plan)})
 						}
 						return nil
 					}
@@ -549,7 +552,7 @@ func (s *HTTPServer) handleResponsesCreateLike(w http.ResponseWriter, r *http.Re
 			upstreamResp = &relayprovider.RawResponse{StatusCode: streamResp.StatusCode}
 			responseChannel = ch
 			if responseID := usage.ResponseID(); responseID != "" {
-				s.storeResponseRoute(responseID, responseRoute{Model: clientModel, ResolvedModel: plan.ResolvedModel, Channel: *ch, UserID: plan.Auth.UserID})
+				s.storeResponseRoute(responseID, responseRoute{Model: clientModel, ResolvedModel: plan.ResolvedModel, Channel: *ch, UserID: plan.Auth.UserID, SubscriptionAccountID: subscriptionAccountIDFromPlan(plan)})
 			}
 			return nil
 		}
@@ -631,7 +634,7 @@ func (s *HTTPServer) handleResponsesCreateLike(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if responseID := extractResponseID(upstreamResp.Body); responseID != "" {
-		s.storeResponseRoute(responseID, responseRoute{Model: clientModel, ResolvedModel: plan.ResolvedModel, Channel: *responseChannel, UserID: plan.Auth.UserID})
+		s.storeResponseRoute(responseID, responseRoute{Model: clientModel, ResolvedModel: plan.ResolvedModel, Channel: *responseChannel, UserID: plan.Auth.UserID, SubscriptionAccountID: subscriptionAccountIDFromPlan(plan)})
 	}
 	writeRawResponse(w, upstreamResp)
 }
@@ -701,6 +704,7 @@ func (s *HTTPServer) forwardResponsesToStoredRoute(w http.ResponseWriter, r *htt
 		estimateRawTokens(body),
 		route.Model,
 		fmt.Sprintf("%d", route.Channel.ID),
+		route.SubscriptionAccountID,
 	)
 	if err != nil {
 		s.writeError(w, http.StatusPaymentRequired, "quota reservation failed")
@@ -986,6 +990,7 @@ func (s *HTTPServer) handleOneAPIProxy(w http.ResponseWriter, r *http.Request) {
 		estimateRawTokens(body),
 		model,
 		fmt.Sprintf("%d", channelReply.Channel.Id),
+		0,
 	)
 	if err != nil {
 		s.writeError(w, http.StatusPaymentRequired, "quota reservation failed")
@@ -1026,6 +1031,7 @@ func (s *HTTPServer) handleOneAPIProxy(w http.ResponseWriter, r *http.Request) {
 		CompletionTokens: usage.CompletionTokens,
 		CacheReadTokens:  usage.CacheReadTokens,
 		ChannelID:        channelReply.Channel.Id,
+		SubscriptionAccountID: 0,
 		ElapsedTime:      time.Since(startedAt).Milliseconds(),
 		IsStream:         false,
 	}); err != nil {
@@ -1105,7 +1111,7 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 		// Reserve quota
 		requestID := generateRequestID()
 		estimatedTokens := s.estimateTokens(&req)
-		reservation, reserveErr := s.reserveQuota(ctx, fmt.Sprintf("%d", plan.Auth.UserID), requestID, estimatedTokens, plan.ResolvedModel, fmt.Sprintf("%d", ch.ID))
+		reservation, reserveErr := s.reserveQuota(ctx, fmt.Sprintf("%d", plan.Auth.UserID), requestID, estimatedTokens, plan.ResolvedModel, fmt.Sprintf("%d", ch.ID), subscriptionAccountIDFromPlan(plan))
 		if reserveErr != nil {
 			return &relaybiz.RetryableError{Status: http.StatusPaymentRequired, Err: reserveErr}
 		}
@@ -1127,6 +1133,7 @@ func (s *HTTPServer) handleChatCompletions(w http.ResponseWriter, r *http.Reques
 				Endpoint:  "/v1/chat/completions",
 				ModelName: clientModel,
 				ChannelID: ch.ID,
+				SubscriptionAccountID: subscriptionAccountIDFromPlan(plan),
 				IsStream:  true,
 			})
 		}
@@ -1261,6 +1268,7 @@ type usageLogInput struct {
 	CompletionTokens int64
 	CacheReadTokens  int64
 	ChannelID        int64
+	SubscriptionAccountID int64
 	ElapsedTime      int64
 	IsStream         bool
 }
@@ -1282,10 +1290,11 @@ func (s *HTTPServer) ingestUsageLog(ctx context.Context, in usageLogInput) {
 		Quota:            in.Quota,
 		PromptTokens:     in.PromptTokens,
 		CompletionTokens: in.CompletionTokens,
-		CacheReadTokens:  in.CacheReadTokens,
-		ChannelId:        in.ChannelID,
-		ElapsedTime:      in.ElapsedTime,
-		IsStream:         in.IsStream,
+		CacheReadTokens:      in.CacheReadTokens,
+		ChannelId:            in.ChannelID,
+		SubscriptionAccountId: in.SubscriptionAccountID,
+		ElapsedTime:          in.ElapsedTime,
+		IsStream:             in.IsStream,
 	})
 	if err != nil && applogger.Log != nil {
 		metrics.UsageLogIngestTotal.WithLabelValues("error").Inc()
@@ -1745,13 +1754,14 @@ func (s *HTTPServer) writeJSON(w http.ResponseWriter, statusCode int, data inter
 
 // 配额管理方法
 
-func (s *HTTPServer) reserveQuota(ctx context.Context, userID, requestID string, estimatedTokens int64, model, channelID string) (*billingv1.ReserveQuotaResponse, error) {
+func (s *HTTPServer) reserveQuota(ctx context.Context, userID, requestID string, estimatedTokens int64, model, channelID string, subscriptionAccountID int64) (*billingv1.ReserveQuotaResponse, error) {
 	req := &billingv1.ReserveQuotaRequest{
-		UserId:          userID,
-		RequestId:       requestID,
-		EstimatedTokens: estimatedTokens,
-		Model:           model,
-		ChannelId:       channelID,
+		UserId:                userID,
+		RequestId:             requestID,
+		EstimatedTokens:       estimatedTokens,
+		Model:                 model,
+		ChannelId:             channelID,
+		SubscriptionAccountId: subscriptionAccountID,
 	}
 	resp, err := s.billingClient.ReserveQuota(ctx, req)
 	if err != nil {
@@ -1778,6 +1788,7 @@ func (s *HTTPServer) commitQuota(ctx context.Context, reservationID string, actu
 		req.CacheReadTokens = detail.CacheReadTokens
 		req.ElapsedTime = detail.ElapsedTime
 		req.IsStream = detail.IsStream
+		req.SubscriptionAccountId = detail.SubscriptionAccountID
 	}
 	billingCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()

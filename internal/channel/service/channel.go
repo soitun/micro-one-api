@@ -112,8 +112,13 @@ func toSubscriptionAccountSummary(account *biz.SubscriptionAccount) *commonv1.Su
 		Models:      account.ModelsCSV(),
 		Priority:    account.Priority,
 		AccountId:   account.AccountID,
-		ExpiresAt:   account.ExpiresAt,
-		UpdatedAt:   account.UpdatedAt,
+		ExpiresAt:         account.ExpiresAt,
+		UpdatedAt:         account.UpdatedAt,
+		LastUsedAt:        account.LastUsedAt,
+		RateLimitedUntil:  account.RateLimitedUntil,
+		QuotaUsedPercent:  account.QuotaUsedPercent,
+		QuotaResetAt:      account.QuotaResetAt,
+		Concurrency:       account.Concurrency,
 	}
 }
 

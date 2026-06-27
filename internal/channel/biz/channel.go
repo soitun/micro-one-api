@@ -94,6 +94,16 @@ type SubscriptionAccount struct {
 	Metadata     string
 	CreatedAt    int64
 	UpdatedAt    int64
+
+	// Lifecycle fields (migration 035): token refresh health, rate-limit
+	// cooldown and upstream subscription quota-window tracking. Surfaced on
+	// the summary so the admin health page can render subscription-account
+	// status without a separate query.
+	LastUsedAt        int64
+	RateLimitedUntil  int64
+	QuotaUsedPercent  float32
+	QuotaResetAt      int64
+	Concurrency       int32
 }
 
 type Ability struct {

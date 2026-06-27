@@ -88,6 +88,12 @@ type subscriptionAccountModel struct {
 	Metadata     *string `gorm:"column:metadata"`
 	CreatedAt    int64   `gorm:"column:created_at"`
 	UpdatedAt    int64   `gorm:"column:updated_at"`
+
+	LastUsedAt        int64   `gorm:"column:last_used_at"`
+	RateLimitedUntil  int64   `gorm:"column:rate_limited_until"`
+	QuotaUsedPercent  float32 `gorm:"column:quota_used_percent"`
+	QuotaResetAt      int64   `gorm:"column:quota_reset_at"`
+	Concurrency       int32   `gorm:"column:concurrency"`
 }
 
 func (subscriptionAccountModel) TableName() string { return "subscription_accounts" }
@@ -969,6 +975,11 @@ func (r *Repository) subscriptionAccountModelToBiz(m *subscriptionAccountModel) 
 		Metadata:     derefString(m.Metadata),
 		CreatedAt:    m.CreatedAt,
 		UpdatedAt:    m.UpdatedAt,
+		LastUsedAt:       m.LastUsedAt,
+		RateLimitedUntil: m.RateLimitedUntil,
+		QuotaUsedPercent: m.QuotaUsedPercent,
+		QuotaResetAt:     m.QuotaResetAt,
+		Concurrency:      m.Concurrency,
 	}
 }
 
@@ -991,6 +1002,11 @@ func (r *Repository) subscriptionAccountBizToModel(a *biz.SubscriptionAccount) *
 		Metadata:     stringPtr(a.Metadata),
 		CreatedAt:    a.CreatedAt,
 		UpdatedAt:    a.UpdatedAt,
+		LastUsedAt:       a.LastUsedAt,
+		RateLimitedUntil: a.RateLimitedUntil,
+		QuotaUsedPercent: a.QuotaUsedPercent,
+		QuotaResetAt:     a.QuotaResetAt,
+		Concurrency:      a.Concurrency,
 	}
 }
 

@@ -923,9 +923,10 @@ type ListReconciliationRunsResult struct {
 }
 
 type UsageAggregateView struct {
-	Key              string `json:"key"`
-	UserID           string `json:"user_id,omitempty"`
-	ChannelID        int64  `json:"channel_id,omitempty"`
+	Key                   string `json:"key"`
+	UserID                string `json:"user_id,omitempty"`
+	ChannelID             int64  `json:"channel_id,omitempty"`
+	SubscriptionAccountID int64 `json:"subscription_account_id,omitempty"`
 	Model            string `json:"model,omitempty"`
 	TokenName        string `json:"token_name,omitempty"`
 	Type             string `json:"type,omitempty"`
@@ -978,9 +979,10 @@ func (s *AdminService) AggregateUsageTopN(ctx context.Context, groupBy string, l
 
 func usageAggregateViewFromBucket(bucket *billingv1.UsageBucket, groupBy string) UsageAggregateView {
 	view := UsageAggregateView{
-		UserID:           bucket.GetUserId(),
-		ChannelID:        bucket.GetChannelId(),
-		Model:            bucket.GetModel(),
+		UserID:                bucket.GetUserId(),
+		ChannelID:             bucket.GetChannelId(),
+		SubscriptionAccountID: bucket.GetSubscriptionAccountId(),
+		Model:                 bucket.GetModel(),
 		TokenName:        bucket.GetTokenName(),
 		Type:             bucket.GetType(),
 		Quota:            bucket.GetQuota(),
@@ -997,6 +999,8 @@ func usageAggregateViewFromBucket(bucket *billingv1.UsageBucket, groupBy string)
 		view.Key = bucket.GetUserId()
 	case "channel":
 		view.Key = strconv.FormatInt(bucket.GetChannelId(), 10)
+	case "subscription_account":
+		view.Key = strconv.FormatInt(bucket.GetSubscriptionAccountId(), 10)
 	case "model":
 		view.Key = bucket.GetModel()
 	case "token":
@@ -1878,8 +1882,9 @@ func (s *AdminService) ListLedgerEntries(ctx context.Context, req *adminv1.ListL
 			"promptTokens":     entry.GetPromptTokens(),
 			"completionTokens": entry.GetCompletionTokens(),
 			"cacheReadTokens":  entry.GetCacheReadTokens(),
-			"channelId":        entry.GetChannelId(),
-			"elapsedTime":      entry.GetElapsedTime(),
+			"channelId":             entry.GetChannelId(),
+			"subscriptionAccountId": entry.GetSubscriptionAccountId(),
+			"elapsedTime":           entry.GetElapsedTime(),
 			"isStream":         entry.GetIsStream(),
 			"endpoint":         entry.GetEndpoint(),
 		})

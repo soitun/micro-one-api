@@ -185,6 +185,7 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 			estimateRawTokens(rawBody),
 			plan.ResolvedModel,
 			channelID,
+			subscriptionAccountIDFromPlan(plan),
 		)
 		if reserveErr != nil {
 			s.writeError(w, http.StatusPaymentRequired, fmt.Sprintf("reserve quota: %v", reserveErr))
@@ -227,9 +228,10 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 				Quota:            actualUsage.TotalTokens,
 				PromptTokens:     actualUsage.PromptTokens,
 				CompletionTokens: actualUsage.CompletionTokens,
-				CacheReadTokens:  actualUsage.CacheReadTokens,
-				ChannelID:        plan.Channel.ID,
-				IsStream:         true,
+				CacheReadTokens:       actualUsage.CacheReadTokens,
+				ChannelID:             plan.Channel.ID,
+				SubscriptionAccountID: subscriptionAccountIDFromPlan(plan),
+				IsStream:              true,
 			}
 			if err := s.commitQuotaAfterResponse(reservation.ReservationId, actualUsage.TotalTokens, true, logInput); err != nil {
 				s.logPostResponseCommitError(err)
@@ -266,8 +268,9 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 			Quota:            usage.TotalTokens,
 			PromptTokens:     usage.PromptTokens,
 			CompletionTokens: usage.CompletionTokens,
-			CacheReadTokens:  usage.CacheReadTokens,
-			ChannelID:        plan.Channel.ID,
+			CacheReadTokens:      usage.CacheReadTokens,
+			ChannelID:            plan.Channel.ID,
+			SubscriptionAccountID: subscriptionAccountIDFromPlan(plan),
 		}
 		if err := s.commitQuotaAfterResponse(reservation.ReservationId, usage.TotalTokens, true, logInput); err != nil {
 			s.logPostResponseCommitError(err)
@@ -310,6 +313,15 @@ func subscriptionAccountMetadataFromPlan(a *relaybiz.SubscriptionAccount) *relay
 		Fingerprint: a.Fingerprint,
 		GroupID:     a.Group,
 	}
+}
+
+// subscriptionAccountIDFromPlan returns the real subscription account id
+// selected during planning, or 0 for ordinary API-key channels.
+func subscriptionAccountIDFromPlan(plan *relaybiz.RelayPlan) int64 {
+	if plan == nil || plan.Account == nil {
+		return 0
+	}
+	return plan.Account.ID
 }
 
 func fallbackSubscriptionAccountMetadata(plan *relaybiz.RelayPlan, ch *relaybiz.Channel) *relaycredential.SubscriptionAccountMetadata {
