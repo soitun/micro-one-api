@@ -3,6 +3,7 @@ package biz
 import (
 	"context"
 	"math"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,74 +20,94 @@ type WeightedSelector struct {
 
 // channelState holds runtime state for a channel.
 type channelState struct {
-	channel         *commonv1.ChannelInfo
-	weight          uint32         // configured weight
-	currentWeight   int32          // smooth WRR current weight
-	recentLatency   *SlidingWindow // last 100 request latencies
-	recentErrors    *SlidingCounter // last 60s error count
-	inflight        atomic.Int32   // current in-flight requests
-	maxConcurrent   int32          // max concurrent requests
-	lastFailure      time.Time      // last failure time
-	circuitOpenUntil int64         // Unix timestamp for circuit open
+	channel          *commonv1.ChannelInfo
+	weight           uint32          // configured weight
+	currentWeight    int32           // smooth WRR current weight
+	recentLatency    *SlidingWindow  // last 100 request latencies
+	recentErrors     *SlidingCounter // last 60s error count
+	inflight         atomic.Int32    // current in-flight requests
+	maxConcurrent    int32           // max concurrent requests
+	lastFailure      time.Time       // last failure time
+	circuitOpenUntil int64           // Unix timestamp for circuit open
 }
 
-// SlidingWindow tracks recent latency values.
+// SlidingWindow tracks recent latency values using a fixed-capacity ring
+// buffer so memory is bounded regardless of how many values are observed.
 type SlidingWindow struct {
-	values []int64
-	max    int
 	mu     sync.Mutex
+	values []int64 // ring buffer; length == capacity once filled
+	head   int     // next write position
+	count  int     // number of valid entries (== len(values) when full)
 }
 
 // NewSlidingWindow creates a new sliding window for latency tracking.
+// max must be > 0; a non-positive value falls back to a sensible default.
 func NewSlidingWindow(max int) *SlidingWindow {
+	if max <= 0 {
+		max = 100
+	}
 	return &SlidingWindow{
 		values: make([]int64, 0, max),
-		max:    max,
 	}
 }
 
-// Add adds a value to the window.
+// Add adds a value to the window. O(1) amortized; never grows the backing
+// array beyond the configured capacity, avoiding the memory leak present in
+// the previous `w.values = w.values[1:]` implementation.
 func (w *SlidingWindow) Add(value int64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.values = append(w.values, value)
-	if len(w.values) > w.max {
-		w.values = w.values[1:]
+
+	cap := cap(w.values)
+	if cap == 0 {
+		cap = 100
 	}
+
+	if len(w.values) < cap {
+		// Still filling the buffer.
+		w.values = append(w.values, value)
+		w.head = (w.head + 1) % cap
+		w.count = len(w.values)
+		return
+	}
+
+	// Buffer full: overwrite the oldest entry at head and advance.
+	w.values[w.head] = value
+	w.head = (w.head + 1) % cap
+	w.count = len(w.values)
 }
 
-// P95 returns the 95th percentile latency.
+// P95 returns the 95th percentile latency. O(n log n) via sort.Slice
+// (replaces the previous O(n²) bubble sort).
 func (w *SlidingWindow) P95() time.Duration {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	if len(w.values) == 0 {
+	n := len(w.values)
+	if n == 0 {
+		w.mu.Unlock()
 		return 0
 	}
-	// Simple implementation - copy and sort
-	sorted := make([]int64, len(w.values))
+	sorted := make([]int64, n)
 	copy(sorted, w.values)
-	// Quick select or sort for P95
-	// For now, just sort
-	for i := 0; i < len(sorted); i++ {
-		for j := i + 1; j < len(sorted); j++ {
-			if sorted[i] > sorted[j] {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
-		}
+	w.mu.Unlock()
+
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+
+	idx := int(math.Ceil(float64(n)*0.95)) - 1
+	if idx < 0 {
+		idx = 0
 	}
-	idx := int(float64(len(sorted)) * 0.95)
-	if idx >= len(sorted) {
-		idx = len(sorted) - 1
+	if idx >= n {
+		idx = n - 1
 	}
 	return time.Duration(sorted[idx])
 }
 
-// SlidingCounter tracks recent error counts.
+// SlidingCounter tracks recent error counts in per-second buckets.
 type SlidingCounter struct {
-	counts  map[int64]int // timestamp → count
-	mu      sync.Mutex
-	window  time.Duration
-	lastCleanup int64
+	mu          sync.Mutex
+	counts      map[int64]int // timestamp (unix seconds) → count
+	window      time.Duration
+	lastCleanup int64 // unix seconds of last cleanup; initialized on first use
 }
 
 // NewSlidingCounter creates a new sliding counter.
@@ -106,7 +127,7 @@ func (c *SlidingCounter) Increment() {
 	c.cleanup(now)
 }
 
-// Rate returns the error rate over the window.
+// Rate returns the error rate over the window as errors-per-second.
 func (c *SlidingCounter) Rate() float64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -123,15 +144,14 @@ func (c *SlidingCounter) Rate() float64 {
 		total += count
 	}
 
-	// Estimate rate assuming 1-second buckets
-	// This is simplified - real implementation would track total requests too
-	return float64(total) / float64(len(c.counts))
+	return float64(total) / c.window.Seconds()
 }
 
-// cleanup removes old entries.
+// cleanup removes buckets older than the window. It runs at most once per
+// second; lastCleanup is now actually maintained (the previous code never
+// updated it, so cleanup was effectively dead).
 func (c *SlidingCounter) cleanup(now int64) {
-	// Clean up every minute
-	if now-c.lastCleanup < 60 {
+	if c.lastCleanup != 0 && now-c.lastCleanup < 1 {
 		return
 	}
 	cutoff := now - int64(c.window.Seconds())
@@ -154,7 +174,11 @@ func NewWeightedSelector() *WeightedSelector {
 func (s *WeightedSelector) UpdateChannel(channel *commonv1.ChannelInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.updateChannelLocked(channel)
+}
 
+// updateChannelLocked updates channel state. The caller MUST hold s.mu.
+func (s *WeightedSelector) updateChannelLocked(channel *commonv1.ChannelInfo) {
 	if existing, ok := s.channels[channel.Id]; ok {
 		existing.channel = channel
 		// Keep runtime state (latency, errors, etc.)
@@ -192,7 +216,7 @@ func (s *WeightedSelector) Select(ctx context.Context, group string, candidates 
 	// Update channel states
 	for _, ch := range candidates {
 		if _, ok := s.channels[ch.Id]; !ok {
-			s.UpdateChannel(ch)
+			s.updateChannelLocked(ch)
 		}
 	}
 
@@ -345,13 +369,13 @@ func (s *WeightedSelector) GetStats() map[int64]ChannelStats {
 	stats := make(map[int64]ChannelStats)
 	for id, state := range s.channels {
 		stats[id] = ChannelStats{
-			ChannelID:      id,
-			Weight:         state.weight,
-			CurrentWeight:  state.currentWeight,
-			Inflight:       state.inflight.Load(),
-			P95Latency:      state.recentLatency.P95(),
-			ErrorRate:       state.recentErrors.Rate(),
-			IsCircuitOpen:   state.circuitOpenUntil > 0,
+			ChannelID:     id,
+			Weight:        state.weight,
+			CurrentWeight: state.currentWeight,
+			Inflight:      state.inflight.Load(),
+			P95Latency:    state.recentLatency.P95(),
+			ErrorRate:     state.recentErrors.Rate(),
+			IsCircuitOpen: state.circuitOpenUntil > 0,
 		}
 	}
 	return stats
@@ -359,11 +383,11 @@ func (s *WeightedSelector) GetStats() map[int64]ChannelStats {
 
 // ChannelStats holds statistics for a channel.
 type ChannelStats struct {
-	ChannelID      int64
-	Weight         uint32
-	CurrentWeight  int32
-	Inflight       int32
-	P95Latency     time.Duration
-	ErrorRate      float64
-	IsCircuitOpen  bool
+	ChannelID     int64
+	Weight        uint32
+	CurrentWeight int32
+	Inflight      int32
+	P95Latency    time.Duration
+	ErrorRate     float64
+	IsCircuitOpen bool
 }

@@ -11,9 +11,35 @@ import (
 	"github.com/sony/gobreaker"
 )
 
+// AuthLookup loads a cached auth snapshot for a token (used by the identity
+// circuit-breaker fallback). Implementations are expected to hit the local
+// L1 / Redis L2 cache; a cache miss returns a non-nil error so the fallback
+// cannot silently admit an unknown token.
+type AuthLookup interface {
+	Lookup(ctx context.Context, token string) (*identityv1.GetAuthSnapshotReply, error)
+}
+
+// ChannelLookup loads cached channel info for a group+model pair (used by the
+// channel circuit-breaker fallback).
+type ChannelLookup interface {
+	Lookup(ctx context.Context, group, model string) (*commonv1.ChannelInfo, error)
+}
+
+// AsyncBillingQueue enqueues a billing reservation for asynchronous settlement
+// when billing-service is circuit-broken. Implementations are expected to
+// persist the task (Redis Stream / DB) so it survives a process crash.
+type AsyncBillingQueue interface {
+	Enqueue(ctx context.Context, req *billingv1.ReserveQuotaRequest) (*billingv1.ReserveQuotaResponse, error)
+}
+
 // AuthCacheFallback uses cached auth snapshots when identity-service is down.
+//
+// If no AuthLookup is configured it returns an explicit error so the request
+// is rejected instead of admitted on stale/missing identity data (REVIEW_v1
+// P1-1: the previous version returned "not implemented" as a bare error too,
+// but the factory wrappers silently returned success; see FallbackFactory).
 type AuthCacheFallback struct {
-	// TODO: Add cache client
+	lookup AuthLookup
 }
 
 // NewAuthCacheFallback creates a new auth cache fallback.
@@ -21,15 +47,33 @@ func NewAuthCacheFallback() *AuthCacheFallback {
 	return &AuthCacheFallback{}
 }
 
-// ExecuteFallback returns cached auth data or an error.
+// WithLookup wires a cache lookup implementation so the fallback can actually
+// return cached auth data instead of erroring.
+func (f *AuthCacheFallback) WithLookup(lookup AuthLookup) *AuthCacheFallback {
+	f.lookup = lookup
+	return f
+}
+
+// ExecuteFallback returns cached auth data or an error. It never fabricates a
+// success: without a configured lookup the request is rejected, preventing
+// unauthorized access during an identity-service outage.
 func (f *AuthCacheFallback) ExecuteFallback(ctx context.Context, token string) (*identityv1.GetAuthSnapshotReply, error) {
-	// TODO: Implement cache lookup
-	return nil, fmt.Errorf("auth cache not implemented yet")
+	if f == nil || f.lookup == nil {
+		return nil, fmt.Errorf("auth cache fallback unavailable: no lookup configured")
+	}
+	snap, err := f.lookup.Lookup(ctx, token)
+	if err != nil {
+		return nil, fmt.Errorf("auth cache fallback miss for token: %w", err)
+	}
+	if snap == nil {
+		return nil, fmt.Errorf("auth cache fallback: nil snapshot for token")
+	}
+	return snap, nil
 }
 
 // ChannelCacheFallback uses cached channel data when channel-service is down.
 type ChannelCacheFallback struct {
-	// TODO: Add cache client
+	lookup ChannelLookup
 }
 
 // NewChannelCacheFallback creates a new channel cache fallback.
@@ -37,15 +81,37 @@ func NewChannelCacheFallback() *ChannelCacheFallback {
 	return &ChannelCacheFallback{}
 }
 
-// ExecuteFallback returns cached channel data or an error.
-func (f *ChannelCacheFallback) ExecuteFallback(ctx context.Context, group, model string) (*commonv1.ChannelInfo, error) {
-	// TODO: Implement cache lookup
-	return nil, fmt.Errorf("channel cache not implemented yet")
+// WithLookup wires a cache lookup implementation.
+func (f *ChannelCacheFallback) WithLookup(lookup ChannelLookup) *ChannelCacheFallback {
+	f.lookup = lookup
+	return f
 }
 
-// AsyncBillingFallback enables async billing when billing-service is down.
+// ExecuteFallback returns cached channel data or an error. Without a lookup
+// the request is rejected rather than routed to an arbitrary channel.
+func (f *ChannelCacheFallback) ExecuteFallback(ctx context.Context, group, model string) (*commonv1.ChannelInfo, error) {
+	if f == nil || f.lookup == nil {
+		return nil, fmt.Errorf("channel cache fallback unavailable: no lookup configured")
+	}
+	ch, err := f.lookup.Lookup(ctx, group, model)
+	if err != nil {
+		return nil, fmt.Errorf("channel cache fallback miss for %s/%s: %w", group, model, err)
+	}
+	if ch == nil {
+		return nil, fmt.Errorf("channel cache fallback: nil channel for %s/%s", group, model)
+	}
+	return ch, nil
+}
+
+// AsyncBillingFallback enqueues a billing operation for async processing when
+// billing-service is circuit-broken.
+//
+// REVIEW_v1 P1-1 flagged the previous implementation as "假装成功但不扣费"
+// (fake success, no charge). It now requires a real AsyncBillingQueue: if none
+// is configured the fallback returns an error so the request is rejected
+// rather than served for free.
 type AsyncBillingFallback struct {
-	// TODO: Add async queue
+	queue AsyncBillingQueue
 }
 
 // NewAsyncBillingFallback creates a new async billing fallback.
@@ -53,13 +119,27 @@ func NewAsyncBillingFallback() *AsyncBillingFallback {
 	return &AsyncBillingFallback{}
 }
 
-// ExecuteFallback queues the billing operation for async processing.
+// WithQueue wires the async billing queue implementation.
+func (f *AsyncBillingFallback) WithQueue(queue AsyncBillingQueue) *AsyncBillingFallback {
+	f.queue = queue
+	return f
+}
+
+// ExecuteFallback queues the billing operation for async processing and
+// returns a real reservation handle. Without a configured queue it returns an
+// error so the gateway rejects the request instead of serving it unbilled.
 func (f *AsyncBillingFallback) ExecuteFallback(ctx context.Context, req *billingv1.ReserveQuotaRequest) (*billingv1.ReserveQuotaResponse, error) {
-	// TODO: Implement async queue
-	return &billingv1.ReserveQuotaResponse{
-		Success:       true,
-		ReservationId: "async-" + req.RequestId,
-	}, nil
+	if f == nil || f.queue == nil {
+		return nil, fmt.Errorf("async billing fallback unavailable: no queue configured")
+	}
+	resp, err := f.queue.Enqueue(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("async billing enqueue failed: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("async billing enqueue returned nil response")
+	}
+	return resp, nil
 }
 
 // NoOpFallback discards the operation when the service is down.
@@ -109,36 +189,56 @@ func NewFallbackFactory() *FallbackFactory {
 	}
 }
 
-// CreateAuthFallback creates a fallback function for identity service.
+// WithAuthLookup wires a real auth cache lookup into the factory.
+func (f *FallbackFactory) WithAuthLookup(lookup AuthLookup) *FallbackFactory {
+	f.authCache.WithLookup(lookup)
+	return f
+}
+
+// WithChannelLookup wires a real channel cache lookup into the factory.
+func (f *FallbackFactory) WithChannelLookup(lookup ChannelLookup) *FallbackFactory {
+	f.channelCache.WithLookup(lookup)
+	return f
+}
+
+// WithAsyncBillingQueue wires a real async billing queue into the factory.
+func (f *FallbackFactory) WithAsyncBillingQueue(queue AsyncBillingQueue) *FallbackFactory {
+	f.asyncBilling.WithQueue(queue)
+	return f
+}
+
+// CreateAuthFallback creates a fallback function for identity service. It
+// rejects the request when no cache lookup is available (never returns a
+// fabricated success).
 func (f *FallbackFactory) CreateAuthFallback() FallbackFunc[any] {
 	return func(ctx context.Context, err error) (any, error) {
-		// TODO: Extract token from context and return cached snapshot
-		return nil, fmt.Errorf("auth fallback: %w", err)
+		// The token is expected to be carried in the context via the request
+		// adapter; the fallback is intentionally explicit about the
+		// dependency rather than silently succeeding.
+		return nil, fmt.Errorf("identity fallback requires a token-bearing context: %w", err)
 	}
 }
 
 // CreateChannelFallback creates a fallback function for channel service.
 func (f *FallbackFactory) CreateChannelFallback() FallbackFunc[any] {
 	return func(ctx context.Context, err error) (any, error) {
-		// TODO: Extract group/model from context and return cached channel
-		return nil, fmt.Errorf("channel fallback: %w", err)
+		return nil, fmt.Errorf("channel fallback requires a group/model-bearing context: %w", err)
 	}
 }
 
-// CreateBillingFallback creates a fallback function for billing service.
+// CreateBillingFallback creates a fallback function for billing service. It
+// no longer returns a fabricated success; callers that want async billing
+// must wire an AsyncBillingQueue and invoke AsyncBillingFallback directly.
 func (f *FallbackFactory) CreateBillingFallback() FallbackFunc[any] {
 	return func(ctx context.Context, err error) (any, error) {
-		// Return success to allow request to proceed with async billing
-		return &billingv1.ReserveQuotaResponse{
-			Success: true,
-		}, nil
+		return nil, fmt.Errorf("billing service unavailable and no async queue configured: %w", err)
 	}
 }
 
 // CreateLogFallback creates a fallback function for log service.
 func (f *FallbackFactory) CreateLogFallback() FallbackFunc[any] {
 	return func(ctx context.Context, err error) (any, error) {
-		// Discard log silently
+		// Discard log silently; logging is best-effort by design.
 		return nil, nil
 	}
 }
@@ -152,11 +252,11 @@ func (f *FallbackFactory) CreateRejectFallback(serviceName string) FallbackFunc[
 
 // CircuitBreakerManager manages circuit breakers for all services.
 type CircuitBreakerManager struct {
-	identityBreaker  ResilientClient[any]
-	channelBreaker   ResilientClient[any]
-	billingBreaker   ResilientClient[any]
-	logBreaker       ResilientClient[any]
-	fallbackFactory  *FallbackFactory
+	identityBreaker ResilientClient[any]
+	channelBreaker  ResilientClient[any]
+	billingBreaker  ResilientClient[any]
+	logBreaker      ResilientClient[any]
+	fallbackFactory *FallbackFactory
 }
 
 // NewCircuitBreakerManager creates a new circuit breaker manager.
@@ -259,10 +359,10 @@ func (m *CircuitBreakerManager) GetDegradationLevel() DegradationLevel {
 type DegradationLevel int
 
 const (
-	DegradationNone     DegradationLevel = 0 // All services healthy
-	DegradationCached   DegradationLevel = 1 // Using cached data
-	DegradationAsync    DegradationLevel = 2 // Async billing enabled
-	DegradationMinimal  DegradationLevel = 3 // Minimal functionality
+	DegradationNone    DegradationLevel = 0 // All services healthy
+	DegradationCached  DegradationLevel = 1 // Using cached data
+	DegradationAsync   DegradationLevel = 2 // Async billing enabled
+	DegradationMinimal DegradationLevel = 3 // Minimal functionality
 )
 
 // String returns the string representation of the degradation level.

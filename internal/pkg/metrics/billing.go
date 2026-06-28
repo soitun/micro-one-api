@@ -124,6 +124,17 @@ var AsyncBillingFallbackToSync = prometheus.NewCounterVec(
 	[]string{},
 )
 
+// AsyncBillingDroppedFlushes counts ledger entries dropped by the async
+// batch writer (e.g. no ledger repo configured or persistence failed).
+var AsyncBillingDroppedFlushes = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Namespace: "micro_one_api",
+		Subsystem: "billing",
+		Name:      "async_dropped_flushes_total",
+		Help:      "Number of ledger entries dropped during async batch flush",
+	},
+)
+
 // Ledger and Reconciliation Metrics
 
 // LedgerWriteDuration tracks ledger entry write duration.

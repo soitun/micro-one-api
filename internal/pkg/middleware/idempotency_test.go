@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestNormalizeIdempotencyKey(t *testing.T) {
@@ -31,9 +32,9 @@ func TestNormalizeIdempotencyKey(t *testing.T) {
 
 func TestLooksLikeHash(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
-		want bool
+		want  bool
 	}{
 		{"empty", "", false},
 		{"too short", "abc123", false},
@@ -132,5 +133,112 @@ func TestIdempotencyMiddleware(t *testing.T) {
 	// The request should still succeed (original response or cached)
 	if rec3.Code != http.StatusOK {
 		t.Errorf("Expected status OK, got %d", rec3.Code)
+	}
+}
+
+func TestIdempotencyMiddleware_ReplaysLocalCachedResponse(t *testing.T) {
+	var calls int
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("X-Custom", "abc")
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte("response-body"))
+	})
+
+	mw := NewIdempotencyMiddleware(nil, DefaultIdempotencyConfig())
+
+	req1 := httptest.NewRequest("POST", "/test", nil)
+	req1.Header.Set("Idempotency-Key", "stable-key-12345")
+	rec1 := httptest.NewRecorder()
+	mw.Handler(handler).ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusAccepted {
+		t.Fatalf("first call: status %d, want %d", rec1.Code, http.StatusAccepted)
+	}
+	if rec1.Header().Get("X-Custom") != "abc" {
+		t.Fatalf("first call: missing X-Custom header")
+	}
+	if calls != 1 {
+		t.Fatalf("handler invoked %d times, want 1", calls)
+	}
+
+	// Replay with same key → must hit local cache, NOT call handler again.
+	req2 := httptest.NewRequest("POST", "/test", nil)
+	req2.Header.Set("Idempotency-Key", "stable-key-12345")
+	rec2 := httptest.NewRecorder()
+	mw.Handler(handler).ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusAccepted {
+		t.Fatalf("replay: status %d, want %d", rec2.Code, http.StatusAccepted)
+	}
+	if rec2.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("replay: missing Idempotency-Replayed header")
+	}
+	if rec2.Header().Get("X-Custom") != "abc" {
+		t.Fatalf("replay: missing X-Custom header from cache")
+	}
+	if string(rec2.Body.Bytes()) != "response-body" {
+		t.Fatalf("replay: body %q, want %q", rec2.Body.String(), "response-body")
+	}
+	if calls != 1 {
+		t.Fatalf("handler invoked %d times after replay, want 1", calls)
+	}
+}
+
+func TestIdempotencyMiddleware_NoKeyDoesNotCache(t *testing.T) {
+	var calls int
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Write([]byte("ok"))
+	})
+	mw := NewIdempotencyMiddleware(nil, DefaultIdempotencyConfig())
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest("POST", "/test", nil)
+		rec := httptest.NewRecorder()
+		mw.Handler(handler).ServeHTTP(rec, req)
+	}
+	if calls != 3 {
+		t.Fatalf("handler invoked %d times, want 3 (no idempotency key)", calls)
+	}
+}
+
+func TestIdempotencyCache_TTLEviction(t *testing.T) {
+	c := newIdempotencyCache(10, 10*time.Millisecond)
+	c.set("k", &IdempotencyResponse{StatusCode: 200, Body: []byte("x")})
+
+	if resp, ok := c.get("k"); !ok || resp.StatusCode != 200 {
+		t.Fatalf("expected cached hit before TTL")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	if _, ok := c.get("k"); ok {
+		t.Fatalf("expected entry evicted after TTL")
+	}
+}
+
+func TestIdempotencyCache_CapacityEviction(t *testing.T) {
+	c := newIdempotencyCache(2, time.Minute)
+	c.set("k1", &IdempotencyResponse{StatusCode: 200})
+	c.set("k2", &IdempotencyResponse{StatusCode: 200})
+	c.set("k3", &IdempotencyResponse{StatusCode: 200}) // should evict oldest (k1)
+
+	c.mu.RLock()
+	n := len(c.keys)
+	c.mu.RUnlock()
+	if n != 2 {
+		t.Fatalf("cache size = %d, want 2 after eviction", n)
+	}
+	c.mu.RLock()
+	_, k1Present := c.keys["k1"]
+	c.mu.RUnlock()
+	if k1Present {
+		t.Fatalf("expected k1 (oldest) evicted")
+	}
+}
+
+func TestIdempotencyCache_Defaults(t *testing.T) {
+	c := newIdempotencyCache(0, 0)
+	if c.max != 1000 || c.ttl != 5*time.Minute {
+		t.Fatalf("defaults wrong: max=%d ttl=%v", c.max, c.ttl)
 	}
 }

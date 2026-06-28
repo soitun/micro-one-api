@@ -213,13 +213,17 @@ func (c *MultiLevelCache[T]) populate(ctx context.Context, key string, value *T)
 	return nil
 }
 
-// populateL1 stores a value in L1 cache.
+// populateL1 stores a value in L1 cache. It blocks until ristretto has
+// ingested the Set so a subsequent Get observes the value (ristretto's Set is
+// processed by a background goroutine; without Wait the entry may not be
+// visible immediately).
 func (c *MultiLevelCache[T]) populateL1(key string, value *T) {
 	expiresAt := time.Time{}
 	if c.ttl > 0 {
 		expiresAt = time.Now().Add(c.ttl)
 	}
 	c.l1.Set(key, &entry[T]{data: value, expiresAt: expiresAt}, 1)
+	c.l1.Wait()
 }
 
 // marshal serializes a value for storage.
@@ -270,13 +274,14 @@ func (m *cacheMetrics) L1HitRate() float64 {
 	return float64(m.l1Hits) / float64(total)
 }
 
-// InvalidateByPattern invalidates all keys matching a pattern.
-// This uses Redis SCAN for L2 and clears all L1 entries with the prefix.
+// InvalidateByPattern invalidates all L2 keys whose Redis key matches the
+// given glob pattern (prefixed with the cache's prefix).
+//
+// L1 (ristretto) does not expose pattern-based deletion, so matching L1
+// entries are NOT removed here; callers that need a full L1 wipe should use
+// ClearAll. This is acceptable because L1 entries have a short TTL and are
+// bounded, so a stale L1 hit is time-limited.
 func (c *MultiLevelCache[T]) InvalidateByPattern(ctx context.Context, pattern string) error {
-	// Clear all matching L1 keys
-	// Since ristretto doesn't support pattern-based deletion,
-	// we'd need to track keys separately or clear the entire cache
-	// For now, we just clear L2
 	if c.l2 != nil {
 		iter := c.l2.Scan(ctx, 0, c.prefix+pattern, 0).Iterator()
 		for iter.Next(ctx) {
@@ -289,6 +294,17 @@ func (c *MultiLevelCache[T]) InvalidateByPattern(ctx context.Context, pattern st
 		}
 	}
 	return nil
+}
+
+// ClearAll removes every entry from L1. L2 is left untouched (use
+// InvalidateByPattern for targeted L2 eviction). This is the brute-force
+// fallback when a reverse index (user→tokens, channel→groups) is not
+// maintained: callers that need precise invalidation should publish an event
+// instead.
+func (c *MultiLevelCache[T]) ClearAll() {
+	if c.l1 != nil {
+		c.l1.Clear()
+	}
 }
 
 // Size returns the approximate number of items in the cache.

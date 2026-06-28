@@ -116,7 +116,7 @@ func (b *StreamEventBus) consumeLoop(topic string) {
 		msgs, err := b.redis.XRead(b.ctx, &redis.XReadArgs{
 			Streams: []string{topic, ">"},
 			Count:   10,
-			Block:  b.readTimeout,
+			Block:   b.readTimeout,
 		}).Result()
 
 		if err != nil {
@@ -226,13 +226,21 @@ type StreamStats struct {
 }
 
 // Stats returns statistics for all streams being consumed.
+//
+// The set of topics is snapshotted under the handlers lock and all Redis IO
+// happens after the lock is released, so a slow Redis cannot block
+// Subscribe/Unsubscribe on other goroutines.
 func (b *StreamEventBus) Stats(ctx context.Context) ([]*StreamStats, error) {
 	b.handlersMu.RLock()
-	defer b.handlersMu.RUnlock()
+	topics := make([]string, 0, len(b.handlers))
+	for topic := range b.handlers {
+		topics = append(topics, topic)
+	}
+	b.handlersMu.RUnlock()
 
 	var stats []*StreamStats
 
-	for topic := range b.handlers {
+	for _, topic := range topics {
 		// Get consumer group info
 		info, err := b.redis.XInfoGroups(ctx, topic).Result()
 		if err != nil {
@@ -266,12 +274,48 @@ func (b *StreamEventBus) Stats(ctx context.Context) ([]*StreamStats, error) {
 	return stats, nil
 }
 
-// ClaimPending processes pending messages that were not ACKed by a crashed consumer.
-// This is a simplified implementation that claims idle messages.
-func (b *StreamEventBus) ClaimPending(ctx context.Context, topic string) error {
-	// TODO: Implement proper pending message claiming
-	// This requires using XAUTOCLAIM or complex XPendingExt logic
-	return fmt.Errorf("ClaimPending not yet implemented")
+// ClaimPending processes pending (un-ACKed) messages for a stream that were
+// left behind by a crashed or slow consumer. It uses XAUTOCLAIM to transfer
+// ownership of messages idle for longer than minIdleTime to this consumer and
+// re-delivers them to the registered handlers. Returns the number of messages
+// reclaimed.
+//
+// This must only be called for topics that have been Subscribe'd (and thus
+// have a consumer group).
+func (b *StreamEventBus) ClaimPending(ctx context.Context, topic string, minIdleTime time.Duration) (int, error) {
+	const batchSize = "100"
+	cursor := "0-0"
+	claimed := 0
+
+	for {
+		msgs, next, err := b.redis.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+			Stream:   topic,
+			Group:    b.consumerGroup,
+			Consumer: b.consumerID,
+			MinIdle:  minIdleTime,
+			Start:    cursor,
+			Count:    100,
+		}).Result()
+		if err != nil && err != redis.Nil {
+			return claimed, fmt.Errorf("xautoclaim on %s: %w", topic, err)
+		}
+
+		for i := range msgs {
+			b.processMessage(topic, &msgs[i])
+			claimed++
+		}
+
+		cursor = next
+		if next == "" || next == "0-0" {
+			break
+		}
+		if len(msgs) == 0 {
+			break
+		}
+		_ = batchSize // batchSize kept for documentation; Count is hardcoded above
+	}
+
+	return claimed, nil
 }
 
 // Trim trims the stream to the specified maximum length.

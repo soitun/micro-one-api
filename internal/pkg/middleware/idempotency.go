@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	applogger "micro-one-api/internal/pkg/logger"
@@ -59,21 +60,88 @@ type IdempotencyResponse struct {
 	Replay     bool              `json:"replay"`
 }
 
-// idempotencyCache provides local in-memory caching for recent idempotency keys.
+// idempotencyCache provides local in-memory caching for recent idempotency
+// keys with bounded size and TTL-based eviction.
 type idempotencyCache struct {
-	mu    sync.RWMutex
-	keys  map[string]*IdempotencyResponse
-	max   int
-	ttl   time.Duration
-	timer *time.Timer
+	mu        sync.RWMutex
+	keys      map[string]*idempotencyEntry
+	max       int
+	ttl       time.Duration
+	lastSweep time.Time
+}
+
+// idempotencyEntry pairs a cached response with its insertion time for TTL.
+type idempotencyEntry struct {
+	resp    *IdempotencyResponse
+	addedAt time.Time
 }
 
 func newIdempotencyCache(max int, ttl time.Duration) *idempotencyCache {
-	return &idempotencyCache{
-		keys: make(map[string]*IdempotencyResponse),
-		max:  max,
-		ttl:  ttl,
+	if max <= 0 {
+		max = 1000
 	}
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	return &idempotencyCache{
+		keys:      make(map[string]*idempotencyEntry),
+		max:       max,
+		ttl:       ttl,
+		lastSweep: time.Now(),
+	}
+}
+
+// get returns a cached response if present and not expired. Sweep of expired
+// entries runs opportunistically at most once per ttl.
+func (c *idempotencyCache) get(key string) (*IdempotencyResponse, bool) {
+	c.mu.RLock()
+	e, ok := c.keys[key]
+	c.mu.RUnlock()
+	if !ok || e == nil {
+		return nil, false
+	}
+	if time.Since(e.addedAt) > c.ttl {
+		c.mu.Lock()
+		delete(c.keys, key)
+		c.mu.Unlock()
+		return nil, false
+	}
+	e.resp.Replay = true
+	return e.resp, true
+}
+
+// set stores a response, evicting the oldest entry if at capacity.
+func (c *idempotencyCache) set(key string, resp *IdempotencyResponse) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	// Opportunistic sweep of expired entries.
+	if now.Sub(c.lastSweep) >= c.ttl {
+		for k, ent := range c.keys {
+			if now.Sub(ent.addedAt) > c.ttl {
+				delete(c.keys, k)
+			}
+		}
+		c.lastSweep = now
+	}
+
+	if len(c.keys) >= c.max {
+		// Evict the oldest entry (approximate LRU by insertion time).
+		var oldestKey string
+		var oldestAt = now
+		for k, ent := range c.keys {
+			if ent.addedAt.Before(oldestAt) {
+				oldestAt = ent.addedAt
+				oldestKey = k
+			}
+		}
+		if oldestKey != "" {
+			delete(c.keys, oldestKey)
+		}
+	}
+
+	c.keys[key] = &idempotencyEntry{resp: resp, addedAt: now}
 }
 
 // NewIdempotencyMiddleware creates a new idempotency middleware.
@@ -123,9 +191,9 @@ func (im *IdempotencyMiddleware) Handler(next http.Handler) http.Handler {
 		// Wrap the response writer to capture the response
 		wrapped := &idempotentResponseWriter{
 			ResponseWriter: w,
-			request:       r,
-			key:           normalizedKey,
-			middleware:    im,
+			request:        r,
+			key:            normalizedKey,
+			middleware:     im,
 		}
 
 		// Process the request
@@ -135,15 +203,11 @@ func (im *IdempotencyMiddleware) Handler(next http.Handler) http.Handler {
 
 // getCachedResponse retrieves a cached response if available.
 func (im *IdempotencyMiddleware) getCachedResponse(ctx context.Context, key string) *IdempotencyResponse {
-	// Check local cache first
+	// Check local cache first (TTL-aware).
 	if im.localCache != nil {
-		im.localCache.mu.RLock()
-		if resp, ok := im.localCache.keys[key]; ok {
-			im.localCache.mu.RUnlock()
-			resp.Replay = true
+		if resp, ok := im.localCache.get(key); ok {
 			return resp
 		}
-		im.localCache.mu.RUnlock()
 	}
 
 	// Check Redis
@@ -151,14 +215,19 @@ func (im *IdempotencyMiddleware) getCachedResponse(ctx context.Context, key stri
 		redisKey := im.redisKey(key)
 		data, err := im.redis.Get(ctx, redisKey).Bytes()
 		if err == nil && len(data) > 0 {
-			// Deserialize response
-			// For simplicity, we'll assume JSON here
-			// In production, use a proper serialization format
-			// For now, return nil as this is a placeholder
-			applogger.Log.Debug("Idempotency key found in Redis",
-				zap.String("key", key),
-			)
-			// TODO: Implement proper deserialization
+			var resp IdempotencyResponse
+			if err := sonic.Unmarshal(data, &resp); err == nil {
+				// Populate local cache for future replays.
+				if im.localCache != nil {
+					im.localCache.set(key, &resp)
+				}
+				resp.Replay = true
+				return &resp
+			}
+			if applogger.Log != nil {
+				applogger.Log.Debug("failed to unmarshal idempotency response from Redis",
+					zap.String("key", key), zap.Error(err))
+			}
 		}
 	}
 
@@ -169,18 +238,22 @@ func (im *IdempotencyMiddleware) getCachedResponse(ctx context.Context, key stri
 func (im *IdempotencyMiddleware) cacheResponse(ctx context.Context, key string, resp *IdempotencyResponse) {
 	// Store in local cache
 	if im.localCache != nil && im.config.CacheKeys {
-		im.localCache.mu.Lock()
-		im.localCache.keys[key] = resp
-		im.localCache.mu.Unlock()
+		im.localCache.set(key, resp)
 	}
 
 	// Store in Redis
 	if im.redis != nil {
 		redisKey := im.redisKey(key)
-		// TODO: Implement proper serialization
-		// For now, we'll skip storing in Redis
-		_ = redisKey
-		_ = ctx
+		if data, err := sonic.Marshal(resp); err == nil {
+			ttl := im.config.TTL
+			if ttl <= 0 {
+				ttl = 24 * time.Hour
+			}
+			if err := im.redis.Set(ctx, redisKey, data, ttl).Err(); err != nil && applogger.Log != nil {
+				applogger.Log.Debug("failed to store idempotency response in Redis",
+					zap.String("key", key), zap.Error(err))
+			}
+		}
 	}
 }
 
@@ -226,7 +299,9 @@ func (iw *idempotentResponseWriter) WriteHeader(statusCode int) {
 	iw.ResponseWriter.WriteHeader(statusCode)
 }
 
-// Write captures the body and writes it.
+// Write captures the body and writes it. The response is cached on the first
+// write (after finalizing status code and headers) so subsequent replays
+// return the identical response.
 func (iw *idempotentResponseWriter) Write(data []byte) (int, error) {
 	if !iw.written {
 		iw.statusCode = http.StatusOK
@@ -235,6 +310,9 @@ func (iw *idempotentResponseWriter) Write(data []byte) (int, error) {
 
 	// Cache the response on first write
 	if iw.key != "" {
+		// Snapshot headers now (Header() may have been mutated between
+		// WriteHeader and Write).
+		iw.captureHeaders()
 		resp := &IdempotencyResponse{
 			StatusCode: iw.statusCode,
 			Headers:    iw.headers,
@@ -251,17 +329,19 @@ func (iw *idempotentResponseWriter) Write(data []byte) (int, error) {
 
 // Header returns the header map.
 func (iw *idempotentResponseWriter) Header() http.Header {
+	return iw.ResponseWriter.Header()
+}
+
+// captureHeaders snapshots the current response headers (first value of each)
+// into iw.headers for later caching.
+func (iw *idempotentResponseWriter) captureHeaders() {
 	h := iw.ResponseWriter.Header()
-	// Capture headers
-	if iw.headers == nil {
-		iw.headers = make(map[string]string)
-		for k, v := range h {
-			if len(v) > 0 {
-				iw.headers[k] = v[0]
-			}
+	iw.headers = make(map[string]string, len(h))
+	for k, v := range h {
+		if len(v) > 0 {
+			iw.headers[k] = v[0]
 		}
 	}
-	return h
 }
 
 // normalizeIdempotencyKey normalizes an idempotency key for consistent hashing.

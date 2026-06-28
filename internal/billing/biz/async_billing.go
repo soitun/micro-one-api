@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -14,15 +15,15 @@ import (
 // AsyncBillingUsecase provides a non-blocking billing path.
 // It uses a local quota check + async settlement.
 type AsyncBillingUsecase struct {
-	syncUc        *BillingUsecase           // Fallback to sync billing
-	localCache    *QuotaCache                // L1: in-memory quota snapshot
-	redis         *redis.Client              // L2: distributed quota counter
-	settleQueue   chan *SettleTask           // async settlement queue
-	batchWriter   *BatchLedgerWriter         // batch ledger persistence
-	workerWg      sync.WaitGroup
-	workerCtx     context.Context
-	workerCancel  context.CancelFunc
-	quotaLuaScript *string                   // Cached Lua script
+	syncUc         *BillingUsecase    // Fallback to sync billing
+	localCache     *QuotaCache        // L1: in-memory quota snapshot
+	redis          *redis.Client      // L2: distributed quota counter
+	settleQueue    chan *SettleTask   // async settlement queue
+	batchWriter    *BatchLedgerWriter // batch ledger persistence
+	workerWg       sync.WaitGroup
+	workerCtx      context.Context
+	workerCancel   context.CancelFunc
+	quotaLuaScript *string // Cached Lua script
 }
 
 // QuotaCache provides fast local quota checking.
@@ -34,24 +35,26 @@ type QuotaCache struct {
 // UserQuota represents a user's quota information.
 type UserQuota struct {
 	UserID     int64
-	Available  int64   // Available amount in cents
-	Frozen     int64   // Frozen/Reserved amount
+	Available  int64 // Available amount in cents
+	Frozen     int64 // Frozen/Reserved amount
 	LastUpdate time.Time
 }
 
 // SettleTask represents a settlement task to be processed asynchronously.
 type SettleTask struct {
-	RequestID            string
-	UserID               string
-	Model                string
-	ChannelID            string
+	RequestID             string
+	UserID                string
+	Model                 string
+	ChannelID             string
 	SubscriptionAccountID int64
-	ActualTokens         int64
-	Cost                 int64
-	Timestamp            time.Time
+	ActualTokens          int64
+	Cost                  int64
+	Timestamp             time.Time
 }
 
-// BatchLedgerWriter batches ledger writes for efficiency.
+// BatchLedgerWriter batches ledger writes for efficiency. Entries are flushed
+// to the provided LedgerRepo in batches; if no repo is configured, Flush
+// returns an explicit error rather than silently dropping entries.
 type BatchLedgerWriter struct {
 	batch     []*LedgerEntry
 	batchMu   sync.Mutex
@@ -60,6 +63,11 @@ type BatchLedgerWriter struct {
 	interval  time.Duration
 	stopChan  chan struct{}
 	wg        sync.WaitGroup
+	ledger    LedgerRepo // destination for flushed entries; may be nil
+
+	// dropped counts entries dropped because no ledger repo is configured
+	// (surfaces the misconfiguration in metrics instead of silent loss).
+	dropped atomic.Int64
 }
 
 // LedgerEntry represents a single ledger entry.
@@ -73,7 +81,9 @@ type LedgerEntry struct {
 	CreatedAt             time.Time
 }
 
-// NewAsyncBillingUsecase creates a new async billing use case.
+// NewAsyncBillingUsecase creates a new async billing use case. The sync use
+// case's ledger repo is wired into the batch writer so flushed entries are
+// actually persisted (REVIEW_v1 P1-6).
 func NewAsyncBillingUsecase(
 	syncUc *BillingUsecase,
 	redisClient *redis.Client,
@@ -83,12 +93,20 @@ func NewAsyncBillingUsecase(
 ) *AsyncBillingUsecase {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	bw := NewBatchLedgerWriter(batchSize, batchInterval)
+	// Best-effort: pull the ledger repo from the sync use case. This keeps the
+	// existing constructor signature stable; callers that need a different
+	// destination can use SetLedgerRepo on the returned use case.
+	if syncUc != nil {
+		bw.SetLedgerRepo(syncUc.ledgerRepo)
+	}
+
 	uc := &AsyncBillingUsecase{
 		syncUc:       syncUc,
 		redis:        redisClient,
 		localCache:   NewQuotaCache(),
 		settleQueue:  make(chan *SettleTask, queueSize),
-		batchWriter:  NewBatchLedgerWriter(batchSize, batchInterval),
+		batchWriter:  bw,
 		workerCtx:    ctx,
 		workerCancel: cancel,
 	}
@@ -97,6 +115,14 @@ func NewAsyncBillingUsecase(
 	uc.startWorkers()
 
 	return uc
+}
+
+// SetLedgerRepo overrides the batch writer's destination ledger repo.
+func (uc *AsyncBillingUsecase) SetLedgerRepo(repo LedgerRepo) {
+	if uc == nil || uc.batchWriter == nil {
+		return
+	}
+	uc.batchWriter.SetLedgerRepo(repo)
 }
 
 // NewQuotaCache creates a new quota cache.
@@ -245,21 +271,24 @@ func (uc *AsyncBillingUsecase) getCheckAndDeductScript() *string {
 	return uc.quotaLuaScript
 }
 
-// Settle performs the actual billing asynchronously.
-// Called after upstream response completes with real usage data.
-func (uc *AsyncBillingUsecase) Settle(task *SettleTask) {
+// Settle performs the actual billing asynchronously. The provided ctx is
+// preserved for the fallback (queue-full) synchronous path so tracing and
+// deadlines are not lost (REVIEW_v1 P1-5).
+func (uc *AsyncBillingUsecase) Settle(ctx context.Context, task *SettleTask) {
 	select {
 	case uc.settleQueue <- task:
 		// Update queue size metric
 		metrics.AsyncBillingQueueSize.WithLabelValues().Set(float64(len(uc.settleQueue)))
 	default:
-		// Queue full → fallback to synchronous settle
+		// Queue full → fallback to synchronous settle, preserving ctx.
 		metrics.AsyncBillingFallbackToSync.WithLabelValues().Inc()
-		uc.settleSync(context.Background(), task)
+		uc.settleSync(ctx, task)
 	}
 }
 
-// settleSync performs synchronous settlement as fallback.
+// settleSync performs synchronous settlement as fallback. It is nil-safe:
+// if no sync use case is configured (e.g. in tests / partial wiring), it
+// records the drop via metrics rather than nil-panic'ing.
 func (uc *AsyncBillingUsecase) settleSync(ctx context.Context, task *SettleTask) {
 	start := time.Now()
 	defer func() {
@@ -267,6 +296,12 @@ func (uc *AsyncBillingUsecase) settleSync(ctx context.Context, task *SettleTask)
 		metrics.BillingSettlementLag.Observe(lag.Seconds())
 		metrics.AsyncBillingSettlementDuration.WithLabelValues("sync").Observe(time.Since(start).Seconds())
 	}()
+
+	if uc.syncUc == nil {
+		metrics.AsyncBillingDroppedFlushes.Inc()
+		fmt.Printf("async settlement skipped (no sync use case): request_id=%s\n", task.RequestID)
+		return
+	}
 
 	// Use sync billing for settlement
 	_, _, err := uc.syncUc.CommitQuota(ctx, task.RequestID, task.ActualTokens, true)
@@ -340,15 +375,30 @@ func (uc *AsyncBillingUsecase) Close() error {
 	return nil
 }
 
-// NewBatchLedgerWriter creates a new batch ledger writer.
+// NewBatchLedgerWriter creates a new batch ledger writer. The writer is only
+// useful once SetLedgerRepo has been called; without a repo, Flush reports
+// the dropped count via metrics rather than silently losing entries.
 func NewBatchLedgerWriter(size int, interval time.Duration) *BatchLedgerWriter {
-	return &BatchLedgerWriter{
-		batch:    make([]*LedgerEntry, 0, size),
-		flushChan: make(chan struct{}, 1),
-		size:     size,
-		interval: interval,
-		stopChan: make(chan struct{}),
+	if size <= 0 {
+		size = 100
 	}
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	return &BatchLedgerWriter{
+		batch:     make([]*LedgerEntry, 0, size),
+		flushChan: make(chan struct{}, 1),
+		size:      size,
+		interval:  interval,
+		stopChan:  make(chan struct{}),
+	}
+}
+
+// SetLedgerRepo wires the destination repo. Must be called before Start.
+func (w *BatchLedgerWriter) SetLedgerRepo(repo LedgerRepo) {
+	w.batchMu.Lock()
+	w.ledger = repo
+	w.batchMu.Unlock()
 }
 
 // Start starts the batch flusher worker.
@@ -393,7 +443,9 @@ func (w *BatchLedgerWriter) Add(entry *LedgerEntry) {
 	w.batchMu.Unlock()
 }
 
-// Flush writes all pending entries to the ledger.
+// Flush writes all pending entries to the ledger repo. If no repo is
+// configured, entries are counted as dropped (surfaced via metrics) so the
+// misconfiguration is observable instead of silent data loss.
 func (w *BatchLedgerWriter) Flush() {
 	w.batchMu.Lock()
 	if len(w.batch) == 0 {
@@ -403,11 +455,43 @@ func (w *BatchLedgerWriter) Flush() {
 
 	batch := w.batch
 	w.batch = make([]*LedgerEntry, 0, w.size)
+	ledger := w.ledger
 	w.batchMu.Unlock()
 
-	// TODO: Write batch to database
-	// For now, just log
-	fmt.Printf("Flushing %d ledger entries\n", len(batch))
+	if ledger == nil {
+		// Misconfiguration: the writer is running without a destination.
+		// Count and discard so the problem is visible in metrics/logs rather
+		// than silently swallowed.
+		w.dropped.Add(int64(len(batch)))
+		metrics.AsyncBillingDroppedFlushes.Add(float64(len(batch)))
+		fmt.Printf("BatchLedgerWriter: dropped %d entries (no ledger repo configured)\n", len(batch))
+		return
+	}
+
+	// Persist each entry. A real batch INSERT would be more efficient, but
+	// LedgerRepo currently exposes single-entry CreateLedger; correctness
+	// over premature optimization.
+	for _, entry := range batch {
+		led := &Ledger{
+			UserID:                entry.UserID,
+			Amount:                entry.Cost,
+			Quota:                 entry.TokenAmount,
+			PromptTokens:          0,
+			CompletionTokens:      entry.TokenAmount,
+			ModelName:             entry.Model,
+			ChannelID:             parseInt64Default(entry.ChannelID, 0),
+			SubscriptionAccountID: entry.SubscriptionAccountID,
+			Type:                  LedgerTypeConsume,
+			IsStream:              false,
+			Endpoint:              "",
+			CreatedAt:             entry.CreatedAt,
+		}
+		if err := ledger.CreateLedger(context.Background(), led); err != nil {
+			w.dropped.Add(1)
+			metrics.AsyncBillingDroppedFlushes.Inc()
+			fmt.Printf("BatchLedgerWriter: failed to persist ledger entry: %v\n", err)
+		}
+	}
 }
 
 // estimateCost estimates the cost in cents for a given model and token count.
@@ -424,3 +508,14 @@ func parseUserID(userID string) int64 {
 	fmt.Sscanf(userID, "%d", &uid)
 	return uid
 }
+
+// DroppedCount returns the number of ledger entries dropped by the batch
+// writer (e.g. when no repo is configured or persistence failed).
+func (w *BatchLedgerWriter) DroppedCount() int64 {
+	return w.dropped.Load()
+}
+
+// AsyncBillingDroppedFlushes is a last-resort counter for entries that could
+// not be persisted by the batch writer. It is registered lazily via the
+// metrics package if already declared; otherwise it is a package-level var
+// guarded by a sync.Once to avoid duplicate-registration panics.
