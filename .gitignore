@@ -77,3 +77,5 @@ dist/
 
 # Subscription account import payloads (contain plaintext OAuth tokens)
 subscription-account.*.payload.json
+
+*.tar
