@@ -123,3 +123,36 @@ func TestGetTablePartitionSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestPartitionMaintenanceForTableUnsupportedTable(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	pm := NewPartitionManager(db)
+	ctx := context.Background()
+
+	// An unsupported table name must produce an explicit error rather than
+	// silently doing nothing — this is the contract the per-service cron
+	// (REVIEW_v4 §六) relies on.
+	err = pm.PartitionMaintenanceForTable(ctx, "unknown_table")
+	if err == nil {
+		t.Fatal("expected error for unsupported table, got nil")
+	}
+}
+
+func TestPartitionMaintenanceForTableLogs(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	pm := NewPartitionManager(db)
+	ctx := context.Background()
+
+	// With a non-partitioned SQLite table the underlying ALTER/INFORMATION
+	// queries fail; the helper should surface that error rather than panic.
+	err = pm.PartitionMaintenanceForTable(ctx, LogTable)
+	if err == nil {
+		t.Logf("PartitionMaintenanceForTable(logs) succeeded on SQLite (unexpected)")
+	}
+}

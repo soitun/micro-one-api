@@ -79,6 +79,17 @@ type ReconAlertConfig struct {
 }
 
 type PartitionConfig struct {
-	Enabled  bool   `json:"enabled"`
-	Interval string `json:"interval"`
+	Enabled  bool     `json:"enabled"`
+	Interval string   `json:"interval"`
+	Tables   []string `json:"tables"`
+}
+
+// PartitionTables returns the tables to maintain, defaulting to both
+// partitioned tables when unset (backward compatible with v4 which ran
+// PartitionMaintenance across both tables).
+func (c PartitionConfig) PartitionTables() []string {
+	if len(c.Tables) > 0 {
+		return c.Tables
+	}
+	return []string{"logs", "billing_ledgers"}
 }

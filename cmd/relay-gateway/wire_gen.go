@@ -297,6 +297,19 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	}
 	identityClient = relaydata.NewCachedIdentityClient(identityClient, authCache)
 
+	// ChannelCache fronts the channel-service SelectChannel RPC. It is gated
+	// by the channel_cache feature flag (default off); when off the client is
+	// used unchanged. Failover selections bypass the cache, so retry/failover
+	// never replays a failed top-priority channel.
+	if cfg.ChannelCache.GetChannelCacheEnabled() {
+		channelLoader := appcache.NewChannelCacheLoader(channelClient, nil, resilienceTimeout)
+		channelCache, cErr := appcache.NewChannelCache(redisClient, nil, channelLoader.Load)
+		if cErr != nil {
+			return nil, nil, fmt.Errorf("create channel cache: %w", cErr)
+		}
+		channelClient = relaydata.NewCachedChannelClient(channelClient, channelCache)
+	}
+
 	modelMapper := newModelMapper(cfg)
 	retryPolicy := newRetryPolicy(cfg)
 

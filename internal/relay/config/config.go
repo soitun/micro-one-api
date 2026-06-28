@@ -13,6 +13,7 @@ type Config struct {
 	OpenAIWS          OpenAIWSConfig          `json:"openai_ws" yaml:"openai_ws"`
 	HybridAdaptor     HybridAdaptorConfig     `json:"hybrid_adaptor" yaml:"hybrid_adaptor"`
 	RelayOrchestrator RelayOrchestratorConfig `json:"relay_orchestrator" yaml:"relay_orchestrator"`
+	ChannelCache      ChannelCacheConfig      `json:"channel_cache" yaml:"channel_cache"`
 	Idempotency       IdempotencyConfig       `json:"idempotency" yaml:"idempotency"`
 	Audit             AuditConfig             `json:"audit" yaml:"audit"`
 	Resilience        ResilienceConfig        `json:"resilience" yaml:"resilience"`
@@ -27,6 +28,18 @@ type RelayOrchestratorConfig struct {
 
 // GetRelayOrchestratorEnabled reports whether the orchestrator route is enabled.
 func (c RelayOrchestratorConfig) GetRelayOrchestratorEnabled() bool { return c.Enabled }
+
+// ChannelCacheConfig controls the multi-level ChannelCache that fronts the
+// channel-service SelectChannel RPC. Disabled by default; when enabled (and
+// Redis is configured) it caches channel-selection results per group+model
+// to cut channel-service gRPC load on hot models. Failover selections
+// (ExcludeFirstPriority=true) always bypass the cache.
+type ChannelCacheConfig struct {
+	Enabled bool `json:"enabled" yaml:"enabled"`
+}
+
+// GetChannelCacheEnabled reports whether the channel cache is enabled.
+func (c ChannelCacheConfig) GetChannelCacheEnabled() bool { return c.Enabled }
 
 type IdempotencyConfig struct {
 	Enabled bool   `json:"enabled" yaml:"enabled"`

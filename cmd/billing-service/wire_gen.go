@@ -181,20 +181,27 @@ func startPartitionMaintenance(ctx context.Context, db *gorm.DB, cfg bcfg.Partit
 	maintenanceCtx, cancel := context.WithCancel(ctx)
 	pm := appdb.NewPartitionManager(db)
 	interval := parseDurationOrDefault(cfg.Interval, 24*time.Hour)
+	tables := cfg.PartitionTables()
+	runMaintenance := func() {
+		for _, table := range tables {
+			if err := pm.PartitionMaintenanceForTable(maintenanceCtx, table); err != nil {
+				applogger.Log.Warn("partition maintenance failed",
+					zap.String("table", table), zap.Error(err))
+			}
+		}
+	}
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		if err := pm.PartitionMaintenance(maintenanceCtx); err != nil {
-			applogger.Log.Warn("partition maintenance failed", zap.Error(err))
-		}
+		// Run once immediately so newly-enabled services don't wait a full
+		// interval before their first partition is created.
+		runMaintenance()
 		for {
 			select {
 			case <-maintenanceCtx.Done():
 				return
 			case <-ticker.C:
-				if err := pm.PartitionMaintenance(maintenanceCtx); err != nil {
-					applogger.Log.Warn("partition maintenance failed", zap.Error(err))
-				}
+				runMaintenance()
 			}
 		}
 	}()

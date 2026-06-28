@@ -94,6 +94,17 @@ func NewMemoryRepositoryForTest() *Repository {
 	return &Repository{mem: map[int64]*biz.LogEntry{}}
 }
 
+// DB returns the underlying *gorm.DB used by the repository, or nil when the
+// repository is backed by the in-memory store. It is exposed so the
+// log-service can run periodic partition maintenance (REVIEW_v4 §六) without
+// the data package depending on the db utilities.
+func (r *Repository) DB() *gorm.DB {
+	if r == nil {
+		return nil
+	}
+	return r.db
+}
+
 func (r *Repository) Get(ctx context.Context, id int64) (*biz.LogEntry, error) {
 	if r.db != nil {
 		return r.getDB(ctx, id)
