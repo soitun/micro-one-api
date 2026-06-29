@@ -1,4 +1,4 @@
-# Issue #4 SQLite 轻量化部署方案
+# Issue #4 SQLite / Postgres 轻量化部署落地说明
 
 ## 背景
 
@@ -9,375 +9,256 @@ Issue: <https://github.com/mengbin92/micro-one-api/issues/4>
 - 维护者回复：可以支持，但当前在做其它功能，后续会支持。
 - 用户补充：Docker 部署后端参数比较复杂，建议默认 SQLite 最简化配置。
 
+本轮实现已完成 SQLite3 轻量部署支持，并在方案基础上额外增加了 Postgres 支持。当前项目运行时支持三种数据库方言：
+
+- `mysql`：保留原有生产部署路径。
+- `sqlite3` / `sqlite`：用于单机轻量部署。
+- `postgres` / `postgresql`：用于偏生产化的开源数据库部署。
+
 ## 结论
 
-可以支持 SQLite，并且适合作为单机、轻量、自托管部署的默认数据库；MySQL 仍应保留为生产、高并发、多实例部署的推荐数据库。
+SQLite3 可以作为单机、自托管、低维护成本部署的默认推荐路径；MySQL 和 Postgres 适合更长期、并发更高或需要外部数据库运维能力的部署。
 
-推荐方案不是把现有 MySQL 迁移脚本直接兼容 SQLite，而是引入明确的数据库方言层：
+落地方式不是把现有 MySQL 迁移脚本改造成跨库 SQL，而是引入明确的数据库方言层：
 
-- 运行时通过 `data.database.driver` 或环境变量选择 `mysql` / `sqlite`。
-- 迁移工具支持 `-driver` 和 `-dir`，分别执行 MySQL 与 SQLite 迁移集。
-- 提供 `docker-compose.lite.yml`，默认使用 SQLite 文件卷，移除 MySQL 服务和 MySQL 必填参数。
-- 分区、MySQL 专用索引、MySQL 专用 DDL 在 SQLite 模式下禁用或替换为 SQLite 兼容实现。
+- 运行时通过 `data.database.driver` / `DATABASE_DRIVER` 选择数据库方言。
+- `cmd/migrate` 支持 `MIGRATIONS_DRIVER` / `-driver`，并按方言执行迁移目录。
+- 提供 SQLite3 专用 `docker-compose.lite.yml`。
+- 提供 Postgres 专用 `docker-compose.postgres.yml`。
+- MySQL 专用分区维护在非 MySQL 方言下自动 no-op。
+- 对 MySQL 专用查询函数补充 SQLite3 / Postgres 分支。
 
-## 仓库现状
+## 当前实现
 
-### 已具备的基础
+### 数据库打开器
 
-`go.mod` 已经包含 SQLite 相关依赖：
-
-- `github.com/mattn/go-sqlite3`
-- `gorm.io/driver/sqlite`
-
-多处单元测试也已经用 SQLite 作为内存数据库，例如：
-
-- `internal/pkg/migrate/runner_test.go`
-- `internal/pkg/db/partition_test.go`
-- `internal/billing/data/*_test.go`
-- `internal/channel/data/data_test.go`
-
-这说明业务仓储中已有不少查询可以在 SQLite 上运行。
-
-### 当前阻塞点
-
-1. 生产数据库入口固定为 MySQL
-
-   `internal/pkg/xdb/mysql.go` 只提供 `OpenMySQL`。`identity`、`channel`、`billing`、`log`、`monitor` 等数据层构造函数即使读取了配置文件中的 `data.database.source`，最终仍调用 `xdb.OpenMySQL(...)`。
-
-2. 配置里有 `driver` 字段，但没有真正传递到数据层
-
-   `configs/*-service.yaml` 已有：
-
-   ```yaml
-   data:
-     database:
-       driver: mysql
-       source: ${DATABASE_DSN}
-   ```
-
-   但 `cmd/*/wire_gen.go` 多数只传 `cfg.Data.Database.Source`，没有传 `cfg.Data.Database.Driver`。
-
-3. 迁移 CLI 固定 MySQL
-
-   `cmd/migrate/main.go` 固定导入 MySQL driver，并执行：
-
-   ```go
-   sql.Open("mysql", dsn)
-   ```
-
-   还会自动追加 `multiStatements=true`，这是 MySQL 专用行为。
-
-4. 现有迁移 SQL 大量使用 MySQL 语法
-
-   当前 `migrations/` 下有 34 个 SQL 文件，包含多种 SQLite 不兼容语法：
-
-   - `AUTO_INCREMENT`
-   - `ENGINE=InnoDB`
-   - `DEFAULT CHARSET`
-   - `COMMENT`
-   - `ALTER TABLE ... ADD INDEX`
-   - `MODIFY COLUMN`
-   - 前缀索引，如 `request_id(32)`
-   - `ON UPDATE CURRENT_TIMESTAMP`
-   - 分区脚本 `PARTITION BY RANGE`
-   - `information_schema`
-
-5. Docker Compose 强依赖 MySQL
-
-   `deployments/docker-compose/docker-compose.yml` 默认启动 `mysql` 服务，所有核心服务通过 `depends_on.mysql` 等待 MySQL 健康检查，并要求 `DATABASE_DSN` 必填。
-
-6. 分区维护逻辑是 MySQL 专用能力
-
-   `internal/pkg/db/partition.go` 使用 `information_schema.PARTITIONS`、`ALTER TABLE ... REORGANIZE PARTITION`、`DROP PARTITION` 等 MySQL 语法。SQLite 模式下应默认关闭 `PARTITION_ENABLED`。
-
-## 推荐架构
-
-### 1. 统一数据库打开器
-
-新增通用入口，例如：
+新增统一入口：
 
 ```go
 // internal/pkg/xdb/db.go
-type DatabaseConfig struct {
-    Driver string
-    DSN    string
-    Pool   *PoolConfig
-}
-
 func Open(cfg DatabaseConfig) (*gorm.DB, error)
 func OpenSQL(driver, dsn string) (*sql.DB, error)
 ```
 
 支持规则：
 
-- `driver=mysql` 使用 `gorm.io/driver/mysql`。
-- `driver=sqlite` / `driver=sqlite3` 使用 `gorm.io/driver/sqlite`。
-- `driver` 为空时：
-  - DSN 以 `file:`、`.db`、`.sqlite`、`.sqlite3` 或 `:memory:` 开头/结尾时推断为 SQLite。
-  - 其他情况保持 MySQL，兼容现有部署。
+- `mysql` 使用 `gorm.io/driver/mysql`。
+- `sqlite` / `sqlite3` 使用 `gorm.io/driver/sqlite` 和 `github.com/mattn/go-sqlite3`。
+- `postgres` / `postgresql` 使用 `gorm.io/driver/postgres` 和 `pgx`。
+- driver 为空时从 DSN 推断：
+  - `file:`、`:memory:`、`.db`、`.sqlite`、`.sqlite3` 推断为 SQLite3。
+  - `postgres://`、`postgresql://`、`host=...` 推断为 Postgres。
+  - 其他情况保持 MySQL，兼容既有部署。
 
-SQLite 建议默认参数：
+SQLite3 默认连接策略：
+
+- `MaxOpenConns=1`
+- `MaxIdleConns=1`
+- 默认 PRAGMA：
+  - `busy_timeout = 5000`
+  - `journal_mode = WAL`
+  - `foreign_keys = ON`
+  - `synchronous = NORMAL`
+
+### 配置透传
+
+所有服务配置中的数据库 driver 已改为环境变量驱动：
+
+```yaml
+data:
+  database:
+    driver: ${DATABASE_DRIVER:-mysql}
+    source: ${DATABASE_DSN}
+```
+
+涉及服务：
+
+- `identity-service`
+- `channel-service`
+- `billing-service`
+- `config-service`
+- `log-service`
+- `monitor-worker`
+- `notify-worker`
+- `admin-api`
+
+各服务 `wire_gen.go` 已将 `cfg.Data.Database.Driver` 传入数据层构造函数。`admin-api` 的 system options repo 改为通过 `xdb.OpenSQL` 打开连接，并按方言选择占位符和 upsert 语法。
+
+### 迁移
+
+迁移目录按方言拆分：
+
+```text
+migrations/             # 既有 MySQL 迁移
+migrations/sqlite/      # SQLite3 baseline
+migrations/postgres/    # Postgres baseline
+```
+
+新增 baseline：
+
+- `migrations/sqlite/000_create_full_schema.sql`
+- `migrations/postgres/000_create_full_schema.sql`
+
+`cmd/migrate` 支持：
+
+```text
+MIGRATIONS_DRIVER=mysql|sqlite3|postgres
+MIGRATIONS_DSN=...
+go run ./cmd/migrate -driver sqlite3 -dir ./migrations/sqlite
+go run ./cmd/migrate -driver postgres -dir ./migrations/postgres
+```
+
+迁移 runner 已补充方言差异：
+
+- MySQL：继续使用 `information_schema.tables` + `DATABASE()`。
+- SQLite3：使用 `sqlite_master`。
+- Postgres：使用 `information_schema.tables` + `current_schema()`。
+- Postgres 占位符从 `?` 转换为 `$1`、`$2`。
+
+### Docker 部署
+
+新增轻量 SQLite3 部署：
+
+```sh
+cd deployments/docker-compose
+cp .env.lite.example .env
+docker compose -f docker-compose.lite.yml --env-file .env up -d
+```
+
+新增 Postgres 部署：
+
+```sh
+cd deployments/docker-compose
+cp .env.postgres.example .env
+docker compose -f docker-compose.postgres.yml --env-file .env up -d
+```
+
+主服务镜像已从 `scratch` 调整为 `alpine:3.20`，并使用 `CGO_ENABLED=1` 构建，以支持 `go-sqlite3`。迁移镜像 `Dockerfile.migrate` 会根据 `MIGRATIONS_DRIVER` 自动选择迁移目录：
+
+- `sqlite3` -> `/migrations/sqlite`
+- `postgres` / `postgresql` -> `/migrations/postgres`
+- 其他 -> `/migrations`
+
+### 查询兼容
+
+已处理的数据库方言差异：
+
+- `billing_ledgers.created_at` 按方言格式化：
+  - SQLite3: `strftime(...)`
+  - Postgres: `to_char(...)`
+  - MySQL: `DATE_FORMAT(...)`
+- `logs.created_at` 保存 Unix epoch 秒，按方言转换日期：
+  - SQLite3: `strftime(..., 'unixepoch')`
+  - Postgres: `to_char(to_timestamp(...))`
+  - MySQL: `FROM_UNIXTIME(...)`
+- MySQL 分区维护在 SQLite3 / Postgres 下 no-op。
+- `system_options` upsert：
+  - MySQL: `ON DUPLICATE KEY UPDATE`
+  - SQLite3/Postgres: `ON CONFLICT ... DO UPDATE`
+
+## 使用建议
+
+### SQLite3
+
+适合：
+
+- 个人部署
+- 单机自托管
+- 低并发团队内部使用
+- 希望减少 MySQL 配置和运维成本的场景
+
+默认 DSN：
 
 ```text
 file:/data/micro-one-api.db?_busy_timeout=5000&_journal_mode=WAL&_foreign_keys=on
 ```
 
-连接池建议：
+边界：
 
-- SQLite: `MaxOpenConns=1` 或较小值，避免写锁冲突。
-- MySQL: 保持现有默认池化配置。
+- 不适合多实例共享同一个数据库文件。
+- 写并发能力弱于 MySQL/Postgres。
+- 依赖 CGO，镜像必须使用 CGO-enabled build。
 
-### 2. 数据层构造函数接收 driver
+### Postgres
 
-把现有只传 DSN 的形式：
+适合：
 
-```go
-data.NewRepositoryFromEnv(cfg.Data.Database.Source)
-```
+- 希望使用开源关系数据库但不想依赖 MySQL 的部署。
+- 需要更强并发和外部数据库运维能力的部署。
 
-调整为显式配置：
-
-```go
-data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source)
-```
-
-或新增结构体参数，避免可变参数含义不清：
-
-```go
-data.NewRepository(data.DatabaseOptions{
-    Driver: cfg.Data.Database.Driver,
-    Source: cfg.Data.Database.Source,
-})
-```
-
-涉及模块：
-
-- `internal/identity/data`
-- `internal/channel/data`
-- `internal/billing/data`
-- `internal/log/data`
-- `internal/monitor/data`
-- `internal/config/data`
-- `internal/notify/data`
-- `cmd/admin-api` 中直接使用 `database/sql` 的 system options repo
-
-### 3. 迁移目录按方言拆分
-
-保留现有 MySQL 迁移目录：
+默认 DSN 示例：
 
 ```text
-migrations/mysql/
+host=postgres user=micro_one_api password=change-me dbname=micro_one_api port=5432 sslmode=disable
 ```
 
-新增 SQLite 迁移目录：
+边界：
 
-```text
-migrations/sqlite/
-```
+- 当前 Postgres 迁移是手写 baseline，后续 schema 变更需要同步维护。
+- MySQL 分区能力不会在 Postgres 下启用。
 
-不建议自动把 MySQL SQL 文本转换成 SQLite SQL，原因是 `ALTER TABLE`、索引、默认值、分区和时间字段语义差异较大，自动转换容易遗漏边界。
+### MySQL
 
-SQLite 迁移集可以从当前最新 schema 生成首个 baseline：
+适合：
 
-```text
-migrations/sqlite/000_create_core_tables.sql
-migrations/sqlite/001_create_indexes.sql
-migrations/sqlite/002_seed_defaults.sql
-```
+- 既有部署
+- 高并发生产环境
+- 需要当前 MySQL 分区脚本的场景
 
-后续新功能要求同时提交：
+MySQL 部署路径保持兼容，默认 `DATABASE_DRIVER` 为空时仍按 MySQL 处理。
 
-- MySQL 迁移
-- SQLite 迁移
-- 迁移测试
+## 验证
 
-### 4. 迁移 CLI 支持 driver
-
-`cmd/migrate` 增加参数和环境变量：
-
-```text
--driver mysql|sqlite
-MIGRATIONS_DRIVER
-DATABASE_DRIVER
-SQL_DRIVER
-```
-
-DSN 优先级保持：
-
-```text
-MIGRATIONS_DSN > DATABASE_DSN > SQL_DSN
-```
-
-driver 优先级：
-
-```text
--driver > MIGRATIONS_DRIVER > DATABASE_DRIVER > SQL_DRIVER > 从 DSN 推断 > mysql
-```
-
-目录默认规则：
-
-- MySQL: `./migrations/mysql`
-- SQLite: `./migrations/sqlite`
-
-为了兼容当前仓库，短期内可以保留 `./migrations` 作为 MySQL legacy 目录，等迁移重排时再移动。
-
-### 5. 提供轻量 Docker Compose
-
-新增：
-
-```text
-deployments/docker-compose/docker-compose.lite.yml
-```
-
-核心变化：
-
-- 删除 `mysql` 服务。
-- 增加共享 SQLite 数据卷，例如 `sqlite_data:/data`。
-- 所有需要数据库的服务挂载该卷。
-- 设置：
-
-  ```text
-  DATABASE_DRIVER=sqlite
-  DATABASE_DSN=file:/data/micro-one-api.db?_busy_timeout=5000&_journal_mode=WAL&_foreign_keys=on
-  PARTITION_ENABLED=false
-  ```
-
-- `depends_on` 只保留 Redis 和必要业务服务依赖。
-- `migrate` 使用 SQLite driver 和 SQLite 迁移目录。
-
-示例启动体验应收敛为：
+已执行的验证项：
 
 ```sh
-docker compose -f deployments/docker-compose/docker-compose.lite.yml up -d
+go test ./internal/billing/data ./internal/log/data ./internal/pkg/migrate ./internal/pkg/xdb ./internal/admin/data ./internal/pkg/db
+go test -tags manual_smoke ./internal/billing/data ./internal/log/data
+CGO_ENABLED=1 go test ./internal/pkg/xdb -run TestOpenSQLite3InMemory -count=1
+MIGRATIONS_DRIVER=sqlite3 MIGRATIONS_DSN='file:/tmp/micro-one-api-review-sqlite.db?_busy_timeout=5000&_foreign_keys=on' go run ./cmd/migrate -dir ./migrations/sqlite
 ```
 
-用户只需要填写最少安全参数：
+新增手动 Postgres smoke 测试：
 
-- `JWT_SECRET_KEY`
-- `SERVICE_TOKEN`
-- `ADMIN_TOKEN`
-- `REDIS_PASSWORD`
-- 初始管理员账号密码
+- `internal/billing/data/postgres_smoke_test.go`
+- `internal/log/data/postgres_smoke_test.go`
 
-如果 Redis 后续也想轻量化，可以单独评估内存/单进程替代方案，但这不是 Issue #4 的核心范围。
-
-## 分阶段实施计划
-
-### 阶段 1：最小可运行 SQLite 支持
-
-目标：本地和 Docker Lite 可以用 SQLite 启动核心链路。
-
-任务：
-
-1. 新增 `xdb.Open`，支持 MySQL / SQLite。
-2. 修改各服务数据层构造函数，传递并消费 `driver`。
-3. 修改 `cmd/migrate` 支持 `-driver sqlite`。
-4. 新增 SQLite baseline 迁移。
-5. 新增 `docker-compose.lite.yml`。
-6. 在 SQLite 模式下强制跳过分区维护。
-7. 更新 `docs/deployment.md`，增加 Lite 部署章节。
-
-验收：
+运行方式：
 
 ```sh
-go test ./internal/pkg/xdb ./internal/pkg/migrate ./internal/identity/data ./internal/channel/data ./internal/billing/data ./internal/log/data ./internal/monitor/data
-docker compose -f deployments/docker-compose/docker-compose.lite.yml up -d
+PG_SMOKE=1 go test -tags manual_smoke ./internal/billing/data ./internal/log/data
 ```
 
-核心功能手工验收：
+这些测试默认跳过，需要本地有可用 Postgres 测试库。
 
-- 管理员初始化
-- 登录
-- 创建渠道
-- 创建 token
-- relay 请求写入日志
-- billing ledger 写入
-- 管理后台日志、用量、订单页面可读
+## 后续维护规则
 
-### 阶段 2：双数据库迁移治理
+涉及 schema 变更时必须同步维护：
 
-目标：避免后续功能只改 MySQL 导致 SQLite 漂移。
+- `migrations/` 下的 MySQL 迁移。
+- `migrations/sqlite/` 下的 SQLite3 迁移。
+- `migrations/postgres/` 下的 Postgres 迁移。
 
-任务：
+涉及 SQL 查询时必须检查：
 
-1. 迁移目录标准化为 `migrations/mysql` 和 `migrations/sqlite`。
-2. CI 增加 SQLite migration apply 测试。
-3. CI 增加 SQLite 仓储集成测试。
-4. 增加文档规则：凡涉及 schema 变更，必须同时更新两套迁移。
-5. 增加脚本：
-
-   ```sh
-   make migrate-sqlite
-   make test-sqlite
-   ```
-
-验收：
-
-```sh
-MIGRATIONS_DRIVER=sqlite MIGRATIONS_DSN='file:/tmp/micro-one-api-test.db?_foreign_keys=on' go run ./cmd/migrate -dir ./migrations/sqlite
-```
-
-### 阶段 3：部署体验优化
-
-目标：让 SQLite 成为默认轻量部署路径，MySQL 作为进阶部署路径。
-
-任务：
-
-1. README 首屏增加 Lite 部署命令。
-2. `.env.example` 拆分为：
-   - `.env.lite.example`
-   - `.env.mysql.example`
-3. 发布说明中明确两种模式：
-   - SQLite: 单机自托管、低维护成本。
-   - MySQL: 多实例、较高并发、长期生产。
-4. 增加从 SQLite 迁移到 MySQL 的导出/导入说明。
-
-## 关键设计取舍
-
-### 为什么不直接把 MySQL 迁移改成跨数据库 SQL
-
-现有迁移已经包含较多 MySQL 专用能力。为了让单个 SQL 文件兼容两种数据库，需要牺牲 MySQL 能力，或者在迁移 runner 中实现复杂条件语法。相比之下，双迁移目录更直接，长期维护成本也更可控。
-
-### 为什么 SQLite 适合默认轻量部署
-
-SQLite 可以显著降低首启门槛：
-
-- 少一个 MySQL 容器。
-- 少一组数据库用户名、密码、root 密码、健康检查和初始化参数。
-- 数据文件可直接通过 Docker volume 持久化。
-- 适合个人、低并发、单机部署。
-
-### 为什么仍保留 MySQL
-
-当前项目是多服务架构，包含日志、账务、渠道、监控等写入场景。SQLite 是单文件数据库，写并发能力和多实例共享能力不适合所有生产环境。MySQL 仍应作为高并发和多副本部署的推荐选项。
+- 是否使用了 MySQL 专用函数，如 `DATE_FORMAT`、`FROM_UNIXTIME`、`ON DUPLICATE KEY UPDATE`。
+- 是否需要 Postgres `$N` 占位符。
+- 是否需要 SQLite3 专用日期函数或 PRAGMA。
+- 是否依赖 MySQL 分区能力。
 
 ## 风险与处理
 
 | 风险 | 影响 | 处理 |
 | --- | --- | --- |
-| SQLite 写锁竞争 | 日志和账务写入可能阻塞 | WAL、busy timeout、较小连接池、批量写入控制 |
-| 迁移漂移 | MySQL 与 SQLite schema 不一致 | CI 同时跑两套迁移 |
-| MySQL 专用 SQL 泄漏 | SQLite 运行时报错 | 仓储测试覆盖 SQLite；代码中按 dialector 分支 |
-| 分区维护误启 | SQLite 启动后报错 | SQLite 模式强制禁用或启动时报明确错误 |
-| 多服务共享单 SQLite 文件 | 并发写入压力增大 | Lite 模式定位单机低并发；文档明确边界 |
-| CGO 依赖 | `go-sqlite3` 需要 CGO | Docker 构建镜像内安装构建依赖，或后续评估纯 Go SQLite driver |
+| SQLite3 写锁竞争 | 日志和账务写入可能阻塞 | WAL、busy timeout、单连接池、批量写入控制 |
+| 迁移漂移 | 三种数据库 schema 不一致 | 方言目录并行维护，新增迁移时同步提交 |
+| MySQL 专用 SQL 泄漏 | SQLite3/Postgres 运行时报错 | 查询层按 `Dialector.Name()` 分支 |
+| 分区维护误启 | 非 MySQL 部署报错 | 非 MySQL 方言下 partition manager no-op |
+| CGO 依赖 | SQLite3 在 `CGO_ENABLED=0` 下不可用 | 主镜像使用 Alpine + CGO build |
+| Postgres 时间类型差异 | `time.Time` 扫描/写入失败 | Postgres baseline 中对应字段使用 `TIMESTAMPTZ` |
 
-## 建议的 Issue 回复
+## Issue 回复建议
 
 可以回复：
 
-> 可以支持。当前代码已经引入了 SQLite 依赖，并且部分测试已经用 SQLite 跑通；但生产入口、迁移工具和 Docker Compose 仍按 MySQL 固定实现。建议分三步做：先增加 `DATABASE_DRIVER=sqlite` 和 SQLite baseline 迁移，让单机 Docker Lite 部署跑起来；再把迁移目录拆成 MySQL/SQLite 双轨并加入 CI；最后把 README 和 `.env.example` 调整成 SQLite 轻量部署优先、MySQL 生产部署可选。
-
-## 最小改动清单
-
-首个 PR 建议只包含：
-
-1. `internal/pkg/xdb` 增加统一 `Open`。
-2. `cmd/migrate` 增加 driver 支持。
-3. 核心服务数据层消费 driver。
-4. 新增 `migrations/sqlite` baseline。
-5. 新增 `docker-compose.lite.yml`。
-6. 新增 SQLite 模式测试。
-7. 更新部署文档。
-
-这样可以把 Issue #4 直接落成可验证的轻量部署能力，同时不影响现有 MySQL 部署。
+> 已支持。当前实现新增了 SQLite3 Lite 部署，同时额外支持 Postgres。SQLite3 部署可通过 `deployments/docker-compose/docker-compose.lite.yml` 启动，不再需要 MySQL 容器；Postgres 可通过 `docker-compose.postgres.yml` 启动。运行时通过 `DATABASE_DRIVER` 选择 `mysql`、`sqlite3` 或 `postgres`，迁移目录也已按方言拆分。

@@ -324,8 +324,8 @@ CREATE TABLE IF NOT EXISTS billing_redeem_codes (
   count INTEGER NOT NULL,
   status INTEGER NOT NULL DEFAULT 1,
   created_by TEXT DEFAULT NULL,
-  created_at BIGINT DEFAULT 0,
-  updated_at BIGINT DEFAULT 0
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_billing_redeem_codes_name              ON billing_redeem_codes(name);
@@ -456,6 +456,4 @@ CREATE INDEX IF NOT EXISTS idx_subscription_account_abilities_model_group_platfo
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version TEXT NOT NULL PRIMARY KEY,
   applied_at BIGINT NOT NULL DEFAULT 0
-);
- BIGINT NOT NULL DEFAULT 0
 );
