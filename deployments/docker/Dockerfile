@@ -29,25 +29,19 @@ RUN npm run build
 
 # ---------------------------------------------------------------------------
 # Stage 2: go-builder
-# Builds the Go service binary. Uses CGO=1 so mattn/go-sqlite3 links in
-# the lite deployment (DATABASE_DRIVER=sqlite3). Cross-compiles to the
-# target arch by installing the matching musl cross-toolchain.
+# Builds the Go service binary. This stage runs on the TARGET platform
+# (natively, or emulated via QEMU on an amd64 GitHub runner), NOT on the
+# build platform. That way the CGO toolchain (mattn/go-sqlite3) always
+# matches the target arch and no fragile cross-sysroot is needed.
+# docker/setup-qemu-action (configured in the CI workflow) supplies the
+# emulation, so linux/arm64 is handled transparently.
 # ---------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
-# build-base pulls gcc + musl-dev for the BUILD arch's CGO compilation.
-# sqlite-libs is the runtime dep for the SQLite3 driver, shipped in the
-# alpine final image.
-#
-# For multi-arch builds (linux/arm64 on an amd64 runner) we additionally
-# install the aarch64 cross-toolchain so CGO can link the target arch's
-# libsqlite3. The fallback apk line keeps the image buildable on alpine
-# releases that haven't published the aarch64 cross packages yet.
+# build-base pulls gcc + musl-dev for CGO (mattn/go-sqlite3); sqlite-dev
+# provides the headers/libs libsqlite3 links against, and sqlite-libs is
+# the runtime dep shipped in the final alpine image.
 RUN apk add --no-cache \
-      git ca-certificates make protobuf protobuf-dev \
-      build-base sqlite-libs sqlite-dev \
-      gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-    || apk add --no-cache \
       git ca-certificates make protobuf protobuf-dev \
       build-base sqlite-libs sqlite-dev
 
@@ -59,8 +53,6 @@ RUN go mod download && go mod verify
 COPY . .
 
 ARG SERVICE_NAME
-ARG TARGETOS
-ARG TARGETARCH
 
 RUN make proto-tools && make proto
 
@@ -76,15 +68,11 @@ RUN if [ "$SERVICE_NAME" = "admin-api" ]; then \
       cp -a /tmp/web-dist/. /app/internal/admin/server/static/web/; \
     fi
 
-# CGO is required by github.com/mattn/go-sqlite3. Build with CGO_ENABLED=1
-# so the lite deployment (DATABASE_DRIVER=sqlite3) works. When GOARCH=arm64
-# Go automatically picks the aarch64 cross-compiler from PATH.
-RUN CGO_ENABLED=1 \
-    GOOS=${TARGETOS:-linux} \
-    GOARCH=${TARGETARCH:-amd64} \
-    CC=${CC:-} \
-    CXX=${CXX:-} \
-    go build \
+# CGO is required by github.com/mattn/go-sqlite3 so the lite deployment
+# (DATABASE_DRIVER=sqlite3) works. Because this stage runs on the target
+# platform, Go's host detection yields the correct GOOS/GOARCH and the
+# platform-native gcc is used — no manual CC/CXX selection is needed.
+RUN CGO_ENABLED=1 go build \
       -ldflags='-s -w -extldflags "-static"' \
       -o /app/bin/service ./cmd/${SERVICE_NAME}
 
