@@ -16,7 +16,7 @@ WORKDIR /web
 # of the source tree. This step fails fast if package-lock.json is out of
 # sync with package.json (which would otherwise fail much later in
 # `npm run build` and waste CI time).
-COPY web/package.json web/package-lock.json ./
+COPY web/package.json web/package-lock.json web/.npmrc ./
 
 # `npm ci` requires a clean install. We don't have node_modules in the
 # build context (.dockerignore excludes it), so this is always a fresh
