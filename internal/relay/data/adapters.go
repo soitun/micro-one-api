@@ -94,6 +94,7 @@ func (a *ChannelAdapter) SelectSubscriptionAccount(ctx context.Context, group, m
 		AccessToken: account.GetAccessToken(),
 		AccountID:   account.GetAccountId(),
 		Fingerprint: account.GetFingerprint(),
+		Concurrency: account.GetConcurrency(),
 	}, nil
 }
 

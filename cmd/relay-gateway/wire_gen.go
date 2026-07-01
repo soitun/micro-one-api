@@ -339,6 +339,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 		parseDurationOrDefault(cfg.HybridAdaptor.RuntimeBlock.GetRateLimitedDuration(), 5*time.Second),
 		parseDurationOrDefault(cfg.HybridAdaptor.RuntimeBlock.GetUnauthorizedDuration(), 2*time.Minute),
 		parseDurationOrDefault(cfg.HybridAdaptor.RuntimeBlock.GetServerErrorDuration(), 2*time.Minute),
+		parseDurationOrDefault(cfg.HybridAdaptor.RuntimeBlock.GetOverloadedDuration(), 30*time.Second),
 	)
 	stopBlockerReporter := func() {}
 	if redisClient != nil {

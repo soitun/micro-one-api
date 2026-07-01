@@ -85,13 +85,16 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 		if current == nil || current.Channel == nil {
 			break
 		}
-		result := s.executeSubscriptionAccountViaAdaptor(r.Context(), current, clientModel, r.Header.Clone(), rawBody, inbound)
-		metrics.RelaySubscriptionAdaptorRequestsTotal.WithLabelValues(subscriptionMetricPlatform(current), string(inbound), subscriptionAdaptorMetricResult(result)).Inc()
+		result := s.runSubscriptionAttempt(r, current, clientModel, rawBody, inbound)
 		if result.retryable {
 			accountID := subscriptionAccountIDFromPlan(current)
 			if accountID > 0 {
 				failedAccounts[accountID] = true
-				s.blockRuntimeAccount(r.Context(), accountID, result.statusCode, result.err)
+				// A concurrency-full account is healthy, just busy: fail over to a
+				// sibling but never cool it down.
+				if !result.concurrencyFull {
+					s.blockRuntimeAccount(r.Context(), accountID, result.statusCode, result.err)
+				}
 			}
 			lastErr = result.err
 			next, err := s.selectSubscriptionFailoverPlan(r.Context(), plan, current, clientModel, failedAccounts)
@@ -112,13 +115,82 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 	s.writeError(w, http.StatusBadGateway, "no subscription account available")
 }
 
+const (
+	// subscriptionSameAccountMaxRetries bounds how many times a transient
+	// same-account error (409/423) is retried in place before escalating to
+	// cross-account failover.
+	subscriptionSameAccountMaxRetries = 3
+	// subscriptionSameAccountRetryDelay is the fixed pause between same-account
+	// retries.
+	subscriptionSameAccountRetryDelay = 500 * time.Millisecond
+)
+
+// runSubscriptionAttempt executes one subscription-account request against the
+// current plan and transparently retries a small number of times on the SAME
+// account for transient 409/423 responses. If those retries are exhausted the
+// result is escalated to cross-account failover (result.retryable) so the caller
+// can try a sibling account. Cross-account failover itself is handled by the
+// caller.
+func (s *HTTPServer) runSubscriptionAttempt(r *http.Request, current *relaybiz.RelayPlan, clientModel string, rawBody []byte, inbound relayadaptor.Format) subscriptionAdaptorResult {
+	result := s.executeAndMeter(r.Context(), current, clientModel, r.Header.Clone(), rawBody, inbound)
+	for tries := 0; result.retryableSameAccount && tries < subscriptionSameAccountMaxRetries; tries++ {
+		metrics.RelaySubscriptionFailoverTotal.WithLabelValues("same_account", "retried").Inc()
+		if !sleepCtx(r.Context(), subscriptionSameAccountRetryDelay) {
+			break // client/context cancelled: stop retrying
+		}
+		result = s.executeAndMeter(r.Context(), current, clientModel, r.Header.Clone(), rawBody, inbound)
+	}
+	if result.retryableSameAccount {
+		// Same-account retries exhausted: escalate to cross-account failover.
+		// 409/423 carry a zero runtime-block duration, so the caller excludes the
+		// account for this request without cooling it down.
+		result.retryable = true
+	}
+	return result
+}
+
+// executeAndMeter runs a single subscription-account request and records the
+// adaptor request metric for that attempt.
+func (s *HTTPServer) executeAndMeter(ctx context.Context, current *relaybiz.RelayPlan, clientModel string, header http.Header, rawBody []byte, inbound relayadaptor.Format) subscriptionAdaptorResult {
+	result := s.executeSubscriptionAccountViaAdaptor(ctx, current, clientModel, header, rawBody, inbound)
+	metrics.RelaySubscriptionAdaptorRequestsTotal.WithLabelValues(subscriptionMetricPlatform(current), string(inbound), subscriptionAdaptorMetricResult(result)).Inc()
+	return result
+}
+
+// sleepCtx waits for d or until ctx is cancelled. It returns true if the full
+// delay elapsed, false if the context was cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return true
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 type subscriptionAdaptorResult struct {
 	statusCode int
 	err        error
-	retryable  bool
-	body       []byte
-	header     http.Header
-	write      func(http.ResponseWriter)
+	// retryable marks a failure that should fail over to a DIFFERENT account
+	// (429/529/5xx/network). The failing account is added to the exclusion set
+	// and cooled down via the runtime blocker.
+	retryable bool
+	// retryableSameAccount marks a transient failure (409/423) that should be
+	// retried a few times on the SAME account before failing over. The account is
+	// NOT cooled down and does NOT count against the cross-account switch budget.
+	retryableSameAccount bool
+	// concurrencyFull marks that the account was at its in-process concurrency
+	// limit, so no upstream call was made. It fails over to another account but,
+	// unlike a real upstream error, must not cool the account down.
+	concurrencyFull bool
+	body            []byte
+	header          http.Header
+	write           func(http.ResponseWriter)
 }
 
 type subscriptionAccountQuotaRecorder interface {
@@ -148,6 +220,37 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 		result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusBadGateway, result.err.Error()) }
 		return result
 	}
+
+	// Enforce the account's in-process concurrency limit before doing any work.
+	// A full account fails over to a sibling (concurrencyFull) rather than being
+	// cooled down: it is healthy, just busy. The slot is held for the entire
+	// upstream call — including the full lifetime of a streamed response — and
+	// released via slotTransferred/releaseSlot below.
+	accountID := subscriptionAccountIDFromPlan(plan)
+	var concurrencyLimit int32
+	if plan.Account != nil {
+		concurrencyLimit = plan.Account.Concurrency
+	}
+	releaseSlot, acquired := s.accountConcurrency.TryAcquire(accountID, concurrencyLimit)
+	if !acquired {
+		result.statusCode = http.StatusServiceUnavailable
+		result.err = fmt.Errorf("subscription account %d at concurrency limit %d", accountID, concurrencyLimit)
+		result.retryable = true
+		result.concurrencyFull = true
+		result.write = func(w http.ResponseWriter) {
+			s.writeError(w, http.StatusServiceUnavailable, "all subscription accounts busy")
+		}
+		return result
+	}
+	// Released on every early return via defer; for the two terminal success
+	// paths (stream + non-stream) ownership is transferred into result.write and
+	// slotTransferred is set so the defer does not release the slot early.
+	slotTransferred := false
+	defer func() {
+		if !slotTransferred {
+			releaseSlot()
+		}
+	}()
 
 	// Prefer the first-class subscription account selected during planning
 	// (plan.Account), then the resolver, then the channel-fallback metadata.
@@ -247,6 +350,7 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 		result.header = resp.Header.Clone()
 		result.err = fmt.Errorf("upstream returned status %d", resp.StatusCode)
 		result.retryable = upstreamErr.RetryableAcrossAccounts()
+		result.retryableSameAccount = upstreamErr.RetryableOnSameAccount()
 		result.write = func(w http.ResponseWriter) {
 			if upstreamErr.ShouldPassthrough() {
 				metrics.RelayUpstreamPassthroughTotal.WithLabelValues(string(upstreamErr.Kind), fmt.Sprint(resp.StatusCode)).Inc()
@@ -306,7 +410,9 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 		// extractRawUsage understands.
 		usageTracker := newRawStreamUsageTracker(estimateRawUsage(rawBody))
 		result.statusCode = http.StatusOK
+		slotTransferred = true // slot released when the stream finishes, below
 		result.write = func(w http.ResponseWriter) {
+			defer releaseSlot()
 			defer resp.Body.Close()
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
@@ -358,7 +464,9 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 	}
 	s.recordCodexQuotaSnapshot(ctx, plan, outBody)
 	result.statusCode = http.StatusOK
+	slotTransferred = true // slot released when the response has been written, below
 	result.write = func(w http.ResponseWriter) {
+		defer releaseSlot()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(outBody)
@@ -513,8 +621,17 @@ func subscriptionAdaptorMetricResult(result subscriptionAdaptorResult) string {
 }
 
 func subscriptionRetryReason(result subscriptionAdaptorResult) string {
+	if result.concurrencyFull {
+		return "concurrency"
+	}
+	if result.retryableSameAccount {
+		return "same_account"
+	}
 	if result.statusCode == http.StatusTooManyRequests {
 		return "429"
+	}
+	if result.statusCode == passthrough.StatusOverloaded {
+		return "529"
 	}
 	if result.statusCode > 0 {
 		return statusClass(result.statusCode)
@@ -555,6 +672,11 @@ func (s *HTTPServer) runtimeBlockDuration(statusCode int) time.Duration {
 			return cfg.rateLimited
 		}
 		return 5 * time.Second
+	case statusCode == passthrough.StatusOverloaded:
+		if cfg.overloaded > 0 {
+			return cfg.overloaded
+		}
+		return 30 * time.Second
 	case statusCode == http.StatusUnauthorized:
 		if cfg.unauthorized > 0 {
 			return cfg.unauthorized

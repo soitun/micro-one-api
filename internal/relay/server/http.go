@@ -79,6 +79,10 @@ type HTTPServer struct {
 
 	accountQuotaRecorder subscriptionAccountQuotaRecorder
 	runtimeBlocker       relaybiz.RuntimeBlocker
+
+	// accountConcurrency enforces SubscriptionAccount.Concurrency per account
+	// within this process. Never nil after NewHTTPServer.
+	accountConcurrency *relaybiz.AccountConcurrencyLimiter
 }
 
 func (s *HTTPServer) Plan(ctx context.Context, req relaybiz.RelayRequest) (*relaybiz.RelayPlan, error) {
@@ -111,6 +115,7 @@ type runtimeBlockConfig struct {
 	rateLimited  time.Duration // 429
 	unauthorized time.Duration // 401
 	serverError  time.Duration // 5xx
+	overloaded   time.Duration // 529
 }
 
 type responseRoute struct {
@@ -139,14 +144,15 @@ func NewHTTPServer(
 		relayUsecase.SetRuntimeBlocker(runtimeBlocker)
 	}
 	return &HTTPServer{
-		identityClient:  identityClient,
-		channelClient:   channelClient,
-		billingClient:   billingClient,
-		logClient:       logClient,
-		providerFactory: providerFactory,
-		relayUsecase:    relayUsecase,
-		responseRoutes:  make(map[string]responseRoute),
-		runtimeBlocker:  runtimeBlocker,
+		identityClient:     identityClient,
+		channelClient:      channelClient,
+		billingClient:      billingClient,
+		logClient:          logClient,
+		providerFactory:    providerFactory,
+		relayUsecase:       relayUsecase,
+		responseRoutes:     make(map[string]responseRoute),
+		runtimeBlocker:     runtimeBlocker,
+		accountConcurrency: relaybiz.NewAccountConcurrencyLimiter(),
 	}
 }
 
@@ -240,8 +246,8 @@ func isSubscriptionChannel(t int32) bool {
 
 // SetRuntimeBlockDurations configures the per-status runtime cool-down applied
 // to a subscription account after a retryable upstream failure. Non-positive
-// values keep the built-in defaults (429=5s, 401=2m, 5xx=2m).
-func (s *HTTPServer) SetRuntimeBlockDurations(rateLimited, unauthorized, serverError time.Duration) {
+// values keep the built-in defaults (429=5s, 401=2m, 5xx=2m, 529=30s).
+func (s *HTTPServer) SetRuntimeBlockDurations(rateLimited, unauthorized, serverError, overloaded time.Duration) {
 	if s == nil {
 		return
 	}
@@ -249,6 +255,7 @@ func (s *HTTPServer) SetRuntimeBlockDurations(rateLimited, unauthorized, serverE
 		rateLimited:  rateLimited,
 		unauthorized: unauthorized,
 		serverError:  serverError,
+		overloaded:   overloaded,
 	}
 }
 

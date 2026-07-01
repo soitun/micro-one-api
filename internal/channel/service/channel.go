@@ -124,6 +124,7 @@ func toSubscriptionAccountInfoWithSecrets(account *biz.SubscriptionAccount, incl
 		Metadata:     account.Metadata,
 		CreatedAt:    account.CreatedAt,
 		UpdatedAt:    account.UpdatedAt,
+		Concurrency:  account.Concurrency,
 	}
 }
 

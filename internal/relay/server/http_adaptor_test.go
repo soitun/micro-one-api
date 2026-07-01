@@ -15,6 +15,7 @@ import (
 	"micro-one-api/internal/pkg/metrics"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaycredential "micro-one-api/internal/relay/credential"
+	"micro-one-api/internal/relay/passthrough"
 	relayprovider "micro-one-api/internal/relay/provider"
 	relayquota "micro-one-api/internal/relay/quota"
 )
@@ -287,7 +288,7 @@ func TestRuntimeBlockDuration_DefaultsAndOverrides(t *testing.T) {
 
 	// Overrides via the setter take effect.
 	s := &HTTPServer{}
-	s.SetRuntimeBlockDurations(30*time.Second, 10*time.Minute, time.Minute)
+	s.SetRuntimeBlockDurations(30*time.Second, 10*time.Minute, time.Minute, 45*time.Second)
 	if got := s.runtimeBlockDuration(http.StatusTooManyRequests); got != 30*time.Second {
 		t.Fatalf("429 override = %v, want 30s", got)
 	}
@@ -297,15 +298,21 @@ func TestRuntimeBlockDuration_DefaultsAndOverrides(t *testing.T) {
 	if got := s.runtimeBlockDuration(http.StatusServiceUnavailable); got != time.Minute {
 		t.Fatalf("5xx override = %v, want 1m", got)
 	}
+	if got := s.runtimeBlockDuration(passthrough.StatusOverloaded); got != 45*time.Second {
+		t.Fatalf("529 override = %v, want 45s", got)
+	}
 
 	// A non-positive override falls back to the default for that class.
 	partial := &HTTPServer{}
-	partial.SetRuntimeBlockDurations(0, 0, 90*time.Second)
+	partial.SetRuntimeBlockDurations(0, 0, 90*time.Second, 0)
 	if got := partial.runtimeBlockDuration(http.StatusTooManyRequests); got != 5*time.Second {
 		t.Fatalf("429 partial = %v, want default 5s", got)
 	}
 	if got := partial.runtimeBlockDuration(http.StatusBadGateway); got != 90*time.Second {
 		t.Fatalf("5xx partial = %v, want 90s", got)
+	}
+	if got := partial.runtimeBlockDuration(passthrough.StatusOverloaded); got != 30*time.Second {
+		t.Fatalf("529 partial = %v, want default 30s", got)
 	}
 }
 
@@ -450,6 +457,188 @@ func TestHandleChatCompletionsViaAdaptor_RecordsCodexQuotaSnapshot(t *testing.T)
 	}
 	if delta := testutil.ToFloat64(metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("auto_paused")) - pausedBefore; delta != 1 {
 		t.Fatalf("codex quota auto paused metric delta = %v, want 1", delta)
+	}
+}
+
+// TestHandleChatCompletionsViaAdaptor_FailoverOn529 verifies that a 529
+// (upstream Overloaded) fails over to a sibling account, cools the first account
+// down with the dedicated "529" reason, and the client sees a 200.
+func TestHandleChatCompletionsViaAdaptor_FailoverOn529(t *testing.T) {
+	selector := &adaptorFailoverChannelClient{
+		accounts: []*relaybiz.SubscriptionAccount{
+			{
+				ID: 23, Name: "second", Platform: "codex", AccountType: "oauth", Status: 1,
+				BaseURL: "https://example.invalid", Group: "default", Models: []string{"gpt-5"},
+				Priority: 10, AccessToken: "second-token", AccountID: "second-account",
+			},
+		},
+	}
+	relayUsecase := relaybiz.NewRelayUsecase(adaptorFailoverIdentity{}, selector, nil, nil)
+	httpServer := NewHTTPServer(nil, nil, nil, nil, relayUsecase)
+	httpServer.SetHybridAdaptorEnabled(true)
+	httpServer.wsPoolCfg.failoverMaxSwitches = 1
+
+	var authHeaders []string
+	httpServer.SetOAuthHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			authHeaders = append(authHeaders, req.Header.Get("Authorization"))
+			if len(authHeaders) == 1 {
+				resp := newStatusResponse(passthrough.StatusOverloaded, `{"error":{"message":"overloaded"}}`)
+				resp.Header.Set("Retry-After", "5")
+				return resp, nil
+			}
+			return newJSONResponse(`{"id":"resp_2","object":"response","model":"gpt-5","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`), nil
+		}),
+	})
+
+	plan := &relaybiz.RelayPlan{
+		Auth:    &relaybiz.AuthSnapshot{UserID: 42, Group: "default"},
+		Channel: &relaybiz.Channel{ID: 22, Type: relayprovider.ChannelTypeCodexOAuth, BaseURL: "https://example.invalid", Group: "default"},
+		Account: &relaybiz.SubscriptionAccount{
+			ID: 22, Platform: "codex", AccountType: "oauth", Status: 1, BaseURL: "https://example.invalid",
+			Group: "default", Models: []string{"gpt-5"}, Priority: 20, AccessToken: "first-token", AccountID: "first-account",
+		},
+		ResolvedModel: "gpt-5",
+	}
+	body := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	failoverBefore := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("529", "switched"))
+	blockBefore := testutil.ToFloat64(metrics.RelayRuntimeBlocksTotal.WithLabelValues("529"))
+
+	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(body))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(authHeaders) != 2 || authHeaders[1] != "Bearer second-token" {
+		t.Fatalf("Authorization headers = %v", authHeaders)
+	}
+	if delta := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("529", "switched")) - failoverBefore; delta != 1 {
+		t.Fatalf("529 failover metric delta = %v, want 1", delta)
+	}
+	if delta := testutil.ToFloat64(metrics.RelayRuntimeBlocksTotal.WithLabelValues("529")) - blockBefore; delta != 1 {
+		t.Fatalf("529 runtime block metric delta = %v, want 1", delta)
+	}
+}
+
+// TestHandleChatCompletionsViaAdaptor_SameAccountRetry verifies that a transient
+// 409 is retried in place on the SAME account (no failover, no cool-down) and
+// then succeeds.
+func TestHandleChatCompletionsViaAdaptor_SameAccountRetry(t *testing.T) {
+	selector := &adaptorFailoverChannelClient{}
+	relayUsecase := relaybiz.NewRelayUsecase(adaptorFailoverIdentity{}, selector, nil, nil)
+	httpServer := NewHTTPServer(nil, nil, nil, nil, relayUsecase)
+	httpServer.SetHybridAdaptorEnabled(true)
+	httpServer.wsPoolCfg.failoverMaxSwitches = 1
+
+	var authHeaders []string
+	httpServer.SetOAuthHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			authHeaders = append(authHeaders, req.Header.Get("Authorization"))
+			if len(authHeaders) == 1 {
+				return newStatusResponse(http.StatusConflict, `{"error":{"message":"conflict"}}`), nil
+			}
+			return newJSONResponse(`{"id":"resp_ok","object":"response","model":"gpt-5","status":"completed","output":[{"type":"message","id":"m","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`), nil
+		}),
+	})
+
+	plan := &relaybiz.RelayPlan{
+		Auth:    &relaybiz.AuthSnapshot{UserID: 42, Group: "default"},
+		Channel: &relaybiz.Channel{ID: 32, Type: relayprovider.ChannelTypeCodexOAuth, BaseURL: "https://example.invalid", Group: "default"},
+		Account: &relaybiz.SubscriptionAccount{
+			ID: 32, Platform: "codex", AccountType: "oauth", Status: 1, BaseURL: "https://example.invalid",
+			Group: "default", Models: []string{"gpt-5"}, AccessToken: "only-token", AccountID: "only-account",
+		},
+		ResolvedModel: "gpt-5",
+	}
+	body := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	retriedBefore := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("same_account", "retried"))
+
+	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(body))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(authHeaders) != 2 {
+		t.Fatalf("upstream calls = %d, want 2 (one 409 + one retry)", len(authHeaders))
+	}
+	if authHeaders[0] != "Bearer only-token" || authHeaders[1] != "Bearer only-token" {
+		t.Fatalf("same-account retry must reuse the same token, got %v", authHeaders)
+	}
+	if selector.calls != 0 {
+		t.Fatalf("same-account retry must not select a different account, selector calls = %d", selector.calls)
+	}
+	if delta := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("same_account", "retried")) - retriedBefore; delta != 1 {
+		t.Fatalf("same_account retried metric delta = %v, want 1", delta)
+	}
+}
+
+// TestHandleChatCompletionsViaAdaptor_ConcurrencyFailover verifies that when an
+// account is at its concurrency limit the request fails over to a sibling
+// account without contacting the busy account's upstream and without cooling it
+// down.
+func TestHandleChatCompletionsViaAdaptor_ConcurrencyFailover(t *testing.T) {
+	selector := &adaptorFailoverChannelClient{
+		accounts: []*relaybiz.SubscriptionAccount{
+			{
+				ID: 43, Name: "second", Platform: "codex", AccountType: "oauth", Status: 1,
+				BaseURL: "https://example.invalid", Group: "default", Models: []string{"gpt-5"},
+				Priority: 10, AccessToken: "second-token", AccountID: "second-account",
+			},
+		},
+	}
+	relayUsecase := relaybiz.NewRelayUsecase(adaptorFailoverIdentity{}, selector, nil, nil)
+	httpServer := NewHTTPServer(nil, nil, nil, nil, relayUsecase)
+	httpServer.SetHybridAdaptorEnabled(true)
+	httpServer.wsPoolCfg.failoverMaxSwitches = 1
+
+	// Saturate account 42 (limit 1) so the next request cannot acquire a slot.
+	release, ok := httpServer.accountConcurrency.TryAcquire(42, 1)
+	if !ok {
+		t.Fatal("precondition: first acquire must succeed")
+	}
+	defer release()
+
+	var authHeaders []string
+	httpServer.SetOAuthHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			authHeaders = append(authHeaders, req.Header.Get("Authorization"))
+			return newJSONResponse(`{"id":"resp_ok","object":"response","model":"gpt-5","status":"completed","output":[{"type":"message","id":"m","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`), nil
+		}),
+	})
+
+	plan := &relaybiz.RelayPlan{
+		Auth:    &relaybiz.AuthSnapshot{UserID: 42, Group: "default"},
+		Channel: &relaybiz.Channel{ID: 42, Type: relayprovider.ChannelTypeCodexOAuth, BaseURL: "https://example.invalid", Group: "default"},
+		Account: &relaybiz.SubscriptionAccount{
+			ID: 42, Platform: "codex", AccountType: "oauth", Status: 1, BaseURL: "https://example.invalid",
+			Group: "default", Models: []string{"gpt-5"}, Priority: 20, AccessToken: "first-token", AccountID: "first-account",
+			Concurrency: 1,
+		},
+		ResolvedModel: "gpt-5",
+	}
+	body := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	switchBefore := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("concurrency", "switched"))
+	blockBefore := testutil.ToFloat64(metrics.RelayRuntimeBlocksTotal.WithLabelValues("concurrency"))
+
+	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(body))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(authHeaders) != 1 || authHeaders[0] != "Bearer second-token" {
+		t.Fatalf("busy account must be skipped without an upstream call, got %v", authHeaders)
+	}
+	if delta := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("concurrency", "switched")) - switchBefore; delta != 1 {
+		t.Fatalf("concurrency failover metric delta = %v, want 1", delta)
+	}
+	if delta := testutil.ToFloat64(metrics.RelayRuntimeBlocksTotal.WithLabelValues("concurrency")) - blockBefore; delta != 0 {
+		t.Fatalf("a concurrency-full account must NOT be cooled down, block delta = %v", delta)
 	}
 }
 

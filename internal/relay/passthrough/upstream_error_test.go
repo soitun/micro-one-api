@@ -17,6 +17,9 @@ func TestClassify(t *testing.T) {
 		{name: "403 passthrough", status: http.StatusForbidden, kind: KindPassthrough},
 		{name: "cyber policy", status: http.StatusBadRequest, body: `{"error":"cyber_policy"}`, kind: KindCyberBlocked},
 		{name: "5xx retryable", status: http.StatusBadGateway, kind: KindRetryable},
+		{name: "529 overloaded", status: StatusOverloaded, kind: KindOverloaded},
+		{name: "409 same account", status: http.StatusConflict, kind: KindRetryableOnSameAccount},
+		{name: "423 same account", status: http.StatusLocked, kind: KindRetryableOnSameAccount},
 		{name: "other 4xx non retryable", status: http.StatusBadRequest, kind: KindNonRetryable},
 	}
 	for _, tt := range tests {
@@ -41,9 +44,11 @@ func TestRetryableAndPassthroughSemantics(t *testing.T) {
 		passthrough bool
 	}{
 		{name: "429", status: http.StatusTooManyRequests, retryable: true, passthrough: true},
+		{name: "529 overloaded", status: StatusOverloaded, retryable: true, passthrough: true},
 		{name: "401", status: http.StatusUnauthorized, retryable: false, passthrough: true},
 		{name: "403", status: http.StatusForbidden, retryable: false, passthrough: true},
 		{name: "5xx", status: http.StatusBadGateway, retryable: true, passthrough: false},
+		{name: "409 same account", status: http.StatusConflict, retryable: false, passthrough: false},
 		{name: "cyber", status: http.StatusBadRequest, body: `{"error":"cyber_policy"}`, retryable: false, passthrough: true},
 		{name: "other 4xx", status: http.StatusBadRequest, retryable: false, passthrough: false},
 	}

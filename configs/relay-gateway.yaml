@@ -48,4 +48,5 @@ hybrid_adaptor:
     rate_limited_duration: 5s   # cool-down after an upstream 429
     unauthorized_duration: 2m   # cool-down after an upstream 401
     server_error_duration: 2m   # cool-down after an upstream 5xx
+    overloaded_duration: 30s    # cool-down after an upstream 529 (Overloaded)
     active_gauge_interval: 30s   # how often the Redis blocker scans for the active-block gauge

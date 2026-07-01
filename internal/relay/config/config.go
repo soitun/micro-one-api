@@ -121,6 +121,10 @@ type RuntimeBlockConfig struct {
 	UnauthorizedDuration string `json:"unauthorized_duration" yaml:"unauthorized_duration"`
 	// ServerErrorDuration cools an account down after a 5xx. Default 2m.
 	ServerErrorDuration string `json:"server_error_duration" yaml:"server_error_duration"`
+	// OverloadedDuration cools an account down after a 529 (upstream Overloaded).
+	// Distinct from a 429/5xx: the account is not over quota and the upstream is
+	// only momentarily saturated, so the default is short. Default 30s.
+	OverloadedDuration string `json:"overloaded_duration" yaml:"overloaded_duration"`
 	// ActiveGaugeInterval is how often the Redis blocker scans for live blocks
 	// to publish the active-block gauge. Default 30s. Only used when the runtime
 	// blocker is Redis-backed.
@@ -149,6 +153,14 @@ func (c RuntimeBlockConfig) GetServerErrorDuration() string {
 		return "2m"
 	}
 	return c.ServerErrorDuration
+}
+
+// GetOverloadedDuration returns the 529 cool-down with default.
+func (c RuntimeBlockConfig) GetOverloadedDuration() string {
+	if c.OverloadedDuration == "" {
+		return "30s"
+	}
+	return c.OverloadedDuration
 }
 
 // GetActiveGaugeInterval returns the active-block scan interval with default.

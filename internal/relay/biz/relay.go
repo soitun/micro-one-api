@@ -67,6 +67,11 @@ type SubscriptionAccount struct {
 	AccessToken string
 	AccountID   string
 	Fingerprint string
+	// Concurrency is the maximum number of in-flight relay requests this account
+	// will serve at once. 0 means unlimited. Enforced in-process by the relay
+	// gateway (see AccountConcurrencyLimiter) so a single subscription account is
+	// not saturated into upstream 429s.
+	Concurrency int32
 }
 
 // RelayPlan is the result of relay planning, containing all resolved
