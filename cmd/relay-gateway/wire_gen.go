@@ -42,6 +42,8 @@ import (
 	relayprovider "micro-one-api/internal/relay/provider"
 	"micro-one-api/internal/relay/server"
 	relayservice "micro-one-api/internal/relay/service"
+	subscriptionbiz "micro-one-api/internal/subscription/biz"
+	subscriptiondata "micro-one-api/internal/subscription/data"
 )
 
 func loadConfig(confPath string) (*relaycfg.Config, error) {
@@ -264,7 +266,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 
 	// Background token-refresh task. Started only when the feature flag is on.
 	var refreshTask *relaycredential.RefreshTask
-	if cfg.HybridAdaptor.GetHybridAdaptorEnabled() {
+	if cfg.HybridAdaptor.GetTokenRefreshEnabled() {
 		refreshTask = relaycredential.NewRefreshTask(
 			map[relaycredential.Platform]relaycredential.TokenProvider{
 				relaycredential.PlatformClaude: claudeTokenProvider,
@@ -275,8 +277,12 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 				return accountLookup.PlatformOf(context.Background(), accountID)
 			},
 			relaycredential.RefreshTaskConfig{
-				Interval:  parseDurationOrDefault(cfg.HybridAdaptor.GetRefreshInterval(), 10*time.Minute),
-				Lookahead: parseDurationOrDefault(cfg.HybridAdaptor.GetRefreshLookahead(), 24*time.Hour),
+				Interval:                  parseDurationOrDefault(cfg.HybridAdaptor.GetRefreshInterval(), 10*time.Minute),
+				Lookahead:                 parseDurationOrDefault(cfg.HybridAdaptor.GetRefreshLookahead(), 24*time.Hour),
+				MaxRetries:                cfg.HybridAdaptor.TokenRefresh.MaxRetries,
+				RetryBackoff:              time.Duration(cfg.HybridAdaptor.TokenRefresh.RetryBackoffSeconds) * time.Second,
+				TempUnschedulableDuration: parseDurationOrDefault(cfg.HybridAdaptor.TokenRefresh.TempUnschedDuration, 10*time.Minute),
+				Hook:                      accountLookup,
 			},
 		)
 		refreshTask.Start()
@@ -324,6 +330,15 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	httpServer.SetSubscriptionAccountResolver(accountResolver)
 	httpServer.SetOAuthHTTPClient(oauthHTTPClient)
 	var routeMiddleware []func(http.Handler) http.Handler
+	if cfg.Subscription.GetSubscriptionEnabled() {
+		subscriptionRepo, subErr := subscriptiondata.NewRepositoryFromEnv(os.Getenv("SQL_DRIVER"))
+		if subErr != nil {
+			return nil, nil, fmt.Errorf("create subscription repository: %w", subErr)
+		}
+		subscriptionUc := subscriptionbiz.NewSubscriptionUsecase(subscriptionRepo, subscriptionRepo)
+		httpServer.SetSubscriptionUsecase(subscriptionUc)
+		routeMiddleware = append(routeMiddleware, httpServer.SubscriptionQuotaMiddleware)
+	}
 	if cfg.Idempotency.Enabled {
 		ttl := parseDurationOrDefault(cfg.Idempotency.TTL, 24*time.Hour)
 		routeMiddleware = append(routeMiddleware, appmiddleware.NewIdempotencyMiddleware(redisClient, &appmiddleware.IdempotencyConfig{

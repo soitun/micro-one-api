@@ -786,10 +786,10 @@ hybrid_adaptor:
 
 ## 11. 落地 Checklist
 
-- [ ] §1: 业务层 DB + Repository + Usecase 骨架
-- [ ] §2: QuotaChecker + ExpiryChecker
-- [ ] §3: 业务层 HTTP + 用量回写接入
-- [ ] §4: TokenRefreshService
+- [x] §1: 业务层 DB + Repository + Usecase 骨架
+- [x] §2: QuotaChecker + ExpiryChecker
+- [x] §3: 业务层 HTTP + 用量回写接入
+- [x] §4: TokenRefreshService
 - [ ] §5: 多层 Scheduler
 - [ ] §6: AccountPool + RuntimeBlocker + FailoverLoop
 - [ ] §7: Codex 5h/7d + ErrorPassthrough + OAuth 整合

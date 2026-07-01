@@ -106,6 +106,7 @@ type SubscriptionAccount struct {
 	QuotaUsedPercent float32
 	QuotaResetAt     int64
 	Concurrency      int32
+	LastError        string
 }
 
 type Ability struct {
@@ -149,10 +150,14 @@ type ChannelRepo interface {
 	FindSubscriptionAccountByID(ctx context.Context, accountID int64) (*SubscriptionAccount, error)
 	ListSubscriptionAccountAbilities(ctx context.Context, group, model, platform string) ([]SubscriptionAccountAbility, error)
 	ListSubscriptionAccounts(ctx context.Context, page, pageSize int32, keyword, group string, status int32, platform string) ([]*SubscriptionAccount, int64, error)
+	ListOAuthRefreshCandidates(ctx context.Context, within time.Duration) ([]int64, error)
 	CreateSubscriptionAccount(ctx context.Context, account *SubscriptionAccount) error
 	UpdateSubscriptionAccount(ctx context.Context, account *SubscriptionAccount) error
 	DeleteSubscriptionAccount(ctx context.Context, accountID int64) error
 	ChangeSubscriptionAccountStatus(ctx context.Context, accountID int64, status int32) error
+	SetSubscriptionAccountError(ctx context.Context, accountID int64, message string) error
+	SetTempUnschedulable(ctx context.Context, accountID int64, until time.Time, reason string) error
+	ClearTempUnschedulable(ctx context.Context, accountID int64) error
 	ListAvailableModels(ctx context.Context, group string) ([]string, error)
 	ListChannels(ctx context.Context, page, pageSize int32, keyword, group string, status, chType int32) ([]*Channel, int64, error)
 	CreateChannel(ctx context.Context, channel *Channel) error
@@ -282,7 +287,7 @@ func (uc *ChannelUsecase) SelectSubscriptionAccount(ctx context.Context, group, 
 			if err != nil {
 				continue
 			}
-			if account.Status == ChannelStatusEnabled {
+			if account.Status == ChannelStatusEnabled && account.IsSchedulableAt(uc.now()) {
 				tier = append(tier, account)
 			}
 		}
@@ -305,6 +310,26 @@ func (uc *ChannelUsecase) GetSubscriptionAccount(ctx context.Context, accountID 
 
 func (uc *ChannelUsecase) ListSubscriptionAccounts(ctx context.Context, page, pageSize int32, keyword, group string, status int32, platform string) ([]*SubscriptionAccount, int64, error) {
 	return uc.repo.ListSubscriptionAccounts(ctx, page, pageSize, keyword, group, status, platform)
+}
+
+func (uc *ChannelUsecase) ListOAuthRefreshCandidates(ctx context.Context, within time.Duration) ([]int64, error) {
+	return uc.repo.ListOAuthRefreshCandidates(ctx, within)
+}
+
+func (uc *ChannelUsecase) SetSubscriptionAccountError(ctx context.Context, accountID int64, message string) error {
+	return uc.repo.SetSubscriptionAccountError(ctx, accountID, message)
+}
+
+func (uc *ChannelUsecase) ClearSubscriptionAccountError(ctx context.Context, accountID int64) error {
+	return uc.repo.SetSubscriptionAccountError(ctx, accountID, "")
+}
+
+func (uc *ChannelUsecase) SetTempUnschedulable(ctx context.Context, accountID int64, until time.Time, reason string) error {
+	return uc.repo.SetTempUnschedulable(ctx, accountID, until, reason)
+}
+
+func (uc *ChannelUsecase) ClearTempUnschedulable(ctx context.Context, accountID int64) error {
+	return uc.repo.ClearTempUnschedulable(ctx, accountID)
 }
 
 func (uc *ChannelUsecase) CreateSubscriptionAccount(ctx context.Context, account *SubscriptionAccount) error {
@@ -486,6 +511,13 @@ func (c *Channel) SelectableAt(now time.Time) bool {
 		return true
 	}
 	return c.CircuitOpenedUntil > 0 && now.Unix() >= c.CircuitOpenedUntil
+}
+
+func (a *SubscriptionAccount) IsSchedulableAt(now time.Time) bool {
+	if a == nil || a.Status != ChannelStatusEnabled {
+		return false
+	}
+	return a.RateLimitedUntil <= 0 || now.Unix() >= a.RateLimitedUntil
 }
 
 func (uc *ChannelUsecase) notifyUnavailable(ctx context.Context, previous, current *Channel, event ChannelHealthEvent) {

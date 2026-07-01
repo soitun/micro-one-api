@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"sort"
@@ -235,6 +236,23 @@ func (r *Repository) ListSubscriptionAccounts(ctx context.Context, page, pageSiz
 	return result, int64(len(result)), nil
 }
 
+func (r *Repository) ListOAuthRefreshCandidates(ctx context.Context, within time.Duration) ([]int64, error) {
+	if r.db != nil {
+		return r.listOAuthRefreshCandidatesDB(ctx, within)
+	}
+	threshold := time.Now().Add(within).Unix()
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	ids := make([]int64, 0)
+	for id, account := range r.subAccounts {
+		if account.ExpiresAt > 0 && account.ExpiresAt <= threshold {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids, nil
+}
+
 func (r *Repository) CreateSubscriptionAccount(ctx context.Context, account *biz.SubscriptionAccount) error {
 	if r.db != nil {
 		return r.createSubscriptionAccountDB(ctx, account)
@@ -280,6 +298,54 @@ func (r *Repository) ChangeSubscriptionAccountStatus(ctx context.Context, accoun
 		return biz.ErrSubscriptionAccountNotFound
 	}
 	account.Status = status
+	return nil
+}
+
+func (r *Repository) SetSubscriptionAccountError(ctx context.Context, accountID int64, message string) error {
+	if r.db != nil {
+		return r.setSubscriptionAccountErrorDB(ctx, accountID, message)
+	}
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	account, ok := r.subAccounts[accountID]
+	if !ok {
+		return biz.ErrSubscriptionAccountNotFound
+	}
+	account.LastError = message
+	account.Metadata = setSubscriptionAccountMetadataValue(account.Metadata, "last_error", message)
+	account.UpdatedAt = time.Now().Unix()
+	return nil
+}
+
+func (r *Repository) SetTempUnschedulable(ctx context.Context, accountID int64, until time.Time, reason string) error {
+	if r.db != nil {
+		return r.setTempUnschedulableDB(ctx, accountID, until, reason)
+	}
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	account, ok := r.subAccounts[accountID]
+	if !ok {
+		return biz.ErrSubscriptionAccountNotFound
+	}
+	account.RateLimitedUntil = until.Unix()
+	account.LastError = reason
+	account.Metadata = setSubscriptionAccountMetadataValue(account.Metadata, "last_error", reason)
+	account.UpdatedAt = time.Now().Unix()
+	return nil
+}
+
+func (r *Repository) ClearTempUnschedulable(ctx context.Context, accountID int64) error {
+	if r.db != nil {
+		return r.clearTempUnschedulableDB(ctx, accountID)
+	}
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	account, ok := r.subAccounts[accountID]
+	if !ok {
+		return biz.ErrSubscriptionAccountNotFound
+	}
+	account.RateLimitedUntil = 0
+	account.UpdatedAt = time.Now().Unix()
 	return nil
 }
 
@@ -453,6 +519,23 @@ func (r *Repository) listSubscriptionAccountsDB(ctx context.Context, page, pageS
 	return result, total, nil
 }
 
+func (r *Repository) listOAuthRefreshCandidatesDB(ctx context.Context, within time.Duration) ([]int64, error) {
+	threshold := time.Now().Add(within).Unix()
+	var rows []subscriptionAccountModel
+	if err := r.db.WithContext(ctx).
+		Select("id").
+		Where("expires_at > 0 AND expires_at <= ?", threshold).
+		Order("expires_at ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids, nil
+}
+
 func (r *Repository) createSubscriptionAccountDB(ctx context.Context, account *biz.SubscriptionAccount) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		model := r.subscriptionAccountBizToModel(account)
@@ -507,6 +590,38 @@ func (r *Repository) changeSubscriptionAccountStatusDB(ctx context.Context, acco
 		enabled := status == biz.ChannelStatusEnabled
 		return tx.Model(&subscriptionAccountAbilityModel{}).Where("account_id = ?", accountID).Update("enabled", enabled).Error
 	})
+}
+
+func (r *Repository) setSubscriptionAccountErrorDB(ctx context.Context, accountID int64, message string) error {
+	account, err := r.findSubscriptionAccountByIDDB(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	metadata := setSubscriptionAccountMetadataValue(account.Metadata, "last_error", message)
+	return r.db.WithContext(ctx).Model(&subscriptionAccountModel{}).Where("id = ?", accountID).Updates(map[string]interface{}{
+		"metadata":   stringPtr(metadata),
+		"updated_at": time.Now().Unix(),
+	}).Error
+}
+
+func (r *Repository) setTempUnschedulableDB(ctx context.Context, accountID int64, until time.Time, reason string) error {
+	account, err := r.findSubscriptionAccountByIDDB(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	metadata := setSubscriptionAccountMetadataValue(account.Metadata, "last_error", reason)
+	return r.db.WithContext(ctx).Model(&subscriptionAccountModel{}).Where("id = ?", accountID).Updates(map[string]interface{}{
+		"rate_limited_until": until.Unix(),
+		"metadata":           stringPtr(metadata),
+		"updated_at":         time.Now().Unix(),
+	}).Error
+}
+
+func (r *Repository) clearTempUnschedulableDB(ctx context.Context, accountID int64) error {
+	return r.db.WithContext(ctx).Model(&subscriptionAccountModel{}).Where("id = ?", accountID).Updates(map[string]interface{}{
+		"rate_limited_until": 0,
+		"updated_at":         time.Now().Unix(),
+	}).Error
 }
 
 func (r *Repository) recordUsageDB(ctx context.Context, channelID int64, quota int64) error {
@@ -987,6 +1102,7 @@ func (r *Repository) subscriptionAccountModelToBiz(m *subscriptionAccountModel) 
 		QuotaUsedPercent: m.QuotaUsedPercent,
 		QuotaResetAt:     m.QuotaResetAt,
 		Concurrency:      m.Concurrency,
+		LastError:        subscriptionAccountMetadataValue(derefString(m.Metadata), "last_error"),
 	}
 }
 
@@ -1039,6 +1155,49 @@ func derefUint(u *uint) uint32 {
 		return 0
 	}
 	return v
+}
+
+func subscriptionAccountMetadataValue(raw, key string) string {
+	values := subscriptionAccountMetadata(raw)
+	if values == nil {
+		return ""
+	}
+	value, _ := values[key].(string)
+	return value
+}
+
+func setSubscriptionAccountMetadataValue(raw, key, value string) string {
+	values := subscriptionAccountMetadata(raw)
+	if values == nil {
+		values = make(map[string]interface{})
+		if strings.TrimSpace(raw) != "" {
+			values["raw"] = raw
+		}
+	}
+	if value == "" {
+		delete(values, key)
+	} else {
+		values[key] = value
+	}
+	if len(values) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(values)
+	if err != nil {
+		return raw
+	}
+	return string(b)
+}
+
+func subscriptionAccountMetadata(raw string) map[string]interface{} {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]interface{}{}
+	}
+	values := make(map[string]interface{})
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil
+	}
+	return values
 }
 
 func applyHealthEvent(channel *biz.Channel, event biz.ChannelHealthEvent, threshold int32, cooldown time.Duration) {

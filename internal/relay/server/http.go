@@ -30,6 +30,7 @@ import (
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaycredential "micro-one-api/internal/relay/credential"
 	relayprovider "micro-one-api/internal/relay/provider"
+	subscriptionbiz "micro-one-api/internal/subscription/biz"
 )
 
 const postResponseWriteTimeout = 10 * time.Second
@@ -69,6 +70,10 @@ type HTTPServer struct {
 	// upstream calls. It mirrors the provider-factory timeout so OAuth calls
 	// don't outlive the configured upstream timeout.
 	oauthHTTPClient *http.Client
+
+	// subscriptionUsecase is an optional business-layer hook used to enforce
+	// user subscription quota and record usage after successful commits.
+	subscriptionUsecase *subscriptionbiz.SubscriptionUsecase
 }
 
 // openAIWSTimeouts holds parsed durations for the Responses WebSocket relay.
@@ -165,6 +170,15 @@ func (s *HTTPServer) SetOAuthHTTPClient(c *http.Client) {
 		return
 	}
 	s.oauthHTTPClient = c
+}
+
+// SetSubscriptionUsecase wires the optional subscription business hook.
+// When unset the relay gateway behaves exactly as before.
+func (s *HTTPServer) SetSubscriptionUsecase(uc *subscriptionbiz.SubscriptionUsecase) {
+	if s == nil {
+		return
+	}
+	s.subscriptionUsecase = uc
 }
 
 // isSubscriptionChannel reports whether the channel type is a subscription
@@ -1760,9 +1774,37 @@ func (s *HTTPServer) commitQuota(ctx context.Context, reservationID string, actu
 		return stderrors.New(billingErrorMessage(resp, "commit quota failed"))
 	}
 	if len(details) > 0 {
-		s.recordChannelUsage(ctx, details[0].ChannelID, actualTokens)
+		detail := details[0]
+		s.recordChannelUsage(ctx, detail.ChannelID, actualTokens)
+		s.recordSubscriptionUsage(ctx, detail.UserID, actualTokens)
 	}
 	return nil
+}
+
+func (s *HTTPServer) recordSubscriptionUsage(ctx context.Context, userID int64, quota int64) {
+	if s.subscriptionUsecase == nil || userID <= 0 || quota <= 0 {
+		return
+	}
+	costUSD := quotaToUSD(quota)
+	if costUSD <= 0 {
+		return
+	}
+	subscriptionCtx, cancel := detachedBillingContext(ctx)
+	defer cancel()
+	if err := s.subscriptionUsecase.RecordUsage(subscriptionCtx, userID, costUSD); err != nil && applogger.Log != nil {
+		applogger.Log.Warn("failed to record subscription usage", zap.Int64("user_id", userID), zap.Float64("cost_usd", costUSD), zap.Error(err))
+	}
+}
+
+func quotaToUSD(quota int64) float64 {
+	if quota <= 0 {
+		return 0
+	}
+	perUSD := quotaPerUSDFromEnv()
+	if perUSD <= 0 {
+		perUSD = defaultQuotaPerUSD
+	}
+	return float64(quota) / float64(perUSD)
 }
 
 func (s *HTTPServer) recordChannelUsage(ctx context.Context, channelID int64, quota int64) {

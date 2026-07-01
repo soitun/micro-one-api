@@ -1,6 +1,10 @@
 package config
 
-import appregistry "micro-one-api/internal/pkg/registry"
+import (
+	"fmt"
+
+	appregistry "micro-one-api/internal/pkg/registry"
+)
 
 // Config holds the relay-gateway configuration.
 type Config struct {
@@ -12,6 +16,7 @@ type Config struct {
 	Redis             RedisConfig             `json:"redis" yaml:"redis"`
 	OpenAIWS          OpenAIWSConfig          `json:"openai_ws" yaml:"openai_ws"`
 	HybridAdaptor     HybridAdaptorConfig     `json:"hybrid_adaptor" yaml:"hybrid_adaptor"`
+	Subscription      SubscriptionConfig      `json:"subscription" yaml:"subscription"`
 	RelayOrchestrator RelayOrchestratorConfig `json:"relay_orchestrator" yaml:"relay_orchestrator"`
 	ChannelCache      ChannelCacheConfig      `json:"channel_cache" yaml:"channel_cache"`
 	Idempotency       IdempotencyConfig       `json:"idempotency" yaml:"idempotency"`
@@ -19,6 +24,14 @@ type Config struct {
 	Resilience        ResilienceConfig        `json:"resilience" yaml:"resilience"`
 	MTLS              MTLSConfig              `json:"mtls" yaml:"mtls"`
 }
+
+// SubscriptionConfig controls user subscription quota enforcement at the
+// relay-gateway request entry. Disabled by default.
+type SubscriptionConfig struct {
+	Enabled bool `json:"enabled" yaml:"enabled"`
+}
+
+func (c SubscriptionConfig) GetSubscriptionEnabled() bool { return c.Enabled }
 
 // RelayOrchestratorConfig controls the handler -> orchestrator -> forwarder
 // route for chat completions. Disabled by default.
@@ -88,6 +101,18 @@ type HybridAdaptorConfig struct {
 	// RefreshLookahead is how far ahead the refresh task looks for expiring
 	// accounts. Defaults to 24h.
 	RefreshLookahead string `json:"refresh_lookahead" yaml:"refresh_lookahead"`
+
+	// TokenRefresh controls the enhanced background token refresh service.
+	TokenRefresh TokenRefreshConfig `json:"token_refresh" yaml:"token_refresh"`
+}
+
+type TokenRefreshConfig struct {
+	Enabled                  bool   `json:"enabled" yaml:"enabled"`
+	CheckIntervalMinutes     int    `json:"check_interval_minutes" yaml:"check_interval_minutes"`
+	RefreshBeforeExpiryHours int    `json:"refresh_before_expiry_hours" yaml:"refresh_before_expiry_hours"`
+	MaxRetries               int    `json:"max_retries" yaml:"max_retries"`
+	RetryBackoffSeconds      int    `json:"retry_backoff_seconds" yaml:"retry_backoff_seconds"`
+	TempUnschedDuration      string `json:"temp_unsched_duration" yaml:"temp_unsched_duration"`
 }
 
 // GetHybridAdaptorEnabled reports whether the hybrid adaptor path is enabled.
@@ -103,6 +128,9 @@ func (c HybridAdaptorConfig) GetIdentityTTL() string {
 
 // GetRefreshInterval returns the background refresh interval with default.
 func (c HybridAdaptorConfig) GetRefreshInterval() string {
+	if c.TokenRefresh.CheckIntervalMinutes > 0 {
+		return fmt.Sprintf("%dm", c.TokenRefresh.CheckIntervalMinutes)
+	}
 	if c.RefreshInterval == "" {
 		return "10m"
 	}
@@ -111,10 +139,20 @@ func (c HybridAdaptorConfig) GetRefreshInterval() string {
 
 // GetRefreshLookahead returns the refresh lookahead window with default.
 func (c HybridAdaptorConfig) GetRefreshLookahead() string {
+	if c.TokenRefresh.RefreshBeforeExpiryHours > 0 {
+		return fmt.Sprintf("%dh", c.TokenRefresh.RefreshBeforeExpiryHours)
+	}
 	if c.RefreshLookahead == "" {
 		return "24h"
 	}
 	return c.RefreshLookahead
+}
+
+func (c HybridAdaptorConfig) GetTokenRefreshEnabled() bool {
+	if c.TokenRefresh.Enabled {
+		return true
+	}
+	return c.Enabled
 }
 
 // OpenAIWSConfig holds tunables for the Codex Responses WebSocket relay
