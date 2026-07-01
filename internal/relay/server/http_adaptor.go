@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/bytedance/sonic"
 
@@ -67,11 +69,71 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 		s.writeError(w, http.StatusInternalServerError, "no channel selected")
 		return
 	}
+	if plan.Auth == nil {
+		s.writeError(w, http.StatusInternalServerError, "no auth selected")
+		return
+	}
+
+	maxAttempts := s.subscriptionFailoverMaxAttempts()
+	failedAccounts := make(map[int64]bool, maxAttempts)
+	current := plan
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if current == nil || current.Channel == nil {
+			break
+		}
+		result := s.executeSubscriptionAccountViaAdaptor(r.Context(), current, clientModel, r.Header.Clone(), rawBody, inbound)
+		if result.retryable {
+			accountID := subscriptionAccountIDFromPlan(current)
+			if accountID > 0 {
+				failedAccounts[accountID] = true
+				s.blockRuntimeAccount(r.Context(), accountID, result.statusCode, result.err)
+			}
+			lastErr = result.err
+			next, err := s.selectSubscriptionFailoverPlan(r.Context(), plan, current, clientModel, failedAccounts)
+			if err == nil && next != nil && next.Channel != nil && subscriptionAccountIDFromPlan(next) != accountID {
+				current = next
+				continue
+			}
+		}
+		result.write(w)
+		return
+	}
+	if lastErr != nil {
+		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("upstream call: %v", lastErr))
+		return
+	}
+	s.writeError(w, http.StatusBadGateway, "no subscription account available")
+}
+
+type subscriptionAdaptorResult struct {
+	statusCode int
+	err        error
+	retryable  bool
+	write      func(http.ResponseWriter)
+}
+
+func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
+	ctx context.Context,
+	plan *relaybiz.RelayPlan,
+	clientModel string,
+	inboundHeader http.Header,
+	rawBody []byte,
+	inbound relayadaptor.Format,
+) subscriptionAdaptorResult {
+	result := subscriptionAdaptorResult{
+		statusCode: http.StatusInternalServerError,
+		write: func(w http.ResponseWriter) {
+			s.writeError(w, http.StatusInternalServerError, "subscription adaptor failed")
+		},
+	}
 
 	ad, ok := relayadaptor.GetAdaptor(plan.Channel.Type)
 	if !ok {
-		s.writeError(w, http.StatusBadGateway, "no adaptor registered for subscription channel type")
-		return
+		result.statusCode = http.StatusBadGateway
+		result.err = fmt.Errorf("no adaptor registered for subscription channel type")
+		result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusBadGateway, result.err.Error()) }
+		return result
 	}
 
 	// Prefer the first-class subscription account selected during planning
@@ -82,7 +144,7 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 	if plan.Account != nil {
 		meta = subscriptionAccountMetadataFromPlan(plan.Account)
 	} else if s.accountResolver != nil {
-		if resolved, err := s.accountResolver.Resolve(r.Context(), plan.Channel.ID); err == nil && resolved != nil {
+		if resolved, err := s.accountResolver.Resolve(ctx, plan.Channel.ID); err == nil && resolved != nil {
 			meta = resolved
 		}
 	}
@@ -105,7 +167,7 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 			Fingerprint: meta.Fingerprint,
 		},
 		UserID:        plan.Auth.UserID,
-		InboundHeader: r.Header.Clone(),
+		InboundHeader: inboundHeader.Clone(),
 		RawBody:       rawBody,
 	}
 	// Carry the configured upstream HTTP client so the OAuth path respects the
@@ -119,17 +181,21 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 	// Convert the inbound request body to the upstream format.
 	upstreamFmt, upstreamBody, err := ad.ConvertRequest(rc, inbound, rawBody)
 	if err != nil {
-		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("adaptor convert request: %v", err))
-		return
+		result.statusCode = http.StatusBadGateway
+		result.err = fmt.Errorf("adaptor convert request: %w", err)
+		result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusBadGateway, result.err.Error()) }
+		return result
 	}
 	// (reservation happens after BuildUpstreamRequest so a build error does not
 	//  leak a reservation; see below.)
 
 	// Build the upstream http.Request (includes identity mimicry + OAuth token).
-	upstreamReq, err := ad.BuildUpstreamRequest(r.Context(), rc, upstreamFmt, upstreamBody)
+	upstreamReq, err := ad.BuildUpstreamRequest(ctx, rc, upstreamFmt, upstreamBody)
 	if err != nil {
-		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("adaptor build request: %v", err))
-		return
+		result.statusCode = http.StatusBadGateway
+		result.err = fmt.Errorf("adaptor build request: %w", err)
+		result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusBadGateway, result.err.Error()) }
+		return result
 	}
 
 	// Determine whether the client requested streaming.
@@ -150,10 +216,12 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 	}
 	resp, err := client.Do(upstreamReq)
 	if err != nil {
-		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("upstream call: %v", err))
-		return
+		result.statusCode = http.StatusBadGateway
+		result.err = fmt.Errorf("upstream call: %w", err)
+		result.retryable = true
+		result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusBadGateway, result.err.Error()) }
+		return result
 	}
-	defer resp.Body.Close()
 
 	// Non-2xx: surface a sanitized upstream error. Upstream error bodies may
 	// leak internal identifiers (the upstream's view of the subscription,
@@ -161,8 +229,12 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 	// the client.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20)) // drain so the connection can be reused
-		s.writeError(w, resp.StatusCode, fmt.Sprintf("upstream returned status %d", resp.StatusCode))
-		return
+		resp.Body.Close()
+		result.statusCode = resp.StatusCode
+		result.err = fmt.Errorf("upstream returned status %d", resp.StatusCode)
+		result.retryable = isSubscriptionRuntimeRetryableStatus(resp.StatusCode)
+		result.write = func(w http.ResponseWriter) { s.writeError(w, resp.StatusCode, result.err.Error()) }
+		return result
 	}
 
 	// Quota reservation for the subscription call (plan §5 step 8). We reserve
@@ -179,7 +251,7 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 	if accountUsage {
 		var reserveErr error
 		reservation, reserveErr = s.reserveQuota(
-			r.Context(),
+			ctx,
 			fmt.Sprintf("%d", plan.Auth.UserID),
 			requestID,
 			estimateRawTokens(rawBody),
@@ -188,96 +260,168 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 			subscriptionAccountIDFromPlan(plan),
 		)
 		if reserveErr != nil {
-			s.writeError(w, http.StatusPaymentRequired, fmt.Sprintf("reserve quota: %v", reserveErr))
-			return
+			result.statusCode = http.StatusPaymentRequired
+			result.err = fmt.Errorf("reserve quota: %w", reserveErr)
+			result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusPaymentRequired, result.err.Error()) }
+			return result
 		}
 	}
 
 	if isStream {
 		_, reader, err := ad.ConvertStreamResponse(rc, upstreamFmt, resp)
 		if err != nil {
+			resp.Body.Close()
 			if accountUsage {
-				_ = s.releaseQuota(r.Context(), reservation.ReservationId, "adaptor convert stream error")
+				_ = s.releaseQuota(ctx, reservation.ReservationId, "adaptor convert stream error")
 			}
-			s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("adaptor convert stream: %v", err))
-			return
+			result.statusCode = http.StatusInternalServerError
+			result.err = fmt.Errorf("adaptor convert stream: %w", err)
+			result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusInternalServerError, result.err.Error()) }
+			return result
 		}
 		// Tee the converted SSE through a usage tracker so we can commit real
 		// token counts. The converted output is already in the client's
 		// protocol (chat/anthropic/responses), whose usage objects
 		// extractRawUsage understands.
 		usageTracker := newRawStreamUsageTracker(estimateRawUsage(rawBody))
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.WriteHeader(http.StatusOK)
-		if flusher, ok := w.(http.Flusher); ok {
-			_, _ = io.Copy(&flushWriter{w: w, flusher: flusher, usageTracker: usageTracker}, reader)
-		} else {
-			_, _ = io.Copy(&streamUsageWriter{w: w, usageTracker: usageTracker}, reader)
+		result.statusCode = http.StatusOK
+		result.write = func(w http.ResponseWriter) {
+			defer resp.Body.Close()
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.WriteHeader(http.StatusOK)
+			if flusher, ok := w.(http.Flusher); ok {
+				_, _ = io.Copy(&flushWriter{w: w, flusher: flusher, usageTracker: usageTracker}, reader)
+			} else {
+				_, _ = io.Copy(&streamUsageWriter{w: w, usageTracker: usageTracker}, reader)
+			}
+			if accountUsage {
+				actualUsage := usageTracker.Usage()
+				logInput := usageLogInput{
+					UserID:                plan.Auth.UserID,
+					TokenID:               plan.Auth.TokenID,
+					TokenName:             plan.Auth.TokenName,
+					RequestID:             requestID,
+					Endpoint:              string(inbound),
+					ModelName:             plan.ResolvedModel,
+					Quota:                 actualUsage.TotalTokens,
+					PromptTokens:          actualUsage.PromptTokens,
+					CompletionTokens:      actualUsage.CompletionTokens,
+					CacheReadTokens:       actualUsage.CacheReadTokens,
+					ChannelID:             plan.Channel.ID,
+					SubscriptionAccountID: subscriptionAccountIDFromPlan(plan),
+					IsStream:              true,
+				}
+				if err := s.commitQuotaAfterResponse(reservation.ReservationId, actualUsage.TotalTokens, true, logInput); err != nil {
+					s.logPostResponseCommitError(err)
+				} else {
+					s.ingestUsageLogAfterResponse(logInput)
+				}
+			}
 		}
+		return result
+	}
+
+	// Non-streaming: convert and write.
+	_, outBody, err := ad.ConvertResponse(rc, upstreamFmt, resp)
+	resp.Body.Close()
+	if err != nil {
 		if accountUsage {
-			actualUsage := usageTracker.Usage()
+			_ = s.releaseQuota(ctx, reservation.ReservationId, "adaptor convert response error")
+		}
+		result.statusCode = http.StatusInternalServerError
+		result.err = fmt.Errorf("adaptor convert response: %w", err)
+		result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusInternalServerError, result.err.Error()) }
+		return result
+	}
+	result.statusCode = http.StatusOK
+	result.write = func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(outBody)
+
+		// Commit real usage from the converted response body.
+		if accountUsage {
+			usage := extractRawUsage(outBody, estimateRawTokens(rawBody))
 			logInput := usageLogInput{
-				UserID:           plan.Auth.UserID,
-				TokenID:          plan.Auth.TokenID,
-				TokenName:        plan.Auth.TokenName,
-				RequestID:        requestID,
-				Endpoint:         string(inbound),
-				ModelName:        plan.ResolvedModel,
-				Quota:            actualUsage.TotalTokens,
-				PromptTokens:     actualUsage.PromptTokens,
-				CompletionTokens: actualUsage.CompletionTokens,
-				CacheReadTokens:       actualUsage.CacheReadTokens,
+				UserID:                plan.Auth.UserID,
+				TokenID:               plan.Auth.TokenID,
+				TokenName:             plan.Auth.TokenName,
+				RequestID:             requestID,
+				Endpoint:              string(inbound),
+				ModelName:             plan.ResolvedModel,
+				Quota:                 usage.TotalTokens,
+				PromptTokens:          usage.PromptTokens,
+				CompletionTokens:      usage.CompletionTokens,
+				CacheReadTokens:       usage.CacheReadTokens,
 				ChannelID:             plan.Channel.ID,
 				SubscriptionAccountID: subscriptionAccountIDFromPlan(plan),
-				IsStream:              true,
 			}
-			if err := s.commitQuotaAfterResponse(reservation.ReservationId, actualUsage.TotalTokens, true, logInput); err != nil {
+			if err := s.commitQuotaAfterResponse(reservation.ReservationId, usage.TotalTokens, true, logInput); err != nil {
 				s.logPostResponseCommitError(err)
 			} else {
 				s.ingestUsageLogAfterResponse(logInput)
 			}
 		}
+	}
+	return result
+}
+
+func (s *HTTPServer) subscriptionFailoverMaxAttempts() int {
+	if s == nil || s.wsPoolCfg.failoverMaxSwitches <= 0 {
+		return 3
+	}
+	return s.wsPoolCfg.failoverMaxSwitches + 1
+}
+
+func (s *HTTPServer) blockRuntimeAccount(ctx context.Context, accountID int64, statusCode int, err error) {
+	if s == nil || s.runtimeBlocker == nil || accountID <= 0 {
 		return
 	}
-
-	// Non-streaming: convert and write.
-	_, outBody, err := ad.ConvertResponse(rc, upstreamFmt, resp)
+	duration := runtimeBlockDuration(statusCode)
+	if duration <= 0 {
+		return
+	}
+	reason := fmt.Sprintf("status=%d", statusCode)
 	if err != nil {
-		if accountUsage {
-			_ = s.releaseQuota(r.Context(), reservation.ReservationId, "adaptor convert response error")
-		}
-		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("adaptor convert response: %v", err))
-		return
+		reason = err.Error()
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(outBody)
+	_ = s.runtimeBlocker.Block(ctx, accountID, time.Now().Add(duration), reason)
+}
 
-	// Commit real usage from the converted response body.
-	if accountUsage {
-		usage := extractRawUsage(outBody, estimateRawTokens(rawBody))
-		logInput := usageLogInput{
-			UserID:           plan.Auth.UserID,
-			TokenID:          plan.Auth.TokenID,
-			TokenName:        plan.Auth.TokenName,
-			RequestID:        requestID,
-			Endpoint:         string(inbound),
-			ModelName:        plan.ResolvedModel,
-			Quota:            usage.TotalTokens,
-			PromptTokens:     usage.PromptTokens,
-			CompletionTokens: usage.CompletionTokens,
-			CacheReadTokens:      usage.CacheReadTokens,
-			ChannelID:            plan.Channel.ID,
-			SubscriptionAccountID: subscriptionAccountIDFromPlan(plan),
-		}
-		if err := s.commitQuotaAfterResponse(reservation.ReservationId, usage.TotalTokens, true, logInput); err != nil {
-			s.logPostResponseCommitError(err)
-		} else {
-			s.ingestUsageLogAfterResponse(logInput)
+func (s *HTTPServer) selectSubscriptionFailoverPlan(ctx context.Context, base, current *relaybiz.RelayPlan, clientModel string, failed map[int64]bool) (*relaybiz.RelayPlan, error) {
+	if s == nil || s.relayUsecase == nil || base == nil || base.Auth == nil {
+		return nil, fmt.Errorf("relay usecase unavailable")
+	}
+	resolvedModel := base.ResolvedModel
+	if resolvedModel == "" && current != nil {
+		resolvedModel = current.ResolvedModel
+	}
+	next, err := s.relayUsecase.SelectSubscriptionFailover(ctx, base.Auth.Group, clientModel, resolvedModel, failed)
+	if err != nil {
+		return nil, err
+	}
+	next.Auth = base.Auth
+	return next, nil
+}
+
+func isSubscriptionRuntimeRetryableStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= 500
+}
+
+func runtimeBlockDuration(statusCode int) time.Duration {
+	switch statusCode {
+	case http.StatusTooManyRequests:
+		return 5 * time.Second
+	case http.StatusUnauthorized:
+		return 2 * time.Minute
+	default:
+		if statusCode >= 500 {
+			return 2 * time.Minute
 		}
 	}
+	return 0
 }
 
 // accountTypeOrDefault returns the subscription account type, defaulting to

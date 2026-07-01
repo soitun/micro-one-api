@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	relayprovider "micro-one-api/internal/relay/provider"
 )
@@ -42,6 +43,7 @@ type recordingChannelClient struct {
 	subscriptionModels    []string
 	subscriptionPlatforms []string
 	subscription          *SubscriptionAccount
+	subscriptions         []*SubscriptionAccount
 	subscriptionErr       error
 }
 
@@ -70,6 +72,13 @@ func (c *recordingChannelClient) SelectSubscriptionAccount(_ context.Context, gr
 	c.subscriptionPlatforms = append(c.subscriptionPlatforms, platform)
 	if c.subscriptionErr != nil {
 		return nil, c.subscriptionErr
+	}
+	if len(c.subscriptions) > 0 {
+		idx := len(c.subscriptionModels) - 1
+		if idx >= len(c.subscriptions) {
+			idx = len(c.subscriptions) - 1
+		}
+		return c.subscriptions[idx], nil
 	}
 	return c.subscription, nil
 }
@@ -260,6 +269,30 @@ func TestRelayUsecasePlan_SelectsClaudeSubscriptionWithPlatformFilter(t *testing
 	}
 	if len(channelClient.subscriptionPlatforms) != 1 || channelClient.subscriptionPlatforms[0] != "claude" {
 		t.Fatalf("subscription selected platforms = %v", channelClient.subscriptionPlatforms)
+	}
+}
+
+func TestRelayUsecasePlan_SkipsRuntimeBlockedSubscriptionAccount(t *testing.T) {
+	channelClient := &recordingChannelClient{
+		failModels: map[string]error{"gpt-5": errors.New("no channel available")},
+		subscriptions: []*SubscriptionAccount{
+			{ID: 8, Name: "blocked", Platform: "codex", Status: 1, Group: "default", Models: []string{"gpt-5"}},
+			{ID: 9, Name: "next", Platform: "codex", Status: 1, Group: "default", Models: []string{"gpt-5"}},
+		},
+	}
+	uc := NewRelayUsecase(&testIdentityClientAllowAll{}, channelClient, nil, nil)
+	blocker := NewMemoryRuntimeBlocker()
+	uc.SetRuntimeBlocker(blocker)
+	if err := blocker.Block(context.Background(), 8, time.Now().Add(time.Minute), "upstream 500"); err != nil {
+		t.Fatalf("Block() error = %v", err)
+	}
+
+	plan, err := uc.Plan(context.Background(), RelayRequest{Token: "demo-token", Model: "gpt-5"})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Account == nil || plan.Account.ID != 9 {
+		t.Fatalf("selected account = %+v, want id 9", plan.Account)
 	}
 }
 

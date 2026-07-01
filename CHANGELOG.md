@@ -10,6 +10,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 ### Added
 - relay-gateway Responses 路径新增 §5 多层调度:优先复用 `previous_response_id` route,其次复用 `session_hash` sticky channel,最后回退到原 `RelayUsecase.Plan`。
 - Responses HTTP/WS sticky session 支持 `session_hash` / `sessionHash` body 字段和 `X-Session-Hash` / `OpenAI-Session-Hash` header,并在 Redis sticky store 中使用独立 `openai_ws_session:` namespace。
+- relay-gateway 订阅账号路径新增 §6 `AccountPool` + `RuntimeBlocker` + FailoverLoop:订阅账号选号会跳过运行时熔断账号,subscription adaptor 在上游网络错误、`429`、`5xx` 时短 TTL 熔断当前账号并切换下一个账号重试。
 
 ### Fixed
 - `previous_response_id` 解析拒绝 `msg_` message id,避免把 message id 误当 Responses route id。

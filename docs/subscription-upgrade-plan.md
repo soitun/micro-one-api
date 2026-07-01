@@ -551,6 +551,18 @@ go func(ctx context.Context, userID, groupID int64, costUSD float64) {
 - **权限边界**:session sticky 命中后仍校验 token 的 allowed models;未配置 sticky store 时保留原 `RelayUsecase.Plan` 行为。
 - **已覆盖测试**:`response_scheduler_test.go`、`response_route_scheduler_test.go`、`openai_ws_pool_test.go` 覆盖 fallback 顺序、message id 拒绝、session TTL/删除/续期和模型白名单。
 
+### 5.4 §6 当前落地状态
+
+§6 已在订阅账号 adaptor 路径落地,本阶段不新增数据库迁移/Proto:
+
+- **AccountPool**:`internal/relay/biz/account_pool.go` 提供 relay-gateway 本地运行时过滤层,当前过滤 `RuntimeBlocker`,保留后续接入 quota window / concurrency 的扩展点。
+- **RuntimeBlocker**:`internal/relay/biz/runtime_blocker.go` 提供 `NoopRuntimeBlocker` 与进程内 `MemoryRuntimeBlocker`;`Block` / `Clear` / `IsBlocked` / `Metrics` 接口独立于 channel-service,不影响持久化账号状态。
+- **选号过滤**:`RelayUsecase` 在订阅账号选择时会跳过 runtime-blocked 账号,并在重选时排除已失败 account id。
+- **FailoverLoop**:`internal/relay/server/http_adaptor.go` 的 subscription adaptor 路径在上游网络错误、`429`、`5xx` 且尚未写客户端响应时,短 TTL 熔断当前账号并选择下一订阅账号重试。
+- **TTL 策略**:`429` 熔断 5 秒,`5xx` 熔断 2 分钟;`401` 的 2 分钟策略已预留在 helper 中,但当前 ErrorPassthrough/OAuth 错误分类仍归 §7。
+- **边界**:本阶段没有实现 Redis runtime block、EWMA 排序、Codex 5h/7d quota window、统一 `passthrough.UpstreamError`;这些继续归 §7/§8。
+- **已覆盖测试**:`account_pool_test.go`、`relay_test.go`、`http_adaptor_test.go` 覆盖 runtime block 过滤、订阅账号 failover 和 retryable upstream status 切换。
+
 ---
 
 ## 6. OAuth 授权码流程(整合修正)
@@ -803,7 +815,7 @@ hybrid_adaptor:
 - [x] §3: 业务层 HTTP + 用量回写接入
 - [x] §4: TokenRefreshService
 - [x] §5: 多层 Scheduler
-- [ ] §6: AccountPool + RuntimeBlocker + FailoverLoop
+- [x] §6: AccountPool + RuntimeBlocker + FailoverLoop
 - [ ] §7: Codex 5h/7d + ErrorPassthrough + OAuth 整合
 - [ ] §8: Prometheus 指标 + 集成收尾
 - [ ] 集成测试 + compose 拉起

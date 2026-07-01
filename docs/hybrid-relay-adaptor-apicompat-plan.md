@@ -531,8 +531,9 @@ service ChannelService {
 ### Phase 5：生产化
 
 - [ ] 配额窗口感知（从上游响应头提取 used% / reset_after）
-- [ ] 限流感知（429/overload cooldown）
-- [ ] 粘性会话（session hash → account）
+- [x] 限流感知（subscription adaptor 对上游 `429` 做 5s runtime block 并切账号重试）
+- [x] 粘性会话（Responses HTTP/WS 支持 `session_hash` / previous-response route → channel）
+- [x] 订阅账号故障转移（上游网络错误、`429`、`5xx` 在响应写出前触发 runtime block + account failover）
 - [ ] 可观测性：per-adaptor / per-platform metrics
 - [ ] 配置项：relay-gateway.yaml 增加 identity/mimicry 开关
 

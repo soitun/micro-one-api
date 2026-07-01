@@ -75,6 +75,8 @@ type HTTPServer struct {
 	// subscriptionUsecase is an optional business-layer hook used to enforce
 	// user subscription quota and record usage after successful commits.
 	subscriptionUsecase *subscriptionbiz.SubscriptionUsecase
+
+	runtimeBlocker relaybiz.RuntimeBlocker
 }
 
 func (s *HTTPServer) Plan(ctx context.Context, req relaybiz.RelayRequest) (*relaybiz.RelayPlan, error) {
@@ -122,6 +124,10 @@ func NewHTTPServer(
 	if len(logClients) > 0 {
 		logClient = logClients[0]
 	}
+	runtimeBlocker := relaybiz.NewMemoryRuntimeBlocker()
+	if relayUsecase != nil {
+		relayUsecase.SetRuntimeBlocker(runtimeBlocker)
+	}
 	return &HTTPServer{
 		identityClient:  identityClient,
 		channelClient:   channelClient,
@@ -130,6 +136,7 @@ func NewHTTPServer(
 		providerFactory: providerFactory,
 		relayUsecase:    relayUsecase,
 		responseRoutes:  make(map[string]responseRoute),
+		runtimeBlocker:  runtimeBlocker,
 	}
 }
 
@@ -187,6 +194,19 @@ func (s *HTTPServer) SetSubscriptionUsecase(uc *subscriptionbiz.SubscriptionUsec
 		return
 	}
 	s.subscriptionUsecase = uc
+}
+
+func (s *HTTPServer) SetRuntimeBlocker(blocker relaybiz.RuntimeBlocker) {
+	if s == nil {
+		return
+	}
+	if blocker == nil {
+		blocker = relaybiz.NoopRuntimeBlocker{}
+	}
+	s.runtimeBlocker = blocker
+	if s.relayUsecase != nil {
+		s.relayUsecase.SetRuntimeBlocker(blocker)
+	}
 }
 
 // isSubscriptionChannel reports whether the channel type is a subscription

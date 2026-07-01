@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	relayprovider "micro-one-api/internal/relay/provider"
 )
@@ -93,6 +94,9 @@ type RelayUsecase struct {
 	subscription SubscriptionAccountClient
 	modelMapper  *ModelMapper
 	retryPolicy  *RetryPolicy
+	blocker      RuntimeBlocker
+	accountPool  *AccountPool
+	now          func() time.Time
 }
 
 // NewRelayUsecase creates a RelayUsecase with the given dependencies.
@@ -111,7 +115,21 @@ func NewRelayUsecase(identity IdentityClient, channel ChannelClient, modelMapper
 		subscription: subscription,
 		modelMapper:  modelMapper,
 		retryPolicy:  retryPolicy,
+		blocker:      NoopRuntimeBlocker{},
+		accountPool:  NewAccountPool(NoopRuntimeBlocker{}),
+		now:          time.Now,
 	}
+}
+
+func (uc *RelayUsecase) SetRuntimeBlocker(blocker RuntimeBlocker) {
+	if uc == nil {
+		return
+	}
+	if blocker == nil {
+		blocker = NoopRuntimeBlocker{}
+	}
+	uc.blocker = blocker
+	uc.accountPool = NewAccountPool(blocker)
 }
 
 // Plan resolves the model name, authenticates the user, validates permissions,
@@ -188,9 +206,9 @@ func (uc *RelayUsecase) selectSubscriptionChannel(ctx context.Context, group, cl
 	if uc.subscription == nil {
 		return nil, nil, fmt.Errorf("subscription account selector is not configured")
 	}
-	account, err := uc.selectSubscriptionAccountForModel(ctx, group, clientModel)
+	account, err := uc.selectSubscriptionAccountForModel(ctx, group, clientModel, nil)
 	if err != nil && resolvedModel != clientModel {
-		account, err = uc.selectSubscriptionAccountForModel(ctx, group, resolvedModel)
+		account, err = uc.selectSubscriptionAccountForModel(ctx, group, resolvedModel, nil)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -202,10 +220,35 @@ func (uc *RelayUsecase) selectSubscriptionChannel(ctx context.Context, group, cl
 	return ch, account, nil
 }
 
-func (uc *RelayUsecase) selectSubscriptionAccountForModel(ctx context.Context, group, model string) (*SubscriptionAccount, error) {
+func (uc *RelayUsecase) SelectSubscriptionFailover(ctx context.Context, group, clientModel, resolvedModel string, failedAccountIDs map[int64]bool) (*RelayPlan, error) {
+	if uc == nil {
+		return nil, fmt.Errorf("relay usecase unavailable")
+	}
+	if uc.subscription == nil {
+		return nil, fmt.Errorf("subscription account selector is not configured")
+	}
+	account, err := uc.selectSubscriptionAccountForModel(ctx, group, clientModel, failedAccountIDs)
+	if err != nil && resolvedModel != clientModel {
+		account, err = uc.selectSubscriptionAccountForModel(ctx, group, resolvedModel, failedAccountIDs)
+	}
+	if err != nil {
+		return nil, err
+	}
+	ch, err := subscriptionAccountToChannel(account)
+	if err != nil {
+		return nil, err
+	}
+	return &RelayPlan{
+		Channel:       ch,
+		Account:       account,
+		ResolvedModel: resolvedModel,
+	}, nil
+}
+
+func (uc *RelayUsecase) selectSubscriptionAccountForModel(ctx context.Context, group, model string, exclude map[int64]bool) (*SubscriptionAccount, error) {
 	var lastErr error
 	for _, platform := range subscriptionPlatformsForModel(model) {
-		account, err := uc.subscription.SelectSubscriptionAccount(ctx, group, model, platform, false)
+		account, err := uc.selectSchedulableSubscriptionAccount(ctx, group, model, platform, exclude)
 		if err == nil {
 			return account, nil
 		}
@@ -215,6 +258,57 @@ func (uc *RelayUsecase) selectSubscriptionAccountForModel(ctx context.Context, g
 		return nil, lastErr
 	}
 	return nil, fmt.Errorf("subscription account platform cannot be inferred for model %q", model)
+}
+
+func (uc *RelayUsecase) selectSchedulableSubscriptionAccount(ctx context.Context, group, model, platform string, exclude map[int64]bool) (*SubscriptionAccount, error) {
+	if uc.subscription == nil {
+		return nil, fmt.Errorf("subscription account selector is not configured")
+	}
+	const maxAttempts = 8
+	excludedPriority := false
+	localExclude := make(map[int64]bool, len(exclude)+maxAttempts)
+	for id, blocked := range exclude {
+		if blocked {
+			localExclude[id] = true
+		}
+	}
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		account, err := uc.subscription.SelectSubscriptionAccount(ctx, group, model, platform, excludedPriority)
+		if err != nil {
+			return nil, err
+		}
+		if account == nil || account.ID <= 0 {
+			return nil, fmt.Errorf("subscription account not found")
+		}
+		if localExclude[account.ID] {
+			lastErr = fmt.Errorf("subscription account %d excluded", account.ID)
+			excludedPriority = true
+			continue
+		}
+		if !uc.isSubscriptionAccountSchedulable(ctx, account) {
+			localExclude[account.ID] = true
+			lastErr = fmt.Errorf("subscription account %d runtime blocked", account.ID)
+			excludedPriority = true
+			continue
+		}
+		return account, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("subscription account not found")
+}
+
+func (uc *RelayUsecase) isSubscriptionAccountSchedulable(ctx context.Context, account *SubscriptionAccount) bool {
+	now := time.Now()
+	if uc.now != nil {
+		now = uc.now()
+	}
+	if uc.accountPool == nil {
+		return true
+	}
+	return uc.accountPool.IsSchedulable(ctx, account, now)
 }
 
 func subscriptionPlatformsForModel(model string) []string {
