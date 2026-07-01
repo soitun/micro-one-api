@@ -21,6 +21,13 @@ func NewChannelService(uc *biz.ChannelUsecase) *ChannelService {
 	return &ChannelService{uc: uc}
 }
 
+func (s *ChannelService) Usecase() *biz.ChannelUsecase {
+	if s == nil {
+		return nil
+	}
+	return s.uc
+}
+
 func (s *ChannelService) SelectChannelModel(ctx context.Context, group, model string, excludeFirstPriority bool) (*biz.Channel, error) {
 	return s.uc.SelectChannel(ctx, group, model, excludeFirstPriority)
 }
