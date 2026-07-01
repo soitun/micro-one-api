@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExtractPreviousResponseIDRejectsMessageIDs(t *testing.T) {
@@ -51,8 +52,8 @@ func TestLookupResponseRouteWithStickyRejectsNonResponseIDs(t *testing.T) {
 
 func TestLookupResponseRouteWithStickyPrefersLocalRoute(t *testing.T) {
 	srv := &HTTPServer{
-		responseRoutes: map[string]responseRoute{
-			"resp_123": {Model: "gpt-5"},
+		responseRoutes: map[string]responseRouteEntry{
+			"resp_123": {route: responseRoute{Model: "gpt-5"}, expiresAt: time.Now().Add(time.Hour)},
 		},
 	}
 	route, ok := srv.lookupResponseRouteWithSticky(nil, "token", "resp_123")
@@ -61,5 +62,32 @@ func TestLookupResponseRouteWithStickyPrefersLocalRoute(t *testing.T) {
 	}
 	if route.Model != "gpt-5" {
 		t.Fatalf("route model = %q, want gpt-5", route.Model)
+	}
+}
+
+// TestResponseRouteTTL verifies stored routes expire (regression for the
+// unbounded-growth memory leak) and that a fresh store keeps live entries.
+func TestResponseRouteTTL(t *testing.T) {
+	srv := &HTTPServer{responseRoutes: make(map[string]responseRouteEntry)}
+
+	srv.storeResponseRoute("resp_live", responseRoute{Model: "gpt-5"})
+	if _, ok := srv.lookupResponseRoute("resp_live"); !ok {
+		t.Fatal("expected freshly stored route to be found")
+	}
+
+	// An already-expired entry must not be returned by lookup.
+	srv.responseRoutes["resp_expired"] = responseRouteEntry{
+		route:     responseRoute{Model: "gpt-5"},
+		expiresAt: time.Now().Add(-time.Minute),
+	}
+	if _, ok := srv.lookupResponseRoute("resp_expired"); ok {
+		t.Fatal("expected expired route to be treated as absent")
+	}
+
+	// A store more than a sweep-interval later must evict the expired entry.
+	srv.responsesLastSweep = time.Now().Add(-2 * responseRouteSweepInterval)
+	srv.storeResponseRoute("resp_new", responseRoute{Model: "gpt-5"})
+	if _, exists := srv.responseRoutes["resp_expired"]; exists {
+		t.Fatal("expected sweep to delete the expired entry")
 	}
 }

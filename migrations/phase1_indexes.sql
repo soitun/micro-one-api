@@ -73,21 +73,16 @@ ADD INDEX idx_expires_at (expires_at);
 -- ============================================================================
 -- Verification queries
 -- ============================================================================
-
--- Check logs indexes
-SHOW INDEX FROM logs WHERE Key_name LIKE 'idx_%';
-
--- Check billing_ledgers indexes
-SHOW INDEX FROM billing_ledgers WHERE Key_name LIKE 'idx_%';
-
--- Check channels indexes
-SHOW INDEX FROM channels WHERE Key_name LIKE 'idx_%';
-
--- Check tokens indexes
-SHOW INDEX FROM tokens WHERE Key_name LIKE 'idx_%';
-
--- Check billing_reservations indexes
-SHOW INDEX FROM billing_reservations WHERE Key_name LIKE 'idx_%';
+--
+-- NOTE: The migration runner splits this file on ';' and executes every
+-- statement as migration DDL. SHOW INDEX statements return result sets and are
+-- not schema changes, so they must not live here — run them manually against a
+-- MySQL client if you want to verify index creation:
+--   SHOW INDEX FROM logs WHERE Key_name LIKE 'idx_%';
+--   SHOW INDEX FROM billing_ledgers WHERE Key_name LIKE 'idx_%';
+--   SHOW INDEX FROM channels WHERE Key_name LIKE 'idx_%';
+--   SHOW INDEX FROM tokens WHERE Key_name LIKE 'idx_%';
+--   SHOW INDEX FROM billing_reservations WHERE Key_name LIKE 'idx_%';
 
 -- ============================================================================
 -- Rollback commands (if needed)

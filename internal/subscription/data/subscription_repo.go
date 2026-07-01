@@ -8,6 +8,7 @@ import (
 	"micro-one-api/internal/subscription/biz"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type subscriptionModel struct {
@@ -84,6 +85,71 @@ func (r *Repository) GetActiveSubscriptionByUser(ctx context.Context, userID int
 	return r.getActiveSubscriptionByUserMemory(ctx, userID)
 }
 
+func (r *Repository) AddUsage(ctx context.Context, userID int64, costUSD float64, now int64) error {
+	if r.db != nil {
+		return r.addUsageDB(ctx, userID, costUSD, now)
+	}
+	return r.addUsageMemory(ctx, userID, costUSD, now)
+}
+
+// addUsageDB performs the read-roll-increment as a single transaction and takes
+// a row lock (SELECT ... FOR UPDATE) on engines that support it, so concurrent
+// callers serialize instead of losing each other's increments. Only the usage
+// and window columns are written, so it can never clobber a concurrent
+// Extend/Revoke that changed status or expires_at.
+func (r *Repository) addUsageDB(ctx context.Context, userID int64, costUSD float64, now int64) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var model subscriptionModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND status = ?", userID, string(biz.SubscriptionStatusActive)).
+			Order("updated_at DESC, id DESC").
+			First(&model).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return biz.ErrSubscriptionNotFound
+			}
+			return err
+		}
+		sub := subscriptionFromModel(&model)
+		rolled := biz.RollUsageWindows(&sub, now)
+		rolled.DailyUsageUSD += costUSD
+		rolled.WeeklyUsageUSD += costUSD
+		rolled.MonthlyUsageUSD += costUSD
+		return tx.Model(&subscriptionModel{}).Where("id = ?", model.ID).Updates(map[string]any{
+			"daily_usage_usd":      rolled.DailyUsageUSD,
+			"weekly_usage_usd":     rolled.WeeklyUsageUSD,
+			"monthly_usage_usd":    rolled.MonthlyUsageUSD,
+			"daily_window_start":   rolled.DailyWindowStart,
+			"weekly_window_start":  rolled.WeeklyWindowStart,
+			"monthly_window_start": rolled.MonthlyWindowStart,
+			"updated_at":           now,
+		}).Error
+	})
+}
+
+func (r *Repository) addUsageMemory(ctx context.Context, userID int64, costUSD float64, now int64) error {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	var chosen *biz.UserSubscription
+	for _, subscription := range r.subscriptions {
+		if subscription.UserID != userID || subscription.Status != biz.SubscriptionStatusActive {
+			continue
+		}
+		if chosen == nil || subscription.UpdatedAt > chosen.UpdatedAt || (subscription.UpdatedAt == chosen.UpdatedAt && subscription.ID > chosen.ID) {
+			chosen = subscription
+		}
+	}
+	if chosen == nil {
+		return biz.ErrSubscriptionNotFound
+	}
+	rolled := biz.RollUsageWindows(chosen, now)
+	rolled.DailyUsageUSD += costUSD
+	rolled.WeeklyUsageUSD += costUSD
+	rolled.MonthlyUsageUSD += costUSD
+	rolled.UpdatedAt = now
+	r.subscriptions[chosen.ID] = rolled
+	return nil
+}
+
 func (r *Repository) createSubscriptionDB(ctx context.Context, subscription *biz.UserSubscription) error {
 	model := subscriptionToModel(subscription)
 	if err := r.db.WithContext(ctx).Create(&model).Error; err != nil {
@@ -109,7 +175,6 @@ func (r *Repository) updateSubscriptionDB(ctx context.Context, subscription *biz
 		"weekly_window_start":  model.WeeklyWindowStart,
 		"monthly_window_start": model.MonthlyWindowStart,
 		"metadata":             model.Metadata,
-		"created_at":           model.CreatedAt,
 		"updated_at":           model.UpdatedAt,
 	}).Error
 }

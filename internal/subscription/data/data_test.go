@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"micro-one-api/internal/subscription/biz"
@@ -133,4 +134,47 @@ func TestSubscriptionRepository_SubscriptionCRUD(t *testing.T) {
 	require.NoError(t, repo.DeleteSubscription(ctx, sub.ID))
 	_, err = repo.GetSubscriptionByID(ctx, sub.ID)
 	assert.ErrorIs(t, err, biz.ErrSubscriptionNotFound)
+}
+
+// TestSubscriptionRepository_AddUsageConcurrent verifies AddUsage does not lose
+// increments under concurrency (regression for the read-modify-write race).
+func TestSubscriptionRepository_AddUsageConcurrent(t *testing.T) {
+	repo := NewMemoryRepositoryForTest()
+	ctx := context.Background()
+
+	sub := &biz.UserSubscription{
+		UserID:             2002,
+		GroupID:            1,
+		Status:             biz.SubscriptionStatusActive,
+		StartsAt:           1,
+		ExpiresAt:          1 << 62, // far future so windows never roll during the test
+		DailyWindowStart:   1,
+		WeeklyWindowStart:  1,
+		MonthlyWindowStart: 1,
+	}
+	require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+	const goroutines = 50
+	const perGoroutine = 20
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < perGoroutine; j++ {
+				if err := repo.AddUsage(ctx, 2002, 0.01, 100); err != nil {
+					t.Errorf("AddUsage() error = %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	got, err := repo.GetActiveSubscriptionByUser(ctx, 2002)
+	require.NoError(t, err)
+	want := 0.01 * float64(goroutines*perGoroutine)
+	assert.InDelta(t, want, got.DailyUsageUSD, 1e-9)
+	assert.InDelta(t, want, got.WeeklyUsageUSD, 1e-9)
+	assert.InDelta(t, want, got.MonthlyUsageUSD, 1e-9)
 }

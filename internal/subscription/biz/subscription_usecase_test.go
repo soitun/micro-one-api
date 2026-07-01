@@ -85,6 +85,22 @@ func (m *mockSubscriptionRepo) GetActiveSubscriptionByUser(ctx context.Context, 
 	return nil, ErrSubscriptionNotFound
 }
 
+func (m *mockSubscriptionRepo) AddUsage(ctx context.Context, userID int64, costUSD float64, now int64) error {
+	for id, subscription := range m.subscriptions {
+		if subscription.UserID != userID || subscription.Status != SubscriptionStatusActive {
+			continue
+		}
+		rolled := RollUsageWindows(subscription, now)
+		rolled.DailyUsageUSD += costUSD
+		rolled.WeeklyUsageUSD += costUSD
+		rolled.MonthlyUsageUSD += costUSD
+		rolled.UpdatedAt = now
+		m.subscriptions[id] = rolled
+		return nil
+	}
+	return ErrSubscriptionNotFound
+}
+
 func (m *mockSubscriptionRepo) CreateGroup(ctx context.Context, group *SubscriptionGroup) error {
 	group.ID = m.nextGroupID
 	m.nextGroupID++

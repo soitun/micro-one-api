@@ -2,7 +2,6 @@ package data
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -191,28 +190,42 @@ func (s *ChannelSubscriptionAccountStore) RecordAccountQuotaSnapshot(ctx context
 	if snapshot == nil {
 		return nil
 	}
-	values := make(map[string]any)
-	if reply, err := s.getSubscriptionAccount(ctx, accountID); err == nil && reply.GetAccount() != nil && reply.GetAccount().GetMetadata() != "" {
-		_ = json.Unmarshal([]byte(reply.GetAccount().GetMetadata()), &values)
+	// Persist the snapshot through the dedicated RPC, which upserts the
+	// account_quota_snapshots table server-side atomically. The previous
+	// approach round-tripped the whole account metadata blob (GET → merge →
+	// PUT), a non-atomic read-modify-write that dropped concurrent writers'
+	// snapshots and could revert unrelated metadata keys.
+	req := &channelv1.RecordAccountQuotaSnapshotRequest{
+		AccountId:      accountID,
+		UpdatedAt:      snapshot.UpdatedAt.Unix(),
+		SnapshotPaused: false,
 	}
-	values["quota_snapshot"] = map[string]any{
-		"primary_used_percent":           snapshot.PrimaryUsedPercent,
-		"primary_reset_after_seconds":    snapshot.PrimaryResetAfterSeconds,
-		"primary_window_minutes":         snapshot.PrimaryWindowMinutes,
-		"secondary_used_percent":         snapshot.SecondaryUsedPercent,
-		"secondary_reset_after_seconds":  snapshot.SecondaryResetAfterSeconds,
-		"secondary_window_minutes":       snapshot.SecondaryWindowMinutes,
-		"primary_over_secondary_percent": snapshot.PrimaryOverSecondaryPercent,
-		"updated_at":                     snapshot.UpdatedAt.Unix(),
+	if snapshot.PrimaryUsedPercent != nil {
+		req.PrimaryUsedPercent = snapshot.PrimaryUsedPercent
 	}
-	metadata, err := json.Marshal(values)
-	if err != nil {
-		return err
+	if snapshot.PrimaryResetAfterSeconds != nil {
+		v := int32(*snapshot.PrimaryResetAfterSeconds)
+		req.PrimaryResetAfterSeconds = &v
 	}
-	reply, err := s.client.UpdateSubscriptionAccount(ctx, &channelv1.UpdateSubscriptionAccountRequest{
-		Id:       accountID,
-		Metadata: string(metadata),
-	})
+	if snapshot.PrimaryWindowMinutes != nil {
+		v := int32(*snapshot.PrimaryWindowMinutes)
+		req.PrimaryWindowMinutes = &v
+	}
+	if snapshot.SecondaryUsedPercent != nil {
+		req.SecondaryUsedPercent = snapshot.SecondaryUsedPercent
+	}
+	if snapshot.SecondaryResetAfterSeconds != nil {
+		v := int32(*snapshot.SecondaryResetAfterSeconds)
+		req.SecondaryResetAfterSeconds = &v
+	}
+	if snapshot.SecondaryWindowMinutes != nil {
+		v := int32(*snapshot.SecondaryWindowMinutes)
+		req.SecondaryWindowMinutes = &v
+	}
+	if snapshot.PrimaryOverSecondaryPercent != nil {
+		req.PrimaryOverSecondaryPercent = snapshot.PrimaryOverSecondaryPercent
+	}
+	reply, err := s.client.RecordAccountQuotaSnapshot(ctx, req)
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,10 @@ package biz
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -37,8 +40,15 @@ func (uc *SubscriptionUsecase) Assign(ctx context.Context, req *AssignSubscripti
 	if group.Status != SubscriptionGroupStatusEnabled {
 		return nil, ErrSubscriptionGroupDisabled
 	}
+	// Enforce a single active subscription per user. GetActiveSubscriptionByUser
+	// and the quota accounting assume one active row per user; allowing a second
+	// (even in a different group) would split usage unpredictably. A genuine DB
+	// error must not be swallowed and treated as "no active subscription".
 	active, err := uc.repo.GetActiveSubscriptionByUser(ctx, req.UserID)
-	if err == nil && active != nil && active.GroupID == req.GroupID {
+	if err != nil && !errors.Is(err, ErrSubscriptionNotFound) {
+		return nil, err
+	}
+	if active != nil {
 		return nil, ErrSubscriptionAlreadyAssigned
 	}
 	now := uc.now().Unix()
@@ -76,6 +86,7 @@ func (uc *SubscriptionUsecase) Revoke(ctx context.Context, id int64, reason stri
 	}
 	subscription.Status = SubscriptionStatusRevoked
 	subscription.UpdatedAt = uc.now().Unix()
+	subscription.Metadata = mergeMetadataReason(subscription.Metadata, reason)
 	return uc.repo.UpdateSubscription(ctx, subscription)
 }
 
@@ -130,12 +141,17 @@ func (uc *SubscriptionUsecase) RecordUsage(ctx context.Context, userID int64, co
 	if err != nil {
 		return err
 	}
-	updated := uc.rollWindows(subscription)
-	updated.DailyUsageUSD += costUSD
-	updated.WeeklyUsageUSD += costUSD
-	updated.MonthlyUsageUSD += costUSD
-	updated.UpdatedAt = uc.now().Unix()
-	return uc.repo.UpdateSubscription(ctx, updated)
+	// Apply the group's billing multiplier so recorded spend matches what the
+	// quota check charges. A zero/unset multiplier means "no scaling" (1.0).
+	effectiveCost := costUSD
+	if group, gerr := uc.groupRepo.GetGroupByID(ctx, subscription.GroupID); gerr == nil && group != nil && group.RateMultiplier > 0 {
+		effectiveCost = costUSD * group.RateMultiplier
+	}
+	// Delegate the read-roll-increment to the repository so it happens atomically
+	// (single transaction / lock). Doing it here would be a lost-update race:
+	// concurrent requests read the same base row and clobber each other's
+	// increment, letting users blow past their quota.
+	return uc.repo.AddUsage(ctx, userID, effectiveCost, uc.now().Unix())
 }
 
 func (uc *SubscriptionUsecase) CheckQuota(ctx context.Context, userID int64, estimatedCost float64) (*QuotaCheckResult, error) {
@@ -158,14 +174,20 @@ func (uc *SubscriptionUsecase) GetProgress(ctx context.Context, userID int64) (*
 	}
 	rolled := uc.rollWindows(subscription)
 	now := uc.now().Unix()
+	// Surface the group's limits so Remaining is meaningful. Without them every
+	// dimension reported Remaining=0, indistinguishable from "quota exhausted".
+	var dailyLimit, weeklyLimit, monthlyLimit *float64
+	if group, gerr := uc.groupRepo.GetGroupByID(ctx, rolled.GroupID); gerr == nil && group != nil {
+		dailyLimit, weeklyLimit, monthlyLimit = group.DailyLimitUSD, group.WeeklyLimitUSD, group.MonthlyLimitUSD
+	}
 	return &SubscriptionProgress{
 		ID:               rolled.ID,
 		Status:           rolled.Status,
 		StartsAt:         rolled.StartsAt,
 		ExpiresAt:        rolled.ExpiresAt,
-		DailyUsed:        makeDimension(rolled.DailyUsageUSD, nil),
-		WeeklyUsed:       makeDimension(rolled.WeeklyUsageUSD, nil),
-		MonthlyUsed:      makeDimension(rolled.MonthlyUsageUSD, nil),
+		DailyUsed:        makeDimension(rolled.DailyUsageUSD, dailyLimit),
+		WeeklyUsed:       makeDimension(rolled.WeeklyUsageUSD, weeklyLimit),
+		MonthlyUsed:      makeDimension(rolled.MonthlyUsageUSD, monthlyLimit),
 		RemainingSeconds: maxInt64(0, rolled.ExpiresAt-now),
 	}, nil
 }
@@ -175,10 +197,17 @@ func (uc *SubscriptionUsecase) ListByUser(ctx context.Context, userID int64) ([]
 }
 
 func (uc *SubscriptionUsecase) rollWindows(subscription *UserSubscription) *UserSubscription {
+	return RollUsageWindows(subscription, uc.now().Unix())
+}
+
+// RollUsageWindows returns a copy of subscription with any usage window that has
+// aged past its period reset to zero, relative to now (unix seconds). It is a
+// pure function so both the usecase and the data layer's atomic AddUsage can
+// share one definition of the rolling rules.
+func RollUsageWindows(subscription *UserSubscription, now int64) *UserSubscription {
 	if subscription == nil {
 		return nil
 	}
-	now := uc.now().Unix()
 	cloned := *subscription
 	if cloned.DailyWindowStart == 0 {
 		cloned.DailyWindowStart = now
@@ -208,6 +237,11 @@ func checkQuotaAgainstGroup(subscription *UserSubscription, group *SubscriptionG
 	estimated := estimatedCost
 	if estimated < 0 {
 		estimated = 0
+	}
+	// Scale the projected cost by the group's billing multiplier so the quota
+	// check charges the same amount RecordUsage will later record.
+	if group != nil && group.RateMultiplier > 0 {
+		estimated *= group.RateMultiplier
 	}
 	result := &QuotaCheckResult{Allowed: true}
 	result.Daily = makeDimension(subscription.DailyUsageUSD+estimated, group.DailyLimitUSD)
@@ -246,4 +280,32 @@ func maxInt64(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// mergeMetadataReason records a revoke reason into the subscription's metadata
+// without corrupting an existing opaque payload. It only injects the reason when
+// metadata is empty or a JSON object; otherwise the original value is preserved.
+func mergeMetadataReason(metadata, reason string) string {
+	if reason == "" {
+		return metadata
+	}
+	trimmed := strings.TrimSpace(metadata)
+	if trimmed == "" {
+		if b, err := json.Marshal(map[string]string{"revoke_reason": reason}); err == nil {
+			return string(b)
+		}
+		return metadata
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil || obj == nil {
+		// Not a JSON object we can safely extend; leave it untouched.
+		return metadata
+	}
+	if b, err := json.Marshal(reason); err == nil {
+		obj["revoke_reason"] = b
+		if merged, err := json.Marshal(obj); err == nil {
+			return string(merged)
+		}
+	}
+	return metadata
 }

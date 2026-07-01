@@ -113,6 +113,16 @@ func (c *resilientChannelClient) SetSubscriptionAccountError(ctx context.Context
 	return resp.(*channelv1.SetSubscriptionAccountErrorResponse), nil
 }
 
+func (c *resilientChannelClient) RecordAccountQuotaSnapshot(ctx context.Context, req *channelv1.RecordAccountQuotaSnapshotRequest, opts ...grpc.CallOption) (*channelv1.RecordAccountQuotaSnapshotResponse, error) {
+	resp, err := c.breaker.Execute(ctx, func(ctx context.Context, client channelv1.ChannelServiceClient) (any, error) {
+		return client.RecordAccountQuotaSnapshot(ctx, req, opts...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*channelv1.RecordAccountQuotaSnapshotResponse), nil
+}
+
 func (c *resilientChannelClient) SetTempUnschedulable(ctx context.Context, req *channelv1.SetTempUnschedulableRequest, opts ...grpc.CallOption) (*channelv1.SetTempUnschedulableResponse, error) {
 	resp, err := c.breaker.Execute(ctx, func(ctx context.Context, client channelv1.ChannelServiceClient) (any, error) {
 		return client.SetTempUnschedulable(ctx, req, opts...)

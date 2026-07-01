@@ -38,20 +38,21 @@ const defaultQuotaPerUSD = 500000
 
 // HTTPServer handles HTTP requests for relay-gateway.
 type HTTPServer struct {
-	identityClient  identityv1.IdentityServiceClient
-	channelClient   channelv1.ChannelServiceClient
-	billingClient   billingv1.BillingServiceClient
-	logClient       logv1.LogServiceClient
-	providerFactory *relayprovider.ProviderFactory
-	relayUsecase    *relaybiz.RelayUsecase
-	responsesMu     sync.RWMutex
-	responseRoutes  map[string]responseRoute
-	wsTimeouts      openAIWSTimeouts
-	wsPool          *openAIWSConnPool
-	wsSticky        *openAIWSStickyStore
-	wsPoolCfg       openAIWSPoolConfig
-	wsScheduler     *OpenAIWSRoutingScheduler
-	runtimeBlockCfg runtimeBlockConfig
+	identityClient     identityv1.IdentityServiceClient
+	channelClient      channelv1.ChannelServiceClient
+	billingClient      billingv1.BillingServiceClient
+	logClient          logv1.LogServiceClient
+	providerFactory    *relayprovider.ProviderFactory
+	relayUsecase       *relaybiz.RelayUsecase
+	responsesMu        sync.RWMutex
+	responseRoutes     map[string]responseRouteEntry
+	responsesLastSweep time.Time
+	wsTimeouts         openAIWSTimeouts
+	wsPool             *openAIWSConnPool
+	wsSticky           *openAIWSStickyStore
+	wsPoolCfg          openAIWSPoolConfig
+	wsScheduler        *OpenAIWSRoutingScheduler
+	runtimeBlockCfg    runtimeBlockConfig
 
 	// hybridAdaptorEnabled gates the new adaptor-based request path (plan §十).
 	// When false the gateway uses the legacy provider-factory path unchanged.
@@ -133,6 +134,24 @@ type responseRoute struct {
 	SubscriptionAccountID int64
 }
 
+// responseRouteEntry wraps a responseRoute with an expiry so the in-process
+// route map can be swept. Without a TTL the map grows once per unique upstream
+// response ID for the lifetime of the process (memory leak).
+type responseRouteEntry struct {
+	route     responseRoute
+	expiresAt time.Time
+}
+
+const (
+	// responseRouteTTL bounds how long a stored response route is retained.
+	// Continuations reference a prior response within a short window, so a
+	// generous but finite TTL is safe.
+	responseRouteTTL = 30 * time.Minute
+	// responseRouteSweepInterval throttles how often storeResponseRoute performs
+	// a full expired-entry sweep, so writes stay O(1) amortized.
+	responseRouteSweepInterval = time.Minute
+)
+
 // NewHTTPServer creates a new HTTP server for Kratos.
 func NewHTTPServer(
 	identityClient identityv1.IdentityServiceClient,
@@ -157,7 +176,7 @@ func NewHTTPServer(
 		logClient:          logClient,
 		providerFactory:    providerFactory,
 		relayUsecase:       relayUsecase,
-		responseRoutes:     make(map[string]responseRoute),
+		responseRoutes:     make(map[string]responseRouteEntry),
 		runtimeBlocker:     runtimeBlocker,
 		accountConcurrency: relaybiz.NewAccountConcurrencyLimiter(),
 	}
@@ -984,9 +1003,20 @@ func (s *HTTPServer) storeResponseRoute(responseID string, route responseRoute) 
 	if responseID == "" {
 		return
 	}
+	now := time.Now()
 	s.responsesMu.Lock()
 	defer s.responsesMu.Unlock()
-	s.responseRoutes[responseID] = route
+	s.responseRoutes[responseID] = responseRouteEntry{route: route, expiresAt: now.Add(responseRouteTTL)}
+	// Opportunistically evict expired entries so the map is bounded by live TTL
+	// traffic rather than growing for the process lifetime.
+	if now.Sub(s.responsesLastSweep) >= responseRouteSweepInterval {
+		s.responsesLastSweep = now
+		for id, entry := range s.responseRoutes {
+			if now.After(entry.expiresAt) {
+				delete(s.responseRoutes, id)
+			}
+		}
+	}
 }
 
 func (s *HTTPServer) lookupResponseRoute(responseID string) (responseRoute, bool) {
@@ -994,9 +1024,12 @@ func (s *HTTPServer) lookupResponseRoute(responseID string) (responseRoute, bool
 		return responseRoute{}, false
 	}
 	s.responsesMu.RLock()
-	defer s.responsesMu.RUnlock()
-	route, ok := s.responseRoutes[responseID]
-	return route, ok
+	entry, ok := s.responseRoutes[responseID]
+	s.responsesMu.RUnlock()
+	if !ok || time.Now().After(entry.expiresAt) {
+		return responseRoute{}, false
+	}
+	return entry.route, true
 }
 
 func providerConfigFromChannelInfo(channel *commonv1.ChannelInfo) relayprovider.ProviderConfig {

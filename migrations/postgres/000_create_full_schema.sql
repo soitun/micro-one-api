@@ -494,6 +494,26 @@ CREATE TABLE IF NOT EXISTS subscription_groups (
 
 CREATE INDEX IF NOT EXISTS idx_sub_groups_platform ON subscription_groups(platform);
 
+-- Codex 5h / 7d upstream subscription quota snapshots.
+-- updated_at is TIMESTAMPTZ to match the *time.Time scan target in
+-- internal/channel/data (accountQuotaSnapshotModel) and the schema's convention
+-- of using TIMESTAMPTZ for Go time.Time columns.
+CREATE TABLE IF NOT EXISTS account_quota_snapshots (
+  account_id BIGINT PRIMARY KEY,
+  primary_used_percent DOUBLE PRECISION DEFAULT NULL,
+  primary_reset_after_seconds INTEGER DEFAULT NULL,
+  primary_window_minutes INTEGER DEFAULT NULL,
+  secondary_used_percent DOUBLE PRECISION DEFAULT NULL,
+  secondary_reset_after_seconds INTEGER DEFAULT NULL,
+  secondary_window_minutes INTEGER DEFAULT NULL,
+  primary_over_secondary_percent DOUBLE PRECISION DEFAULT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NULL,
+  snapshot_paused BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_quota_snapshot_updated
+  ON account_quota_snapshots(updated_at);
+
 -- ============================================================
 -- Schema migrations bookkeeping (matches internal/pkg/migrate)
 -- ============================================================

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	identityv1 "micro-one-api/api/identity/v1"
 	relaybiz "micro-one-api/internal/relay/biz"
@@ -39,8 +40,8 @@ func (c rawIdentityClientWithAllowedModels) GetAuthSnapshot(ctx context.Context,
 func TestOpenAIWSRoutingSchedulerResolveStoredRoute(t *testing.T) {
 	srv := &HTTPServer{
 		identityClient: rawIdentityClient{},
-		responseRoutes: map[string]responseRoute{
-			"resp_123": {Model: "gpt-5"},
+		responseRoutes: map[string]responseRouteEntry{
+			"resp_123": {route: responseRoute{Model: "gpt-5"}, expiresAt: time.Now().Add(time.Hour)},
 		},
 	}
 	sched := NewOpenAIWSRoutingScheduler(srv)

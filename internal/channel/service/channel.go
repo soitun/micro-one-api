@@ -423,6 +423,48 @@ func (s *ChannelService) ChangeSubscriptionAccountStatus(ctx context.Context, re
 	}, nil
 }
 
+func (s *ChannelService) RecordAccountQuotaSnapshot(ctx context.Context, req *channelv1.RecordAccountQuotaSnapshotRequest) (*channelv1.RecordAccountQuotaSnapshotResponse, error) {
+	snapshot := &biz.AccountQuotaSnapshot{
+		AccountID:      req.GetAccountId(),
+		SnapshotPaused: req.GetSnapshotPaused(),
+	}
+	if req.PrimaryUsedPercent != nil {
+		v := req.GetPrimaryUsedPercent()
+		snapshot.PrimaryUsedPercent = &v
+	}
+	if req.PrimaryResetAfterSeconds != nil {
+		v := req.GetPrimaryResetAfterSeconds()
+		snapshot.PrimaryResetAfterSeconds = &v
+	}
+	if req.PrimaryWindowMinutes != nil {
+		v := req.GetPrimaryWindowMinutes()
+		snapshot.PrimaryWindowMinutes = &v
+	}
+	if req.SecondaryUsedPercent != nil {
+		v := req.GetSecondaryUsedPercent()
+		snapshot.SecondaryUsedPercent = &v
+	}
+	if req.SecondaryResetAfterSeconds != nil {
+		v := req.GetSecondaryResetAfterSeconds()
+		snapshot.SecondaryResetAfterSeconds = &v
+	}
+	if req.SecondaryWindowMinutes != nil {
+		v := req.GetSecondaryWindowMinutes()
+		snapshot.SecondaryWindowMinutes = &v
+	}
+	if req.PrimaryOverSecondaryPercent != nil {
+		v := req.GetPrimaryOverSecondaryPercent()
+		snapshot.PrimaryOverSecondaryPercent = &v
+	}
+	if req.GetUpdatedAt() > 0 {
+		snapshot.UpdatedAt = time.Unix(req.GetUpdatedAt(), 0)
+	}
+	if err := s.uc.RecordAccountQuotaSnapshot(ctx, snapshot); err != nil {
+		return &channelv1.RecordAccountQuotaSnapshotResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &channelv1.RecordAccountQuotaSnapshotResponse{Success: true, Message: "ok"}, nil
+}
+
 func (s *ChannelService) CreateChannel(ctx context.Context, req *channelv1.CreateChannelRequest) (*channelv1.CreateChannelResponse, error) {
 	// Read config fields by accessors on the pointer rather than copying the
 	// protobuf value (it embeds protoimpl.MessageState which contains a mutex).

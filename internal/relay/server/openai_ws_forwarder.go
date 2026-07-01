@@ -423,12 +423,15 @@ func (s *HTTPServer) runResponsesWSRelayWithFailover(
 		pooledConn, err := s.acquireOpenAIWSUpstreamConn(ctx, currentChannel.ID, wsURL, headers)
 		if err != nil {
 			// Dial failed. Try failover if we haven't exhausted switches.
+			// Capture the failed channel id before maybeFailoverChannel mutates
+			// currentChannel, otherwise the log records the channel we switched to.
+			failedChannelID := currentChannel.ID
 			if attempt < maxSwitches && s.maybeFailoverChannel(ctx, wsConn, plan, currentChannel, clientModel, &currentChannel) {
 				if applogger.Log != nil {
 					applogger.Log.Info("openai ws failover after dial error",
 						zap.String("request_id", requestID),
 						zap.Int("attempt", attempt+1),
-						zap.Int64("failed_channel", currentChannel.ID),
+						zap.Int64("failed_channel", failedChannelID),
 						zap.Error(err),
 					)
 				}
@@ -467,15 +470,35 @@ func (s *HTTPServer) runResponsesWSRelayWithFailover(
 				IsStream:         true,
 			}
 			logUpstreamUsage(logInput)
-			if commitErr := s.commitQuotaAfterResponse(reservation.ReservationId, actualTotal, true, logInput); commitErr != nil {
-				if applogger.Log != nil {
-					applogger.Log.Warn("failed to commit openai ws turn quota",
-						zap.String("request_id", turnID),
-						zap.Error(commitErr),
-					)
+			// Each turn commits against its own reservation. The connection-level
+			// reservation only covers the first turn; a Responses WebSocket is
+			// long-lived and multi-turn, so reusing one reservation id for every
+			// turn would under-bill (or double-commit) every turn after the first.
+			turnReservationID := reservation.ReservationId
+			if turnCommits > 0 {
+				turnReservationID = ""
+				if s.billingClient != nil {
+					if turnRes, rerr := s.reserveQuota(ctx, fmt.Sprintf("%d", plan.Auth.UserID), turnID, actualTotal, resolvedModel, fmt.Sprintf("%d", currentChannel.ID), subscriptionAccountIDFromPlan(plan)); rerr == nil && turnRes != nil {
+						turnReservationID = turnRes.ReservationId
+					} else if applogger.Log != nil {
+						applogger.Log.Warn("failed to reserve openai ws turn quota",
+							zap.String("request_id", turnID),
+							zap.Error(rerr),
+						)
+					}
 				}
-			} else {
-				s.ingestUsageLogAfterResponse(logInput)
+			}
+			if turnReservationID != "" {
+				if commitErr := s.commitQuotaAfterResponse(turnReservationID, actualTotal, true, logInput); commitErr != nil {
+					if applogger.Log != nil {
+						applogger.Log.Warn("failed to commit openai ws turn quota",
+							zap.String("request_id", turnID),
+							zap.Error(commitErr),
+						)
+					}
+				} else {
+					s.ingestUsageLogAfterResponse(logInput)
+				}
 			}
 			// Bind the upstream response id -> channel both locally and in the
 			// cross-process sticky store (Redis) so multi-replica deployments

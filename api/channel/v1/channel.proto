@@ -20,6 +20,7 @@ service ChannelService {
   rpc UpdateSubscriptionAccount(UpdateSubscriptionAccountRequest) returns (UpdateSubscriptionAccountResponse);
   rpc DeleteSubscriptionAccount(DeleteSubscriptionAccountRequest) returns (DeleteSubscriptionAccountResponse);
   rpc ChangeSubscriptionAccountStatus(ChangeSubscriptionAccountStatusRequest) returns (ChangeSubscriptionAccountStatusResponse);
+  rpc RecordAccountQuotaSnapshot(RecordAccountQuotaSnapshotRequest) returns (RecordAccountQuotaSnapshotResponse);
   rpc GetChannel(GetChannelRequest) returns (GetChannelReply);
   rpc ListAvailableModels(ListAvailableModelsRequest) returns (ListAvailableModelsReply);
   rpc ListChannels(ListChannelsRequest) returns (ListChannelsResponse);
@@ -211,6 +212,27 @@ message ChangeSubscriptionAccountStatusRequest {
 }
 
 message ChangeSubscriptionAccountStatusResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// RecordAccountQuotaSnapshotRequest upserts a Codex 5h/7d upstream quota
+// snapshot for an account. Optional fields are absent when the upstream did not
+// report that window. updated_at is unix seconds.
+message RecordAccountQuotaSnapshotRequest {
+  int64 account_id = 1;
+  optional double primary_used_percent = 2;
+  optional int32 primary_reset_after_seconds = 3;
+  optional int32 primary_window_minutes = 4;
+  optional double secondary_used_percent = 5;
+  optional int32 secondary_reset_after_seconds = 6;
+  optional int32 secondary_window_minutes = 7;
+  optional double primary_over_secondary_percent = 8;
+  int64 updated_at = 9;
+  bool snapshot_paused = 10;
+}
+
+message RecordAccountQuotaSnapshotResponse {
   bool success = 1;
   string message = 2;
 }

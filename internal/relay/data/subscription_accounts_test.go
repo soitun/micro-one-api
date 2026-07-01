@@ -7,6 +7,7 @@ import (
 
 	channelv1 "micro-one-api/api/channel/v1"
 	commonv1 "micro-one-api/api/common/v1"
+	relayquota "micro-one-api/internal/relay/quota"
 
 	"google.golang.org/grpc"
 )
@@ -22,6 +23,18 @@ type subscriptionAccountStoreClient struct {
 	setTempUntil    int64
 	refreshWithin   int64
 	refreshAccounts []int64
+	snapshotReq     *channelv1.RecordAccountQuotaSnapshotRequest
+	updateCalled    bool
+}
+
+func (c *subscriptionAccountStoreClient) RecordAccountQuotaSnapshot(_ context.Context, req *channelv1.RecordAccountQuotaSnapshotRequest, _ ...grpc.CallOption) (*channelv1.RecordAccountQuotaSnapshotResponse, error) {
+	c.snapshotReq = req
+	return &channelv1.RecordAccountQuotaSnapshotResponse{Success: true}, nil
+}
+
+func (c *subscriptionAccountStoreClient) UpdateSubscriptionAccount(_ context.Context, _ *channelv1.UpdateSubscriptionAccountRequest, _ ...grpc.CallOption) (*channelv1.UpdateSubscriptionAccountResponse, error) {
+	c.updateCalled = true
+	return &channelv1.UpdateSubscriptionAccountResponse{Success: true}, nil
 }
 
 func (c *subscriptionAccountStoreClient) GetSubscriptionAccount(context.Context, *channelv1.GetSubscriptionAccountRequest, ...grpc.CallOption) (*channelv1.GetSubscriptionAccountReply, error) {
@@ -113,5 +126,47 @@ func TestChannelSubscriptionAccountStoreRefreshHookRPCs(t *testing.T) {
 	}
 	if client.setTempUntil != until.Unix() || client.setErrorReason != "timeout" {
 		t.Fatalf("retry-exhausted hook not forwarded: until=%d reason=%q", client.setTempUntil, client.setErrorReason)
+	}
+}
+
+// TestChannelSubscriptionAccountStoreRecordQuotaSnapshotUsesRPC verifies the
+// snapshot is persisted via the dedicated (server-side atomic) RPC and NOT the
+// racy metadata read-modify-write through UpdateSubscriptionAccount.
+func TestChannelSubscriptionAccountStoreRecordQuotaSnapshotUsesRPC(t *testing.T) {
+	client := &subscriptionAccountStoreClient{}
+	store := NewChannelSubscriptionAccountStore(client)
+
+	primaryUsed := 87.5
+	primaryWindow := 300
+	updatedAt := time.Unix(1710002000, 0)
+	err := store.RecordAccountQuotaSnapshot(context.Background(), 42, &relayquota.CodexSnapshot{
+		PrimaryUsedPercent:   &primaryUsed,
+		PrimaryWindowMinutes: &primaryWindow,
+		UpdatedAt:            updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("RecordAccountQuotaSnapshot() error = %v", err)
+	}
+	if client.updateCalled {
+		t.Fatal("snapshot must not round-trip the account metadata blob")
+	}
+	if client.snapshotReq == nil {
+		t.Fatal("expected RecordAccountQuotaSnapshot RPC to be called")
+	}
+	if client.snapshotReq.GetAccountId() != 42 {
+		t.Fatalf("account id = %d, want 42", client.snapshotReq.GetAccountId())
+	}
+	if client.snapshotReq.PrimaryUsedPercent == nil || client.snapshotReq.GetPrimaryUsedPercent() != 87.5 {
+		t.Fatalf("primary used percent = %v", client.snapshotReq.PrimaryUsedPercent)
+	}
+	if client.snapshotReq.PrimaryWindowMinutes == nil || client.snapshotReq.GetPrimaryWindowMinutes() != 300 {
+		t.Fatalf("primary window minutes = %v", client.snapshotReq.PrimaryWindowMinutes)
+	}
+	if client.snapshotReq.GetUpdatedAt() != updatedAt.Unix() {
+		t.Fatalf("updated_at = %d, want %d", client.snapshotReq.GetUpdatedAt(), updatedAt.Unix())
+	}
+	// Windows the upstream didn't report must stay absent, not zero-valued.
+	if client.snapshotReq.SecondaryUsedPercent != nil {
+		t.Fatal("secondary used percent should be absent")
 	}
 }

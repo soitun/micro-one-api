@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -269,6 +270,11 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 	// (plan.Account), then the resolver, then the channel-fallback metadata.
 	// The account carries the access token; the channel view intentionally
 	// does not (see biz.RelayPlan.Account).
+	// Prefer the first-class subscription account selected during planning
+	// (plan.Account), then the resolver, then the channel-fallback metadata. For
+	// OAuth subscription channels the channel's Key field holds the access token
+	// and the channel id doubles as the account id, so the fallback is a valid
+	// (intended) credential source — not a bogus one.
 	meta := fallbackSubscriptionAccountMetadata(plan, plan.Channel)
 	if plan.Account != nil {
 		meta = subscriptionAccountMetadataFromPlan(plan.Account)
@@ -342,6 +348,19 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 	client := rc.HTTPClient
 	if client == nil {
 		client = http.DefaultClient
+	}
+	if isStream && client.Timeout > 0 {
+		// http.Client.Timeout covers the entire exchange including reading the
+		// response body, so a streaming (SSE) completion longer than the
+		// configured upstream timeout would be truncated mid-stream. Reuse the
+		// transport (and thus the connection pool) but drop the overall deadline;
+		// cancellation is governed by the request context and the transport's
+		// dial/response-header timeouts.
+		client = &http.Client{
+			Transport:     client.Transport,
+			CheckRedirect: client.CheckRedirect,
+			Jar:           client.Jar,
+		}
 	}
 	resp, err := client.Do(upstreamReq)
 	if err != nil {
@@ -463,9 +482,24 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 		return result
 	}
 
-	// Non-streaming: convert and write.
-	_, outBody, err := ad.ConvertResponse(rc, upstreamFmt, resp)
+	// Non-streaming: convert and write. Capture the raw upstream body first so
+	// the codex quota snapshot is parsed from the upstream rate-limit fields
+	// (used_percent / window_minutes / primary_over_secondary_percent), which the
+	// client-facing conversion strips. Restore resp.Body so ConvertResponse still
+	// sees the full payload.
+	rawUpstream, readErr := io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if readErr != nil {
+		if accountUsage {
+			_ = s.releaseQuota(ctx, reservation.ReservationId, "read upstream body error")
+		}
+		result.statusCode = http.StatusBadGateway
+		result.err = fmt.Errorf("read upstream body: %w", readErr)
+		result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusBadGateway, result.err.Error()) }
+		return result
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(rawUpstream))
+	_, outBody, err := ad.ConvertResponse(rc, upstreamFmt, resp)
 	if err != nil {
 		if accountUsage {
 			_ = s.releaseQuota(ctx, reservation.ReservationId, "adaptor convert response error")
@@ -475,7 +509,7 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 		result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusInternalServerError, result.err.Error()) }
 		return result
 	}
-	s.recordCodexQuotaSnapshot(ctx, plan, outBody)
+	s.recordCodexQuotaSnapshot(ctx, plan, rawUpstream)
 	result.statusCode = http.StatusOK
 	slotTransferred = true // slot released when the response has been written, below
 	result.write = func(w http.ResponseWriter) {

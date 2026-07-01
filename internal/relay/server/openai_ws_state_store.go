@@ -210,14 +210,14 @@ func (s *openAIWSStickyStore) maybeSweepLocked() {
 		return
 	}
 	s.lastSweep = now
-	scanned := 0
+	// Full sweep of expired entries. Throttled to once per minute, so an O(n)
+	// pass under the lock is cheap; unlike a bounded scan it guarantees every
+	// expired entry is removed regardless of Go's randomized map iteration order
+	// (a 512-entry cap could inspect only live keys and never reach the expired
+	// ones, letting the map grow unbounded).
 	for k, b := range s.hot {
 		if now.After(b.expiresAt) {
 			delete(s.hot, k)
-		}
-		scanned++
-		if scanned >= 512 {
-			break
 		}
 	}
 }

@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -19,7 +20,10 @@ func (uc *GroupUsecase) Create(ctx context.Context, group *SubscriptionGroup) er
 		return ErrSubscriptionGroupNotFound
 	}
 	existing, err := uc.repo.GetGroupByName(ctx, group.Name)
-	if err == nil && existing != nil {
+	if err != nil && !errors.Is(err, ErrSubscriptionGroupNotFound) {
+		return err
+	}
+	if existing != nil {
 		return ErrSubscriptionGroupNameTaken
 	}
 	now := uc.now().Unix()
@@ -27,6 +31,11 @@ func (uc *GroupUsecase) Create(ctx context.Context, group *SubscriptionGroup) er
 	group.UpdatedAt = now
 	if group.Status == 0 {
 		group.Status = SubscriptionGroupStatusEnabled
+	}
+	// A zero multiplier would silently zero out all recorded usage; default to
+	// 1.0 (no scaling) when the caller doesn't specify one.
+	if group.RateMultiplier <= 0 {
+		group.RateMultiplier = 1.0
 	}
 	return uc.repo.CreateGroup(ctx, group)
 }
