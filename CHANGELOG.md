@@ -18,6 +18,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 - `previous_response_id` 解析拒绝 `msg_` message id,避免把 message id 误当 Responses route id。
 - 订阅账号上游 `401` / `403` / `429` / `cyber_policy` 错误改为按 §7 ErrorPassthrough 透传状态码、body 与 `Retry-After`,不再统一包装成网关错误。
+- compose E2E mock channel 状态修正为 `ChannelStatusEnabled = 1`,避免模型列表可见但 relay 选号过滤后 chat completion 返回 500。
+- `phase1_indexes.sql` 不再重复创建 `billing_ledgers.idx_created_at`,避免干净 MySQL volume 首次初始化时因重复索引中断。
 
 ## [0.3.1] - 2026-06-29
 

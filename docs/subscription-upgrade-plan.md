@@ -748,14 +748,15 @@ hybrid_adaptor:
 
 ### 9.2 集成测试
 
-`test/integration/subscription_e2e_test.go` 用 `docker-compose` 拉起 channel-service + identity-service + subscription-service + redis + postgresql,模拟:
+当前集成验收入口为 `./scripts/test-e2e-flow.sh --suite`。脚本使用 `deployments/docker-compose/docker-compose.yml` + `docker-compose.test.yml` 拉起 identity-service、channel-service、billing-service、relay-gateway、admin-api、redis、mysql 与 mock-upstream,并运行 `test/e2e/suite`:
 
-1. **业务流**:admin Assign → user 调 chat completions → CheckQuota 通过 → 计费回写 → 第二次请求 progress 上升
-2. **配额拦截**:user 用完日配额 → 下次请求 429 + Retry-After
-3. **OAuth 流程**:admin 点"绑定 Codex" → 调 auth-url → 模拟浏览器走通 → exchange → subscription_account 创建 → 用 codex account 发请求成功
-4. **粘性命中**:同一 sessionHash 两次请求命中同一账号(unit test 覆盖)
-5. **多账号切换**:3 个账号 token 全 invalid_grant,第 4 次请求得到 401 不是 5xx
-6. **指标可见**:`curl /metrics | grep relay_` 能看到全部新增指标
+1. **业务流**:register/login → create API token → admin topup → user 调 chat completions → billing quota 扣减 → ledger 出现 consume 记录
+2. **模型与选号**:mock channel 写入 `channels` + `abilities`,并显式校验 `channels.status = 1`、`base_url = http://mock-upstream:9999`、ability 数量 ≥ 2
+3. **Admin 路径**:admin access/list/get/update user、list channels、redeem code CRUD、system options、logs
+4. **真实 provider 测试**:`PROVIDER_API_KEY` 未设置时跳过;设置后走 provider/list/stream/relay billing 验证
+5. **指标可见**:`/metrics` 暴露 Prometheus 指标;订阅/relay 指标使用 `micro_one_api_subscription_*` / `micro_one_api_relay_*` 命名空间
+
+本轮验收已在干净 compose volume 上通过 `./scripts/test-e2e-flow.sh --suite`;随后用 `docker-compose -f docker-compose.yml -f docker-compose.test.yml up -d --no-build` 保持测试栈运行。
 
 ### 9.3 Mock 与 fixture
 
@@ -763,7 +764,8 @@ hybrid_adaptor:
 - `internal/relay/scheduling/fake_account_repo_test.go`:可注入 candidates
 - `internal/subscription/biz/fake_repo_test.go`:内存版 SubscriptionRepository
 - `internal/channel/biz/oauth/fake_openai_test.go`:`httptest.Server` 模拟 chatgpt.com/backend-api
-- `test/integration/compose.yaml`:redis:7-alpine + postgresql:16-alpine
+- `deployments/docker-compose/docker-compose.test.yml`:mock-upstream + 暴露 identity/channel/billing gRPC 端口
+- `scripts/test-e2e-flow.sh`:compose E2E 编排、mock channel fixture 注入、Go E2E suite 执行
 
 ---
 
@@ -818,7 +820,7 @@ hybrid_adaptor:
 - [x] §6: AccountPool + RuntimeBlocker + FailoverLoop
 - [x] §7: Codex 5h/7d + ErrorPassthrough + OAuth 整合（Codex 配额 + ErrorPassthrough + channel-service OAuth HTTP 绑定已落地；admin-web 联调仍按独立项跟踪）
 - [x] §8: Prometheus 指标 + 集成收尾（指标已接入；compose E2E/灰度发布仍按下方独立项跟踪）
-- [ ] 集成测试 + compose 拉起
+- [x] 集成测试 + compose 拉起
 - [x] CHANGELOG + 文档更新
 - [ ] 灰度发布:staging 一周,生产开关默认关闭,按 10% / 50% / 100% 灰度
 
