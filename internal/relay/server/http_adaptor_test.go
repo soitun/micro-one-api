@@ -12,6 +12,7 @@ import (
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaycredential "micro-one-api/internal/relay/credential"
 	relayprovider "micro-one-api/internal/relay/provider"
+	relayquota "micro-one-api/internal/relay/quota"
 )
 
 type testSubscriptionResolver struct {
@@ -203,6 +204,101 @@ func TestHandleChatCompletionsViaAdaptor_FailoverOnRetryableUpstreamStatus(t *te
 	}
 }
 
+func TestHandleChatCompletionsViaAdaptor_Passthrough429(t *testing.T) {
+	httpServer := NewHTTPServer(nil, nil, nil, nil, nil)
+	httpServer.SetHybridAdaptorEnabled(true)
+	httpServer.SetOAuthHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			resp := newStatusResponse(http.StatusTooManyRequests, `{"error":{"message":"rate limited","type":"rate_limit"}}`)
+			resp.Header.Set("Retry-After", "30")
+			return resp, nil
+		}),
+	})
+
+	plan := &relaybiz.RelayPlan{
+		Auth: &relaybiz.AuthSnapshot{UserID: 42, Group: "default"},
+		Channel: &relaybiz.Channel{
+			ID:      12,
+			Type:    relayprovider.ChannelTypeCodexOAuth,
+			BaseURL: "https://example.invalid",
+			Group:   "default",
+		},
+		Account: &relaybiz.SubscriptionAccount{
+			ID:          12,
+			Platform:    "codex",
+			AccountType: "oauth",
+			Group:       "default",
+			AccessToken: "first-token",
+			AccountID:   "first-account",
+		},
+		ResolvedModel: "gpt-5",
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+
+	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Retry-After") != "30" {
+		t.Fatalf("Retry-After = %q", rec.Header().Get("Retry-After"))
+	}
+	if !strings.Contains(rec.Body.String(), "rate limited") {
+		t.Fatalf("body was not passed through: %s", rec.Body.String())
+	}
+}
+
+func TestHandleChatCompletionsViaAdaptor_RecordsCodexQuotaSnapshot(t *testing.T) {
+	httpServer := NewHTTPServer(nil, nil, nil, nil, nil)
+	httpServer.SetHybridAdaptorEnabled(true)
+	recorder := &testQuotaRecorder{}
+	httpServer.SetSubscriptionAccountQuotaRecorder(recorder)
+	httpServer.SetOAuthHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return newStatusResponse(http.StatusTooManyRequests, `{
+				"error":{"message":"quota exhausted"},
+				"quota":{"primary":{"used_percent":96,"reset_after_seconds":120,"window_minutes":300}}
+			}`), nil
+		}),
+	})
+
+	plan := &relaybiz.RelayPlan{
+		Auth: &relaybiz.AuthSnapshot{UserID: 42, Group: "default"},
+		Channel: &relaybiz.Channel{
+			ID:      12,
+			Type:    relayprovider.ChannelTypeCodexOAuth,
+			BaseURL: "https://example.invalid",
+			Group:   "default",
+		},
+		Account: &relaybiz.SubscriptionAccount{
+			ID:          12,
+			Platform:    "codex",
+			AccountType: "oauth",
+			Group:       "default",
+			AccessToken: "first-token",
+			AccountID:   "first-account",
+		},
+		ResolvedModel: "gpt-5",
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+
+	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
+
+	if recorder.recordedAccountID != 12 {
+		t.Fatalf("recorded account = %d, want 12", recorder.recordedAccountID)
+	}
+	if recorder.snapshot == nil || recorder.snapshot.PrimaryUsedPercent == nil || *recorder.snapshot.PrimaryUsedPercent != 96 {
+		t.Fatalf("unexpected snapshot: %+v", recorder.snapshot)
+	}
+	if recorder.pausedAccountID != 12 {
+		t.Fatalf("paused account = %d, want 12", recorder.pausedAccountID)
+	}
+}
+
 type adaptorFailoverIdentity struct{}
 
 func (adaptorFailoverIdentity) GetAuthSnapshot(context.Context, string) (*relaybiz.AuthSnapshot, error) {
@@ -249,4 +345,21 @@ func newStatusResponse(status int, body string) *http.Response {
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
+}
+
+type testQuotaRecorder struct {
+	recordedAccountID int64
+	pausedAccountID   int64
+	snapshot          *relayquota.CodexSnapshot
+}
+
+func (r *testQuotaRecorder) RecordAccountQuotaSnapshot(ctx context.Context, accountID int64, snapshot *relayquota.CodexSnapshot) error {
+	r.recordedAccountID = accountID
+	r.snapshot = snapshot
+	return nil
+}
+
+func (r *testQuotaRecorder) AutoPauseAccount(ctx context.Context, accountID int64, reason string) error {
+	r.pausedAccountID = accountID
+	return nil
 }

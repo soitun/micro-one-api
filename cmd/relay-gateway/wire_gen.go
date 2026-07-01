@@ -329,6 +329,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	httpServer.SetRelayOrchestratorEnabled(cfg.RelayOrchestrator.GetRelayOrchestratorEnabled())
 	httpServer.SetSubscriptionAccountResolver(accountResolver)
 	httpServer.SetOAuthHTTPClient(oauthHTTPClient)
+	httpServer.SetSubscriptionAccountQuotaRecorder(accountLookup)
 	var routeMiddleware []func(http.Handler) http.Handler
 	if cfg.Subscription.GetSubscriptionEnabled() {
 		subscriptionRepo, subErr := subscriptiondata.NewRepositoryFromEnv(os.Getenv("SQL_DRIVER"))

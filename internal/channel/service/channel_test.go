@@ -98,6 +98,22 @@ func (r *channelServiceRepo) ClearTempUnschedulable(ctx context.Context, account
 	return nil
 }
 
+func (r *channelServiceRepo) RecordAccountQuotaSnapshot(ctx context.Context, snapshot *biz.AccountQuotaSnapshot) error {
+	return nil
+}
+
+func (r *channelServiceRepo) GetAccountQuotaSnapshot(ctx context.Context, accountID int64) (*biz.AccountQuotaSnapshot, error) {
+	return &biz.AccountQuotaSnapshot{AccountID: accountID}, nil
+}
+
+func (r *channelServiceRepo) AutoPauseAccount(ctx context.Context, accountID int64, reason string) error {
+	if r.account != nil && r.account.ID == accountID {
+		r.account.Status = biz.ChannelStatusDisabled
+		r.account.LastError = reason
+	}
+	return nil
+}
+
 func (r *channelServiceRepo) ListAvailableModels(ctx context.Context, group string) ([]string, error) {
 	return []string{"gpt-4o"}, nil
 }

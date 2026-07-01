@@ -816,7 +816,7 @@ hybrid_adaptor:
 - [x] §4: TokenRefreshService
 - [x] §5: 多层 Scheduler
 - [x] §6: AccountPool + RuntimeBlocker + FailoverLoop
-- [ ] §7: Codex 5h/7d + ErrorPassthrough + OAuth 整合
+- [ ] §7: Codex 5h/7d + ErrorPassthrough + OAuth 整合（Codex 配额 + ErrorPassthrough 已落地；OAuth HTTP 整合待继续）
 - [ ] §8: Prometheus 指标 + 集成收尾
 - [ ] 集成测试 + compose 拉起
 - [ ] CHANGELOG + 文档更新

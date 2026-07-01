@@ -76,7 +76,8 @@ type HTTPServer struct {
 	// user subscription quota and record usage after successful commits.
 	subscriptionUsecase *subscriptionbiz.SubscriptionUsecase
 
-	runtimeBlocker relaybiz.RuntimeBlocker
+	accountQuotaRecorder subscriptionAccountQuotaRecorder
+	runtimeBlocker       relaybiz.RuntimeBlocker
 }
 
 func (s *HTTPServer) Plan(ctx context.Context, req relaybiz.RelayRequest) (*relaybiz.RelayPlan, error) {
@@ -194,6 +195,13 @@ func (s *HTTPServer) SetSubscriptionUsecase(uc *subscriptionbiz.SubscriptionUsec
 		return
 	}
 	s.subscriptionUsecase = uc
+}
+
+func (s *HTTPServer) SetSubscriptionAccountQuotaRecorder(recorder subscriptionAccountQuotaRecorder) {
+	if s == nil {
+		return
+	}
+	s.accountQuotaRecorder = recorder
 }
 
 func (s *HTTPServer) SetRuntimeBlocker(blocker relaybiz.RuntimeBlocker) {

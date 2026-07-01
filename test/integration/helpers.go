@@ -442,6 +442,18 @@ func (m *testChannelRepo) ClearTempUnschedulable(ctx context.Context, accountID 
 	return channelbiz.ErrSubscriptionAccountNotFound
 }
 
+func (m *testChannelRepo) RecordAccountQuotaSnapshot(ctx context.Context, snapshot *channelbiz.AccountQuotaSnapshot) error {
+	return channelbiz.ErrSubscriptionAccountNotFound
+}
+
+func (m *testChannelRepo) GetAccountQuotaSnapshot(ctx context.Context, accountID int64) (*channelbiz.AccountQuotaSnapshot, error) {
+	return nil, channelbiz.ErrSubscriptionAccountNotFound
+}
+
+func (m *testChannelRepo) AutoPauseAccount(ctx context.Context, accountID int64, reason string) error {
+	return channelbiz.ErrSubscriptionAccountNotFound
+}
+
 func (m *testChannelRepo) ListAvailableModels(ctx context.Context, group string) ([]string, error) {
 	uniqueModels := make(map[string]bool)
 	for key, abilities := range m.abilities {

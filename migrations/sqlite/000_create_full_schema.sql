@@ -478,6 +478,22 @@ CREATE TABLE IF NOT EXISTS subscription_groups (
 
 CREATE INDEX IF NOT EXISTS idx_sub_groups_platform ON subscription_groups(platform);
 
+CREATE TABLE IF NOT EXISTS account_quota_snapshots (
+  account_id INTEGER PRIMARY KEY,
+  primary_used_percent REAL,
+  primary_reset_after_seconds INTEGER,
+  primary_window_minutes INTEGER,
+  secondary_used_percent REAL,
+  secondary_reset_after_seconds INTEGER,
+  secondary_window_minutes INTEGER,
+  primary_over_secondary_percent REAL,
+  updated_at DATETIME,
+  snapshot_paused INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_quota_snapshot_updated
+  ON account_quota_snapshots(updated_at);
+
 -- ============================================================
 -- Schema migrations bookkeeping (matches internal/pkg/migrate)
 -- ============================================================

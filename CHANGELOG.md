@@ -11,9 +11,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - relay-gateway Responses 路径新增 §5 多层调度:优先复用 `previous_response_id` route,其次复用 `session_hash` sticky channel,最后回退到原 `RelayUsecase.Plan`。
 - Responses HTTP/WS sticky session 支持 `session_hash` / `sessionHash` body 字段和 `X-Session-Hash` / `OpenAI-Session-Hash` header,并在 Redis sticky store 中使用独立 `openai_ws_session:` namespace。
 - relay-gateway 订阅账号路径新增 §6 `AccountPool` + `RuntimeBlocker` + FailoverLoop:订阅账号选号会跳过运行时熔断账号,subscription adaptor 在上游网络错误、`429`、`5xx` 时短 TTL 熔断当前账号并切换下一个账号重试。
+- §7 新增 Codex 5h/7d 配额快照解析与 `account_quota_snapshots` 落点,relay-gateway 可从 Codex 上游响应记录 quota snapshot 并在阈值耗尽时自动暂停订阅账号。
 
 ### Fixed
 - `previous_response_id` 解析拒绝 `msg_` message id,避免把 message id 误当 Responses route id。
+- 订阅账号上游 `401` / `403` / `429` / `cyber_policy` 错误改为按 §7 ErrorPassthrough 透传状态码、body 与 `Retry-After`,不再统一包装成网关错误。
 
 ## [0.3.1] - 2026-06-29
 

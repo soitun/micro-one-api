@@ -13,7 +13,9 @@ import (
 	relayadaptor "micro-one-api/internal/relay/adaptor"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaycredential "micro-one-api/internal/relay/credential"
+	"micro-one-api/internal/relay/passthrough"
 	relayprovider "micro-one-api/internal/relay/provider"
+	relayquota "micro-one-api/internal/relay/quota"
 )
 
 // handleChatCompletionsViaAdaptor is the feature-flag-gated request path for
@@ -110,7 +112,14 @@ type subscriptionAdaptorResult struct {
 	statusCode int
 	err        error
 	retryable  bool
+	body       []byte
+	header     http.Header
 	write      func(http.ResponseWriter)
+}
+
+type subscriptionAccountQuotaRecorder interface {
+	RecordAccountQuotaSnapshot(ctx context.Context, accountID int64, snapshot *relayquota.CodexSnapshot) error
+	AutoPauseAccount(ctx context.Context, accountID int64, reason string) error
 }
 
 func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
@@ -223,17 +232,24 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 		return result
 	}
 
-	// Non-2xx: surface a sanitized upstream error. Upstream error bodies may
-	// leak internal identifiers (the upstream's view of the subscription,
-	// account-scoped request ids, etc.), so we never forward them verbatim to
-	// the client.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20)) // drain so the connection can be reused
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		io.Copy(io.Discard, resp.Body) // drain so the connection can be reused
 		resp.Body.Close()
+		s.recordCodexQuotaSnapshot(ctx, plan, body)
+		upstreamErr := passthrough.Classify(resp.StatusCode, body)
 		result.statusCode = resp.StatusCode
+		result.body = body
+		result.header = resp.Header.Clone()
 		result.err = fmt.Errorf("upstream returned status %d", resp.StatusCode)
-		result.retryable = isSubscriptionRuntimeRetryableStatus(resp.StatusCode)
-		result.write = func(w http.ResponseWriter) { s.writeError(w, resp.StatusCode, result.err.Error()) }
+		result.retryable = upstreamErr.RetryableAcrossAccounts()
+		result.write = func(w http.ResponseWriter) {
+			if upstreamErr.ShouldPassthrough() {
+				writeUpstreamPassthrough(w, resp.StatusCode, resp.Header, body)
+				return
+			}
+			s.writeError(w, resp.StatusCode, result.err.Error())
+		}
 		return result
 	}
 
@@ -335,6 +351,7 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 		result.write = func(w http.ResponseWriter) { s.writeError(w, http.StatusInternalServerError, result.err.Error()) }
 		return result
 	}
+	s.recordCodexQuotaSnapshot(ctx, plan, outBody)
 	result.statusCode = http.StatusOK
 	result.write = func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "application/json")
@@ -408,6 +425,37 @@ func (s *HTTPServer) selectSubscriptionFailoverPlan(ctx context.Context, base, c
 
 func isSubscriptionRuntimeRetryableStatus(statusCode int) bool {
 	return statusCode == http.StatusTooManyRequests || statusCode >= 500
+}
+
+func writeUpstreamPassthrough(w http.ResponseWriter, statusCode int, header http.Header, body []byte) {
+	if contentType := header.Get("Content-Type"); contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	if retryAfter := header.Get("Retry-After"); retryAfter != "" {
+		w.Header().Set("Retry-After", retryAfter)
+	}
+	w.WriteHeader(statusCode)
+	_, _ = w.Write(body)
+}
+
+func (s *HTTPServer) recordCodexQuotaSnapshot(ctx context.Context, plan *relaybiz.RelayPlan, body []byte) {
+	if s == nil || s.accountQuotaRecorder == nil || plan == nil || plan.Account == nil || plan.Account.Platform != "codex" {
+		return
+	}
+	snapshot, ok := relayquota.ParseCodexSnapshot(body, time.Now())
+	if !ok {
+		return
+	}
+	accountID := plan.Account.ID
+	if accountID <= 0 {
+		return
+	}
+	_ = s.accountQuotaRecorder.RecordAccountQuotaSnapshot(ctx, accountID, snapshot)
+	if relayquota.ShouldAutoPause(snapshot, 95, 100) {
+		_ = s.accountQuotaRecorder.AutoPauseAccount(ctx, accountID, "codex quota exhausted")
+	}
 }
 
 func runtimeBlockDuration(statusCode int) time.Duration {

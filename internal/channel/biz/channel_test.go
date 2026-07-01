@@ -158,6 +158,35 @@ func (m *mockChannelRepo) ClearTempUnschedulable(ctx context.Context, accountID 
 	return nil
 }
 
+func (m *mockChannelRepo) RecordAccountQuotaSnapshot(ctx context.Context, snapshot *AccountQuotaSnapshot) error {
+	if snapshot != nil && m.accounts != nil {
+		if acc, ok := m.accounts[snapshot.AccountID]; ok && snapshot.PrimaryUsedPercent != nil {
+			acc.QuotaUsedPercent = float32(*snapshot.PrimaryUsedPercent)
+		}
+	}
+	return nil
+}
+
+func (m *mockChannelRepo) GetAccountQuotaSnapshot(ctx context.Context, accountID int64) (*AccountQuotaSnapshot, error) {
+	if m.accounts == nil {
+		return nil, ErrSubscriptionAccountNotFound
+	}
+	acc, ok := m.accounts[accountID]
+	if !ok {
+		return nil, ErrSubscriptionAccountNotFound
+	}
+	used := float64(acc.QuotaUsedPercent)
+	return &AccountQuotaSnapshot{AccountID: accountID, PrimaryUsedPercent: &used}, nil
+}
+
+func (m *mockChannelRepo) AutoPauseAccount(ctx context.Context, accountID int64, reason string) error {
+	if acc, ok := m.accounts[accountID]; ok {
+		acc.Status = ChannelStatusDisabled
+		acc.LastError = reason
+	}
+	return nil
+}
+
 func (m *mockChannelRepo) ListAvailableModels(ctx context.Context, group string) ([]string, error) {
 	uniqueModels := make(map[string]bool)
 	for key, abilities := range m.abilities {

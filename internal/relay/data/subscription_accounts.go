@@ -2,10 +2,13 @@ package data
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	channelv1 "micro-one-api/api/channel/v1"
 	relaycredential "micro-one-api/internal/relay/credential"
+	relayquota "micro-one-api/internal/relay/quota"
 )
 
 // ChannelSubscriptionAccountStore adapts channel-service subscription-account
@@ -177,6 +180,69 @@ func (s *ChannelSubscriptionAccountStore) OnRefreshRetryExhausted(ctx context.Co
 	}
 	if resp != nil && !resp.GetSuccess() {
 		return relaycredential.ErrRefreshFailed
+	}
+	return nil
+}
+
+func (s *ChannelSubscriptionAccountStore) RecordAccountQuotaSnapshot(ctx context.Context, accountID int64, snapshot *relayquota.CodexSnapshot) error {
+	if s == nil || s.client == nil {
+		return relaycredential.ErrNotConfigured
+	}
+	if snapshot == nil {
+		return nil
+	}
+	values := make(map[string]any)
+	if reply, err := s.getSubscriptionAccount(ctx, accountID); err == nil && reply.GetAccount() != nil && reply.GetAccount().GetMetadata() != "" {
+		_ = json.Unmarshal([]byte(reply.GetAccount().GetMetadata()), &values)
+	}
+	values["quota_snapshot"] = map[string]any{
+		"primary_used_percent":           snapshot.PrimaryUsedPercent,
+		"primary_reset_after_seconds":    snapshot.PrimaryResetAfterSeconds,
+		"primary_window_minutes":         snapshot.PrimaryWindowMinutes,
+		"secondary_used_percent":         snapshot.SecondaryUsedPercent,
+		"secondary_reset_after_seconds":  snapshot.SecondaryResetAfterSeconds,
+		"secondary_window_minutes":       snapshot.SecondaryWindowMinutes,
+		"primary_over_secondary_percent": snapshot.PrimaryOverSecondaryPercent,
+		"updated_at":                     snapshot.UpdatedAt.Unix(),
+	}
+	metadata, err := json.Marshal(values)
+	if err != nil {
+		return err
+	}
+	reply, err := s.client.UpdateSubscriptionAccount(ctx, &channelv1.UpdateSubscriptionAccountRequest{
+		Id:       accountID,
+		Metadata: string(metadata),
+	})
+	if err != nil {
+		return err
+	}
+	if reply != nil && !reply.GetSuccess() {
+		return relaycredential.ErrRefreshFailed
+	}
+	return nil
+}
+
+func (s *ChannelSubscriptionAccountStore) AutoPauseAccount(ctx context.Context, accountID int64, reason string) error {
+	if s == nil || s.client == nil {
+		return relaycredential.ErrNotConfigured
+	}
+	if resp, err := s.client.SetSubscriptionAccountError(ctx, &channelv1.SetSubscriptionAccountErrorRequest{
+		AccountId: accountID,
+		Message:   reason,
+	}); err != nil {
+		return err
+	} else if resp != nil && !resp.GetSuccess() {
+		return relaycredential.ErrRefreshFailed
+	}
+	resp, err := s.client.ChangeSubscriptionAccountStatus(ctx, &channelv1.ChangeSubscriptionAccountStatusRequest{
+		AccountId: accountID,
+		Status:    2,
+	})
+	if err != nil {
+		return err
+	}
+	if resp != nil && !resp.GetSuccess() {
+		return fmt.Errorf("auto-pause subscription account: %s", resp.GetMessage())
 	}
 	return nil
 }

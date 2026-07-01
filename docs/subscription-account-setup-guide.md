@@ -328,6 +328,18 @@ docker exec mysql mysql -uroot -prootpassword123 oneapi -e \
 
 ---
 
+## 6.4 配额快照与错误透传
+
+开启 `hybrid_adaptor.enabled` 后，订阅账号路径会按 §7 规则处理上游错误和 Codex 配额窗口：
+
+- Codex 响应体里出现 5h / 7d quota window 字段时，relay-gateway 会解析 `used_percent` / `reset_after_seconds` / `window_minutes`，并写回订阅账号 metadata；数据库迁移 `041_create_account_quota_snapshots.sql` 提供了后续直写快照表的落点。
+- 当 Codex primary quota 使用率达到 95% 或 secondary quota 达到 100% 时，账号会被自动暂停，避免继续被选路。
+- 上游 `401` / `403` / `429` / `cyber_policy` 会原样透传状态码、body 和 `Retry-After` 给客户端；网络错误和 `5xx` 才会触发跨账号 failover。
+
+排查时可先看订阅账号 metadata 中的 `quota_snapshot` 与 `last_error`，再确认账号 `status` 是否已被自动改为禁用。
+
+---
+
 ## 七、客户端调用示例
 
 配好后，下游客户端照常用 micro-one-api 的标准协议入口即可，路由层自动落到订阅号：
