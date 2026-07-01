@@ -534,7 +534,7 @@ service ChannelService {
 - [x] ErrorPassthrough（subscription adaptor 对上游 `401` / `403` / `429` / `cyber_policy` 透传状态码、body 与 `Retry-After`）
 - [x] 粘性会话（Responses HTTP/WS 支持 `session_hash` / previous-response route → channel）
 - [x] 订阅账号故障转移（上游网络错误、`5xx` 在响应写出前触发 runtime block + account failover）
-- [ ] 可观测性：per-adaptor / per-platform metrics
+- [x] 可观测性：per-adaptor / per-platform metrics（Prometheus 覆盖 adaptor request、failover、runtime block、passthrough、Codex quota snapshot）
 - [ ] 配置项：relay-gateway.yaml 增加 identity/mimicry 开关
 
 ---

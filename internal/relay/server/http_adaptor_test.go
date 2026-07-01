@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"micro-one-api/internal/pkg/metrics"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaycredential "micro-one-api/internal/relay/credential"
 	relayprovider "micro-one-api/internal/relay/provider"
@@ -184,6 +187,8 @@ func TestHandleChatCompletionsViaAdaptor_FailoverOnRetryableUpstreamStatus(t *te
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
 	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
+	failoverBefore := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("5xx", "switched"))
+	blockBefore := testutil.ToFloat64(metrics.RelayRuntimeBlocksTotal.WithLabelValues("5xx"))
 
 	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
 
@@ -201,6 +206,12 @@ func TestHandleChatCompletionsViaAdaptor_FailoverOnRetryableUpstreamStatus(t *te
 	}
 	if selector.calls != 1 {
 		t.Fatalf("selector calls = %d, want 1", selector.calls)
+	}
+	if delta := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("5xx", "switched")) - failoverBefore; delta != 1 {
+		t.Fatalf("subscription failover metric delta = %v, want 1", delta)
+	}
+	if delta := testutil.ToFloat64(metrics.RelayRuntimeBlocksTotal.WithLabelValues("5xx")) - blockBefore; delta != 1 {
+		t.Fatalf("runtime block metric delta = %v, want 1", delta)
 	}
 }
 
@@ -236,6 +247,7 @@ func TestHandleChatCompletionsViaAdaptor_Passthrough429(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
 	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
+	passthroughBefore := testutil.ToFloat64(metrics.RelayUpstreamPassthroughTotal.WithLabelValues("Passthrough", "429"))
 
 	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
 
@@ -247,6 +259,9 @@ func TestHandleChatCompletionsViaAdaptor_Passthrough429(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "rate limited") {
 		t.Fatalf("body was not passed through: %s", rec.Body.String())
+	}
+	if delta := testutil.ToFloat64(metrics.RelayUpstreamPassthroughTotal.WithLabelValues("Passthrough", "429")) - passthroughBefore; delta != 1 {
+		t.Fatalf("upstream passthrough metric delta = %v, want 1", delta)
 	}
 }
 
@@ -285,6 +300,8 @@ func TestHandleChatCompletionsViaAdaptor_RecordsCodexQuotaSnapshot(t *testing.T)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
 	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
+	recordedBefore := testutil.ToFloat64(metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("recorded"))
+	pausedBefore := testutil.ToFloat64(metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("auto_paused"))
 
 	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`))
 
@@ -296,6 +313,12 @@ func TestHandleChatCompletionsViaAdaptor_RecordsCodexQuotaSnapshot(t *testing.T)
 	}
 	if recorder.pausedAccountID != 12 {
 		t.Fatalf("paused account = %d, want 12", recorder.pausedAccountID)
+	}
+	if delta := testutil.ToFloat64(metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("recorded")) - recordedBefore; delta != 1 {
+		t.Fatalf("codex quota recorded metric delta = %v, want 1", delta)
+	}
+	if delta := testutil.ToFloat64(metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("auto_paused")) - pausedBefore; delta != 1 {
+		t.Fatalf("codex quota auto paused metric delta = %v, want 1", delta)
 	}
 }
 

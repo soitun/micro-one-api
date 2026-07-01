@@ -817,9 +817,9 @@ hybrid_adaptor:
 - [x] §5: 多层 Scheduler
 - [x] §6: AccountPool + RuntimeBlocker + FailoverLoop
 - [ ] §7: Codex 5h/7d + ErrorPassthrough + OAuth 整合（Codex 配额 + ErrorPassthrough 已落地；OAuth HTTP 整合待继续）
-- [ ] §8: Prometheus 指标 + 集成收尾
+- [x] §8: Prometheus 指标 + 集成收尾（指标已接入；compose E2E/灰度发布仍按下方独立项跟踪）
 - [ ] 集成测试 + compose 拉起
-- [ ] CHANGELOG + 文档更新
+- [x] CHANGELOG + 文档更新
 - [ ] 灰度发布:staging 一周,生产开关默认关闭,按 10% / 50% / 100% 灰度
 
 ---

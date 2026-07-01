@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"micro-one-api/internal/pkg/metrics"
 	subscriptionbiz "micro-one-api/internal/subscription/biz"
 	subscriptiondata "micro-one-api/internal/subscription/data"
 )
@@ -37,6 +40,7 @@ func TestSubscriptionQuotaMiddlewareRejectsExceededQuota(t *testing.T) {
 	handler := srv.withSubscriptionQuotaCheck(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nextCalled = true
 	}))
+	rejectedBefore := testutil.ToFloat64(metrics.SubscriptionQuotaChecksTotal.WithLabelValues("rejected"))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
 	req.Header.Set("Authorization", "Bearer user-token")
@@ -52,6 +56,10 @@ func TestSubscriptionQuotaMiddlewareRejectsExceededQuota(t *testing.T) {
 	}
 	if rec.Header().Get("Retry-After") == "" {
 		t.Fatal("Retry-After header missing")
+	}
+	rejectedAfter := testutil.ToFloat64(metrics.SubscriptionQuotaChecksTotal.WithLabelValues("rejected"))
+	if rejectedAfter-rejectedBefore != 1 {
+		t.Fatalf("subscription quota rejected metric delta = %v, want 1", rejectedAfter-rejectedBefore)
 	}
 }
 

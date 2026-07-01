@@ -1835,17 +1835,24 @@ func (s *HTTPServer) commitQuota(ctx context.Context, reservationID string, actu
 
 func (s *HTTPServer) recordSubscriptionUsage(ctx context.Context, userID int64, quota int64) {
 	if s.subscriptionUsecase == nil || userID <= 0 || quota <= 0 {
+		metrics.SubscriptionUsageRecordsTotal.WithLabelValues("skipped").Inc()
 		return
 	}
 	costUSD := quotaToUSD(quota)
 	if costUSD <= 0 {
+		metrics.SubscriptionUsageRecordsTotal.WithLabelValues("skipped").Inc()
 		return
 	}
 	subscriptionCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
-	if err := s.subscriptionUsecase.RecordUsage(subscriptionCtx, userID, costUSD); err != nil && applogger.Log != nil {
-		applogger.Log.Warn("failed to record subscription usage", zap.Int64("user_id", userID), zap.Float64("cost_usd", costUSD), zap.Error(err))
+	if err := s.subscriptionUsecase.RecordUsage(subscriptionCtx, userID, costUSD); err != nil {
+		metrics.SubscriptionUsageRecordsTotal.WithLabelValues("error").Inc()
+		if applogger.Log != nil {
+			applogger.Log.Warn("failed to record subscription usage", zap.Int64("user_id", userID), zap.Float64("cost_usd", costUSD), zap.Error(err))
+		}
+		return
 	}
+	metrics.SubscriptionUsageRecordsTotal.WithLabelValues("success").Inc()
 }
 
 func quotaToUSD(quota int64) float64 {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync/atomic"
 	"time"
+
+	"micro-one-api/internal/pkg/metrics"
 )
 
 type AccountPoolMetrics struct {
@@ -41,10 +43,12 @@ func (p *AccountPool) IsSchedulable(ctx context.Context, account *SubscriptionAc
 	if p.blocker != nil {
 		if _, blocked := p.blocker.IsBlocked(ctx, account.ID, now); blocked {
 			p.runtimeBlocked.Add(1)
+			metrics.RelayAccountPoolChecksTotal.WithLabelValues("runtime_blocked").Inc()
 			return false
 		}
 	}
 	p.allowed.Add(1)
+	metrics.RelayAccountPoolChecksTotal.WithLabelValues("allowed").Inc()
 	return true
 }
 

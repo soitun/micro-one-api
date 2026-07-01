@@ -10,6 +10,7 @@ import (
 	"github.com/bytedance/sonic"
 
 	billingv1 "micro-one-api/api/billing/v1"
+	"micro-one-api/internal/pkg/metrics"
 	relayadaptor "micro-one-api/internal/relay/adaptor"
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaycredential "micro-one-api/internal/relay/credential"
@@ -85,6 +86,7 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 			break
 		}
 		result := s.executeSubscriptionAccountViaAdaptor(r.Context(), current, clientModel, r.Header.Clone(), rawBody, inbound)
+		metrics.RelaySubscriptionAdaptorRequestsTotal.WithLabelValues(subscriptionMetricPlatform(current), string(inbound), subscriptionAdaptorMetricResult(result)).Inc()
 		if result.retryable {
 			accountID := subscriptionAccountIDFromPlan(current)
 			if accountID > 0 {
@@ -94,9 +96,11 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 			lastErr = result.err
 			next, err := s.selectSubscriptionFailoverPlan(r.Context(), plan, current, clientModel, failedAccounts)
 			if err == nil && next != nil && next.Channel != nil && subscriptionAccountIDFromPlan(next) != accountID {
+				metrics.RelaySubscriptionFailoverTotal.WithLabelValues(subscriptionRetryReason(result), "switched").Inc()
 				current = next
 				continue
 			}
+			metrics.RelaySubscriptionFailoverTotal.WithLabelValues(subscriptionRetryReason(result), "exhausted").Inc()
 		}
 		result.write(w)
 		return
@@ -245,6 +249,7 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 		result.retryable = upstreamErr.RetryableAcrossAccounts()
 		result.write = func(w http.ResponseWriter) {
 			if upstreamErr.ShouldPassthrough() {
+				metrics.RelayUpstreamPassthroughTotal.WithLabelValues(string(upstreamErr.Kind), fmt.Sprint(resp.StatusCode)).Inc()
 				writeUpstreamPassthrough(w, resp.StatusCode, resp.Header, body)
 				return
 			}
@@ -405,6 +410,8 @@ func (s *HTTPServer) blockRuntimeAccount(ctx context.Context, accountID int64, s
 		reason = err.Error()
 	}
 	_ = s.runtimeBlocker.Block(ctx, accountID, time.Now().Add(duration), reason)
+	metrics.RelayRuntimeBlocksTotal.WithLabelValues(subscriptionRetryReason(subscriptionAdaptorResult{statusCode: statusCode, err: err})).Inc()
+	metrics.RelayRuntimeBlockActive.Set(float64(s.runtimeBlocker.Metrics().ActiveSize))
 }
 
 func (s *HTTPServer) selectSubscriptionFailoverPlan(ctx context.Context, base, current *relaybiz.RelayPlan, clientModel string, failed map[int64]bool) (*relaybiz.RelayPlan, error) {
@@ -441,20 +448,92 @@ func writeUpstreamPassthrough(w http.ResponseWriter, statusCode int, header http
 }
 
 func (s *HTTPServer) recordCodexQuotaSnapshot(ctx context.Context, plan *relaybiz.RelayPlan, body []byte) {
-	if s == nil || s.accountQuotaRecorder == nil || plan == nil || plan.Account == nil || plan.Account.Platform != "codex" {
+	if s == nil || plan == nil || plan.Account == nil || plan.Account.Platform != "codex" {
+		return
+	}
+	if s.accountQuotaRecorder == nil {
+		metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("recorder_missing").Inc()
 		return
 	}
 	snapshot, ok := relayquota.ParseCodexSnapshot(body, time.Now())
 	if !ok {
+		metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("parse_miss").Inc()
 		return
 	}
 	accountID := plan.Account.ID
 	if accountID <= 0 {
 		return
 	}
-	_ = s.accountQuotaRecorder.RecordAccountQuotaSnapshot(ctx, accountID, snapshot)
+	if snapshot.PrimaryUsedPercent != nil {
+		metrics.RelayCodexQuotaUsedPercent.WithLabelValues("primary").Set(*snapshot.PrimaryUsedPercent)
+	}
+	if snapshot.SecondaryUsedPercent != nil {
+		metrics.RelayCodexQuotaUsedPercent.WithLabelValues("secondary").Set(*snapshot.SecondaryUsedPercent)
+	}
+	if err := s.accountQuotaRecorder.RecordAccountQuotaSnapshot(ctx, accountID, snapshot); err != nil {
+		metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("record_error").Inc()
+		return
+	}
+	metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("recorded").Inc()
 	if relayquota.ShouldAutoPause(snapshot, 95, 100) {
-		_ = s.accountQuotaRecorder.AutoPauseAccount(ctx, accountID, "codex quota exhausted")
+		if err := s.accountQuotaRecorder.AutoPauseAccount(ctx, accountID, "codex quota exhausted"); err != nil {
+			metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("auto_pause_error").Inc()
+			return
+		}
+		metrics.RelayCodexQuotaSnapshotsTotal.WithLabelValues("auto_paused").Inc()
+	}
+}
+
+func subscriptionMetricPlatform(plan *relaybiz.RelayPlan) string {
+	if plan != nil && plan.Account != nil && plan.Account.Platform != "" {
+		return plan.Account.Platform
+	}
+	if plan != nil && plan.Channel != nil {
+		switch plan.Channel.Type {
+		case relayprovider.ChannelTypeCodexOAuth:
+			return "codex"
+		case relayprovider.ChannelTypeClaudeOAuth:
+			return "claude"
+		}
+	}
+	return "unknown"
+}
+
+func subscriptionAdaptorMetricResult(result subscriptionAdaptorResult) string {
+	if result.statusCode >= 200 && result.statusCode < 300 && result.err == nil {
+		return "success"
+	}
+	if result.retryable {
+		return "retryable_" + statusClass(result.statusCode)
+	}
+	if result.statusCode > 0 {
+		return statusClass(result.statusCode)
+	}
+	return "error"
+}
+
+func subscriptionRetryReason(result subscriptionAdaptorResult) string {
+	if result.statusCode > 0 {
+		return statusClass(result.statusCode)
+	}
+	if result.err != nil {
+		return "network_error"
+	}
+	return "unknown"
+}
+
+func statusClass(statusCode int) string {
+	switch {
+	case statusCode >= 500:
+		return "5xx"
+	case statusCode >= 400:
+		return "4xx"
+	case statusCode >= 300:
+		return "3xx"
+	case statusCode >= 200:
+		return "2xx"
+	default:
+		return "network_error"
 	}
 }
 

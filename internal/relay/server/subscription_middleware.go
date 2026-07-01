@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	applogger "micro-one-api/internal/pkg/logger"
+	"micro-one-api/internal/pkg/metrics"
 )
 
 const defaultSubscriptionEstimatedCostUSD = 0.01
@@ -35,6 +36,7 @@ func (s *HTTPServer) withSubscriptionQuotaCheck(next http.Handler) http.Handler 
 		estimatedCost := subscriptionEstimatedCostFromHeader(r)
 		result, err := s.subscriptionUsecase.CheckQuota(r.Context(), auth.GetUserId(), estimatedCost)
 		if err != nil {
+			metrics.SubscriptionQuotaChecksTotal.WithLabelValues("error").Inc()
 			if applogger.Log != nil {
 				applogger.Log.Warn("subscription quota check failed", zap.Int64("user_id", auth.GetUserId()), zap.Error(err))
 			}
@@ -42,9 +44,11 @@ func (s *HTTPServer) withSubscriptionQuotaCheck(next http.Handler) http.Handler 
 			return
 		}
 		if result == nil || result.Allowed {
+			metrics.SubscriptionQuotaChecksTotal.WithLabelValues("allowed").Inc()
 			next.ServeHTTP(w, r)
 			return
 		}
+		metrics.SubscriptionQuotaChecksTotal.WithLabelValues("rejected").Inc()
 		w.Header().Set("Retry-After", "60")
 		s.writeJSON(w, http.StatusTooManyRequests, map[string]interface{}{
 			"error": map[string]interface{}{
