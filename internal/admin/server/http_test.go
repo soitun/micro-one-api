@@ -551,6 +551,16 @@ func TestAdminHTTPSubscriptionManagement(t *testing.T) {
 		t.Fatalf("list subscriptions status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
+	// Omitting user_id lists every subscription rather than erroring, so admins
+	// can browse without knowing a user id.
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/subscriptions", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"subscription_name":"alice-pro"`) {
+		t.Fatalf("list all subscriptions status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/subscriptions/1/reset-quota", strings.NewReader(`{"scope":"all"}`))
 	req.Header.Set("Authorization", "Bearer admin-token")
 	rec = httptest.NewRecorder()
@@ -710,6 +720,50 @@ func TestAdminHTTPNotificationProxyRewritesListPath(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"total":7`) {
 		t.Fatalf("response was not proxied: %s", rec.Body.String())
+	}
+}
+
+func TestAdminHTTPProxiesSubscriptionOAuthToChannelService(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"auth_url":"https://example.com/auth","session_id":"s1","state":"st"}`))
+	}))
+	defer upstream.Close()
+	t.Setenv("CHANNEL_HTTP_ENDPOINT", upstream.URL)
+
+	srv := NewHTTPServer(":0", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/subscription/oauth/claude/auth-url", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/api/v1/admin/accounts/subscription/oauth/claude/auth-url" {
+		t.Fatalf("proxied path = %q, want the oauth auth-url path preserved", gotPath)
+	}
+	if !strings.Contains(rec.Body.String(), `"session_id":"s1"`) {
+		t.Fatalf("response was not proxied: %s", rec.Body.String())
+	}
+}
+
+func TestAdminHTTPSubscriptionOAuthRequiresAdminAuth(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	t.Setenv("CHANNEL_HTTP_ENDPOINT", "http://channel-service:8002")
+
+	srv := NewHTTPServer(":0", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/subscription/oauth/claude/auth-url", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 without admin auth", rec.Code)
 	}
 }
 

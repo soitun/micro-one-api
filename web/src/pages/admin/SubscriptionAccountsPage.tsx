@@ -12,6 +12,7 @@ import { AdminPagination } from '@/components/admin/AdminPagination';
 import { AdminTableToolbar } from '@/components/admin/AdminTableToolbar';
 import { SortableHeader } from '@/components/admin/SortableHeader';
 import { useAdminTableState } from '@/hooks/useAdminTableState';
+import { OAuthBindDialog } from '@/pages/admin/OAuthBindDialog';
 import { buildAdminListParams } from '@/lib/admin-table-query';
 import { ensureApiSuccess } from '@/lib/api-response';
 import { sortRows, type SortState } from '@/lib/table-utils';
@@ -304,12 +305,15 @@ export function AdminSubscriptionAccountsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">订阅账号管理</h2>
-        <CreateAccountDialog
-          open={isCreateOpen}
-          onOpenChange={setIsCreateOpen}
-          onSubmit={(payload) => createMutation.mutate(payload)}
-          pending={createMutation.isPending}
-        />
+        <div className="flex items-center gap-2">
+          <OAuthBindDialog onBound={invalidate} />
+          <CreateAccountDialog
+            open={isCreateOpen}
+            onOpenChange={setIsCreateOpen}
+            onSubmit={(payload) => createMutation.mutate(payload)}
+            pending={createMutation.isPending}
+          />
+        </div>
       </div>
 
       <AdminTableToolbar

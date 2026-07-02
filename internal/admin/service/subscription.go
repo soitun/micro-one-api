@@ -51,6 +51,13 @@ func (s *AdminService) ListUserSubscriptions(ctx context.Context, userID int64) 
 	return s.subscriptionUc.ListByUser(ctx, userID)
 }
 
+func (s *AdminService) ListAllSubscriptions(ctx context.Context) ([]*subscriptionbiz.UserSubscription, error) {
+	if s == nil || s.subscriptionUc == nil {
+		return nil, ErrSubscriptionServiceNotConfigured
+	}
+	return s.subscriptionUc.List(ctx)
+}
+
 func (s *AdminService) CreateSubscriptionGroup(ctx context.Context, group *subscriptionbiz.SubscriptionGroup) error {
 	if s == nil || s.groupUc == nil {
 		return ErrSubscriptionServiceNotConfigured

@@ -30,12 +30,15 @@ func handleUserSubscriptions(w http.ResponseWriter, r *http.Request, svc *servic
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
+	// user_id is an optional filter: with it we scope to one user, without it we
+	// list every subscription so admins can browse without knowing a user id.
 	userID := getQueryInt64(r, "user_id", 0)
-	if userID <= 0 {
-		writeJSON(w, http.StatusBadRequest, apiResponse(false, "user_id is required", nil))
+	if userID > 0 {
+		items, err := svc.ListUserSubscriptions(r.Context(), userID)
+		writeSubscriptionResponse(w, items, err)
 		return
 	}
-	items, err := svc.ListUserSubscriptions(r.Context(), userID)
+	items, err := svc.ListAllSubscriptions(r.Context())
 	writeSubscriptionResponse(w, items, err)
 }
 

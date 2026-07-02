@@ -9,6 +9,9 @@ type SubscriptionRepository interface {
 	GetSubscriptionByID(ctx context.Context, subscriptionID int64) (*UserSubscription, error)
 	ListSubscriptionsByUser(ctx context.Context, userID int64) ([]*UserSubscription, error)
 	ListActiveSubscriptions(ctx context.Context) ([]*UserSubscription, error)
+	// ListAllSubscriptions returns every subscription regardless of user or
+	// status, newest first, so admins can browse without knowing a user id.
+	ListAllSubscriptions(ctx context.Context) ([]*UserSubscription, error)
 	GetActiveSubscriptionByUser(ctx context.Context, userID int64) (*UserSubscription, error)
 	// AddUsage atomically rolls the active subscription's usage windows relative
 	// to now (unix seconds) and adds costUSD to every window. Implementations

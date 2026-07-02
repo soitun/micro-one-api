@@ -89,6 +89,7 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv := khttp.NewServer(xhttp.SafeKratosServerOptions(khttp.Address(addr))...)
 	identityProxy := newServiceReverseProxy(optionString(options, 0))
 	notifyWorkerProxy := newNotifyWorkerProxy()
+	channelHTTPProxy := newChannelHTTPProxy()
 	webAssets := newAdminWebAssets(optionString(options, 1))
 	handlePage := webAssets.handlePage
 	adminAuth := newAdminGuard(svc)
@@ -108,6 +109,7 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandleFunc("/redeem", handlePage)
 	srv.HandleFunc("/orders", handlePage)
 	srv.HandleFunc("/profile", handlePage)
+	srv.HandleFunc("/subscriptions", handlePage)
 	srv.HandleFunc("/admin/users", handlePage)
 	srv.HandleFunc("/admin/channels", handlePage)
 	srv.HandleFunc("/admin/channel-health", handlePage)
@@ -119,6 +121,8 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandleFunc("/admin/redemptions", handlePage)
 	srv.HandleFunc("/admin/options", handlePage)
 	srv.HandleFunc("/admin/subscription-accounts", handlePage)
+	srv.HandleFunc("/admin/subscription-groups", handlePage)
+	srv.HandleFunc("/admin/subscriptions", handlePage)
 	// Static assets bundled by Vite
 	srv.HandlePrefix("/assets/", http.HandlerFunc(handlePage))
 	srv.HandleFunc("/favicon.svg", handlePage)
@@ -281,6 +285,14 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandlePrefix("/api/v1/admin/subscription-groups/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleSubscriptionGroupByID(w, r, svc)
 	}))
+	// Subscription-account OAuth authorization-code binding lives only on
+	// channel-service HTTP; proxy the SPA's requests through so the admin UI can
+	// reach auth-url/exchange. Guarded by adminAuth like the routes above.
+	if channelHTTPProxy != nil {
+		srv.HandlePrefix("/api/v1/admin/accounts/subscription/oauth/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+			channelHTTPProxy.ServeHTTP(w, r)
+		}))
+	}
 
 	// Protected admin endpoints
 	srv.HandlePrefix("/api/user/disable/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -3071,6 +3083,23 @@ func newNotifyWorkerProxy() *httputil.ReverseProxy {
 	if endpoint == "" {
 		// Default to notify-worker's HTTP port
 		endpoint = "http://notify-worker:8008"
+	}
+	target, err := parseReverseProxyTarget(endpoint)
+	if err != nil {
+		return nil
+	}
+	return httputil.NewSingleHostReverseProxy(target) // #nosec G704 -- endpoint is configured by operators and validated by parseReverseProxyTarget.
+}
+
+// newChannelHTTPProxy builds a reverse proxy to channel-service's HTTP port.
+// The subscription-account OAuth authorization-code endpoints live only on
+// channel-service HTTP (not the gRPC surface admin-api normally speaks), so the
+// SPA cannot reach them through the /api gateway without this proxy.
+func newChannelHTTPProxy() *httputil.ReverseProxy {
+	endpoint := os.Getenv("CHANNEL_HTTP_ENDPOINT")
+	if endpoint == "" {
+		// Default to channel-service's HTTP port (see configs/channel-service.yaml).
+		endpoint = "http://channel-service:8002"
 	}
 	target, err := parseReverseProxyTarget(endpoint)
 	if err != nil {

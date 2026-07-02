@@ -196,6 +196,10 @@ func (uc *SubscriptionUsecase) ListByUser(ctx context.Context, userID int64) ([]
 	return uc.repo.ListSubscriptionsByUser(ctx, userID)
 }
 
+func (uc *SubscriptionUsecase) List(ctx context.Context) ([]*UserSubscription, error) {
+	return uc.repo.ListAllSubscriptions(ctx)
+}
+
 func (uc *SubscriptionUsecase) rollWindows(subscription *UserSubscription) *UserSubscription {
 	return RollUsageWindows(subscription, uc.now().Unix())
 }

@@ -75,6 +75,15 @@ func (m *mockSubscriptionRepo) ListActiveSubscriptions(ctx context.Context) ([]*
 	return result, nil
 }
 
+func (m *mockSubscriptionRepo) ListAllSubscriptions(ctx context.Context) ([]*UserSubscription, error) {
+	var result []*UserSubscription
+	for _, subscription := range m.subscriptions {
+		cloned := *subscription
+		result = append(result, &cloned)
+	}
+	return result, nil
+}
+
 func (m *mockSubscriptionRepo) GetActiveSubscriptionByUser(ctx context.Context, userID int64) (*UserSubscription, error) {
 	for _, subscription := range m.subscriptions {
 		if subscription.UserID == userID && subscription.Status == SubscriptionStatusActive {

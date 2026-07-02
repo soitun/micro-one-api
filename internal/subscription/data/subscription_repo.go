@@ -78,6 +78,13 @@ func (r *Repository) ListActiveSubscriptions(ctx context.Context) ([]*biz.UserSu
 	return r.listActiveSubscriptionsMemory(ctx)
 }
 
+func (r *Repository) ListAllSubscriptions(ctx context.Context) ([]*biz.UserSubscription, error) {
+	if r.db != nil {
+		return r.listAllSubscriptionsDB(ctx)
+	}
+	return r.listAllSubscriptionsMemory(ctx)
+}
+
 func (r *Repository) GetActiveSubscriptionByUser(ctx context.Context, userID int64) (*biz.UserSubscription, error) {
 	if r.db != nil {
 		return r.getActiveSubscriptionByUserDB(ctx, userID)
@@ -239,6 +246,21 @@ func (r *Repository) listActiveSubscriptionsDB(ctx context.Context) ([]*biz.User
 	return result, nil
 }
 
+func (r *Repository) listAllSubscriptionsDB(ctx context.Context) ([]*biz.UserSubscription, error) {
+	var rows []subscriptionModel
+	if err := r.db.WithContext(ctx).
+		Order("created_at DESC, id DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	result := make([]*biz.UserSubscription, 0, len(rows))
+	for i := range rows {
+		subscription := subscriptionFromModel(&rows[i])
+		result = append(result, &subscription)
+	}
+	return result, nil
+}
+
 func subscriptionToModel(subscription *biz.UserSubscription) subscriptionModel {
 	if subscription == nil {
 		return subscriptionModel{}
@@ -356,6 +378,23 @@ func (r *Repository) listActiveSubscriptionsMemory(ctx context.Context) ([]*biz.
 			return result[i].ID < result[j].ID
 		}
 		return result[i].ExpiresAt < result[j].ExpiresAt
+	})
+	return result, nil
+}
+
+func (r *Repository) listAllSubscriptionsMemory(ctx context.Context) ([]*biz.UserSubscription, error) {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	result := make([]*biz.UserSubscription, 0, len(r.subscriptions))
+	for _, subscription := range r.subscriptions {
+		cloned := *subscription
+		result = append(result, &cloned)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].CreatedAt == result[j].CreatedAt {
+			return result[i].ID > result[j].ID
+		}
+		return result[i].CreatedAt > result[j].CreatedAt
 	})
 	return result, nil
 }

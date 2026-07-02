@@ -121,6 +121,11 @@ func TestSubscriptionRepository_SubscriptionCRUD(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 
+	all, err := repo.ListAllSubscriptions(ctx)
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+	assert.Equal(t, sub.ID, all[0].ID)
+
 	active, err := repo.GetActiveSubscriptionByUser(ctx, 1001)
 	require.NoError(t, err)
 	assert.Equal(t, sub.ID, active.ID)
