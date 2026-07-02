@@ -1482,7 +1482,7 @@ var oneAPIOptionDefaults = map[string]string{
 	"CompletionRatio":                "{}",
 	"TopUpLink":                      "",
 	"ChatLink":                       "",
-	"QuotaPerUnit":                   "500000",
+	"QuotaPerUnit":                   "10000",
 	"RetryTimes":                     "0",
 	"Theme":                          "default",
 }

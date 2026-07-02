@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { adminApiClient } from '@/lib/api';
 import { ensureApiSuccess, unwrapApiData } from '@/lib/api-response';
+import { amountUnitsToCurrencyUnits, currencyUnitsToAmountUnits } from '@/lib/quota';
 
 interface OptionItem {
   key: string;
@@ -50,11 +51,11 @@ function optionValue(options: OptionItem[] | undefined, key: string) {
 
 function quotaToDisplay(value: string) {
   const raw = Number.parseInt(value || '0', 10);
-  return Number.isFinite(raw) ? (raw / 500000).toString() : '0';
+  return Number.isFinite(raw) ? amountUnitsToCurrencyUnits(raw).toString() : '0';
 }
 
 function displayToQuota(value: string) {
-  return Math.floor(Number.parseFloat(value || '0') * 500000).toString();
+  return currencyUnitsToAmountUnits(value).toString();
 }
 
 export function AdminOptionsPage() {

@@ -730,7 +730,6 @@ func TestCommitQuota_UsesModelPrices(t *testing.T) {
 	redeemRepo := &mockRedeemRepo{}
 	cacheReadPrice := 0.10 / 1000000
 	uc := NewBillingUsecaseWithPricing(accountRepo, reservationRepo, ledgerRepo, redeemRepo, PricingConfig{
-		QuotaPerUnit: 500000,
 		ModelPrices: map[string]ModelPrice{
 			"gpt-5.5": {
 				InputPrice:     0.65 / 1000000,
@@ -742,7 +741,7 @@ func TestCommitQuota_UsesModelPrices(t *testing.T) {
 
 	reservation, err := uc.ReserveQuota(context.Background(), "user1", "req-model-price", 100, "gpt-5.5", "channel1", 0)
 	require.NoError(t, err)
-	assert.Equal(t, int64(33), reservation.Amount)
+	assert.Equal(t, int64(1), reservation.Amount)
 
 	committed, refund, err := uc.CommitQuotaWithUsage(context.Background(), reservation.ReservationID, 100, true, LedgerUsage{
 		PromptTokens:     10,
@@ -750,9 +749,9 @@ func TestCommitQuota_UsesModelPrices(t *testing.T) {
 		CacheReadTokens:  4,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, int64(42), committed)
+	assert.Equal(t, int64(1), committed)
 	assert.Equal(t, int64(0), refund)
-	assert.Equal(t, int64(958), account.Quota)
+	assert.Equal(t, int64(999), account.Quota)
 }
 
 func TestReserveQuota_UsesDynamicPricingStore(t *testing.T) {

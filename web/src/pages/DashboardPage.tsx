@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/EmptyState';
 import { ChartSkeleton, MetricCardsSkeleton } from '@/components/LoadingStates';
 import { unwrapApiData } from '@/lib/api-response';
+import { formatAmountUnits, formatUSD } from '@/lib/quota';
 import { cn } from '@/lib/utils';
 
 interface UsageItem {
@@ -70,12 +71,12 @@ interface TokenListData {
   total?: number;
 }
 
-function formatQuota(q: number, digits = 2) {
-  return (q / 500000).toFixed(digits);
+function formatQuota(q: number, digits = 4) {
+  return formatAmountUnits(q, digits);
 }
 
-function formatMoney(q: number, digits = 2) {
-  return `US$${formatQuota(q, digits)}`;
+function formatMoney(q: number, digits = 4) {
+  return formatUSD(q, digits);
 }
 
 function compactNumber(value: number) {

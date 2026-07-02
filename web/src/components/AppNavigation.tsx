@@ -34,6 +34,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { apiClient } from '@/lib/api';
 import { canAccessAdmin } from '@/lib/admin-access';
 import { unwrapApiData } from '@/lib/api-response';
+import { formatUSD } from '@/lib/quota';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -120,10 +121,7 @@ const routeTitles: Record<string, string> = {
 };
 
 function formatQuota(value?: number) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return 'US$0.00';
-  }
-  return `US$${(value / 500000).toFixed(2)}`;
+  return formatUSD(value);
 }
 
 function NavigationLinks({

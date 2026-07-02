@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,7 +26,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const paymentQuotaPerCNY = int64(5000000)
+const (
+	amountScale                         = int64(10000)
+	defaultRechargeAmountMultiplier     = 10
+	rechargeAmountMultiplierEnvVariable = "RECHARGE_AMOUNT_MULTIPLIER"
+)
 
 type TurnstileVerifier interface {
 	VerifyTurnstile(ctx context.Context, secret, token, remoteIP string) error
@@ -789,12 +794,12 @@ func handleCreatePaymentOrder(w http.ResponseWriter, r *http.Request, uc *biz.Id
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "invalid payment_method"})
 		return
 	}
-	assetAmount := int64(req.Amount * float64(paymentQuotaPerCNY))
+	assetAmount := int64(math.Round(req.Amount * rechargeAmountMultiplier() * float64(amountScale)))
 	if assetAmount <= 0 {
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "amount too small"})
 		return
 	}
-	moneyCents := int64(req.Amount * 100)
+	moneyCents := int64(math.Round(req.Amount * 100))
 	if moneyCents <= 0 {
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "amount too small"})
 		return
@@ -829,6 +834,18 @@ func handleCreatePaymentOrder(w http.ResponseWriter, r *http.Request, uc *biz.Id
 			"asset_type": resp.GetOrder().GetAssetType(),
 		},
 	})
+}
+
+func rechargeAmountMultiplier() float64 {
+	raw := strings.TrimSpace(os.Getenv(rechargeAmountMultiplierEnvVariable))
+	if raw == "" {
+		return defaultRechargeAmountMultiplier
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value <= 0 {
+		return defaultRechargeAmountMultiplier
+	}
+	return value
 }
 
 func handleUserPaymentOrders(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, billingClient billingv1.BillingServiceClient) {

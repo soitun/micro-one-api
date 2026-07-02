@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/LoadingStates';
 import { adminApiClient, apiClient } from '@/lib/api';
 import { unwrapApiData } from '@/lib/api-response';
+import { formatAmountUnits } from '@/lib/quota';
 import {
   Table,
   TableBody,
@@ -115,7 +116,7 @@ function numberValue(value: unknown): number {
 }
 
 function formatQuota(value: number) {
-  return (value / 500000).toFixed(4);
+  return formatAmountUnits(value);
 }
 
 function formatMoney(cents: unknown, currency?: string) {

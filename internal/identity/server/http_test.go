@@ -104,7 +104,7 @@ func TestIdentityHTTPAffTransferReturnsDisabledCompatibilityResponse(t *testing.
 	_, authToken := registerAndLoginForHTTPTest(t, uc)
 	srv := NewHTTPServer(":0", uc, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/user/aff_transfer", strings.NewReader(`{"quota":500000}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/user/aff_transfer", strings.NewReader(`{"quota":1000000}`))
 	req.Header.Set("Authorization", "Bearer "+authToken)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -615,13 +615,13 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 	_, authToken := registerAndLoginForHTTPTest(t, uc)
 
 	// Simulate mimo-v2.5-pro pricing: 1M input-only tokens at $0.435/1M tokens.
-	// 1000000 * $0.435/1000000 = $0.435 → 0.435 * 500000 = 217500 quota units.
-	// The aggregate RPC returns |amount| (217500) directly, not raw token count (1000000).
+	// 1000000 * $0.435/1000000 = $0.435 -> 0.435 * 10000 = 4350 amount units.
+	// The aggregate RPC returns |amount| (4350) directly, not raw token count (1000000).
 	todayStr := time.Now().Format("2006-01-02")
 	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
 		snapshot: &commonv1.AccountSnapshot{
-			Quota:        5000000,
-			UsedQuota:    217500,
+			Quota:        100000,
+			UsedQuota:    4350,
 			RequestCount: 1,
 			Group:        "default",
 			GroupRatio:   1,
@@ -630,7 +630,7 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 			Daily: []*billingv1.DailyUsage{
 				{
 					Date:             todayStr,
-					Quota:            217500,
+					Quota:            4350,
 					PromptTokens:     1000000,
 					CompletionTokens: 0,
 					CacheReadTokens:  250000,
@@ -641,7 +641,7 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 			Models: []*billingv1.ModelUsage{
 				{Model: "mimo-v2.5-pro", Tokens: 1000000},
 			},
-			TotalQuota:            217500,
+			TotalQuota:            4350,
 			TotalPromptTokens:     1000000,
 			TotalCompletionTokens: 0,
 			TotalCount:            1,
@@ -678,13 +678,13 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 	}
 	d := resp.Data
 
-	// today_quota must be |amount| (217500), NOT quota (1000000)
-	if d.TodayQuota != 217500 {
-		t.Errorf("today_quota = %d, want 217500 (|amount|)", d.TodayQuota)
+	// today_quota must be |amount| (4350), NOT quota (1000000)
+	if d.TodayQuota != 4350 {
+		t.Errorf("today_quota = %d, want 4350 (|amount|)", d.TodayQuota)
 	}
 	// used_quota from account snapshot should match
-	if d.UsedQuota != 217500 {
-		t.Errorf("used_quota = %d, want 217500", d.UsedQuota)
+	if d.UsedQuota != 4350 {
+		t.Errorf("used_quota = %d, want 4350", d.UsedQuota)
 	}
 	// Token counts should still reflect raw values
 	if d.TodayPromptTokens != 1000000 {
@@ -700,8 +700,8 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 	// Verify 7-day usage chart also uses |amount|, not quota
 	for _, u := range d.Usage {
 		if u.Date == todayStr {
-			if u.Quota != 217500 {
-				t.Errorf("usage[%s].quota = %d, want 217500 (|amount|), not 1000000 (raw tokens)", todayStr, u.Quota)
+			if u.Quota != 4350 {
+				t.Errorf("usage[%s].quota = %d, want 4350 (|amount|), not 1000000 (raw tokens)", todayStr, u.Quota)
 			}
 			if u.PromptTokens != 1000000 {
 				t.Errorf("usage[%s].prompt_tokens = %d, want 1000000", todayStr, u.PromptTokens)
@@ -994,9 +994,40 @@ func TestIdentityHTTPOnlinePaymentCompatibilityRoutesAreDisabled(t *testing.T) {
 		if call.GetMoneyCents() != 1000 {
 			t.Fatalf("money cents = %d, want 1000", call.GetMoneyCents())
 		}
-		if call.GetAssetAmount() != 50000000 {
-			t.Fatalf("asset amount = %d, want 50000000", call.GetAssetAmount())
+		if call.GetAssetAmount() != 1000000 {
+			t.Fatalf("asset amount = %d, want 1000000", call.GetAssetAmount())
 		}
+	}
+}
+
+func TestIdentityHTTPCreatePaymentOrderUsesRechargeMultiplier(t *testing.T) {
+	t.Setenv("RECHARGE_AMOUNT_MULTIPLIER", "3")
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	billingClient := &identityHTTPBillingClient{}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/user/pay", strings.NewReader(`{"amount":10,"payment_method":"alipay"}`))
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("payment response mismatch: %s", rec.Body.String())
+	}
+	if len(billingClient.createOrderCalls) != 1 {
+		t.Fatalf("CreatePaymentOrder calls = %d, want 1", len(billingClient.createOrderCalls))
+	}
+	call := billingClient.createOrderCalls[0]
+	if call.GetMoneyCents() != 1000 {
+		t.Fatalf("money cents = %d, want 1000", call.GetMoneyCents())
+	}
+	if call.GetAssetAmount() != 300000 {
+		t.Fatalf("asset amount = %d, want 300000", call.GetAssetAmount())
 	}
 }
 
@@ -1076,7 +1107,7 @@ func TestIdentityHTTPUserPaymentOrderDetailRefreshesAndScopesOrder(t *testing.T)
 				UserId:           strconv.FormatInt(user.ID, 10),
 				TradeNo:          "PAY-DETAIL",
 				Channel:          "alipay",
-				AssetAmount:      50000000,
+				AssetAmount:      1000000,
 				MoneyCents:       1000,
 				Currency:         "CNY",
 				Status:           "paid",
@@ -1721,7 +1752,7 @@ func (c *identityHTTPBillingClient) GetPaymentOrderByTradeNo(ctx context.Context
 			TradeNo:          req.GetTradeNo(),
 			Channel:          "alipay",
 			AssetType:        "quota",
-			AssetAmount:      50000000,
+			AssetAmount:      1000000,
 			MoneyCents:       1000,
 			Currency:         "CNY",
 			Status:           "paid",
@@ -1745,7 +1776,7 @@ func (c *identityHTTPBillingClient) ListPaymentOrders(ctx context.Context, req *
 				TradeNo:          "PAY-USER",
 				Channel:          "alipay",
 				AssetType:        "quota",
-				AssetAmount:      50000000,
+				AssetAmount:      1000000,
 				MoneyCents:       1000,
 				Currency:         "CNY",
 				Status:           "paid",

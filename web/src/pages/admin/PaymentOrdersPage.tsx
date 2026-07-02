@@ -10,6 +10,7 @@ import { useAdminTableState } from '@/hooks/useAdminTableState';
 import { buildAdminListParams } from '@/lib/admin-table-query';
 import { adminApiClient } from '@/lib/api';
 import { unwrapApiData } from '@/lib/api-response';
+import { formatAmountUnits } from '@/lib/quota';
 import { sortRows, type SortState } from '@/lib/table-utils';
 import {
   Table,
@@ -69,7 +70,7 @@ function numberValue(value: unknown): number {
 }
 
 function formatQuota(value: unknown) {
-  return (numberValue(value) / 500000).toFixed(4);
+  return formatAmountUnits(numberValue(value));
 }
 
 function formatMoney(cents: unknown, currency?: string) {

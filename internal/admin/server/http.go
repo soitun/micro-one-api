@@ -887,7 +887,10 @@ type readonlyModelPrice struct {
 	CacheReadPrice *float64 `json:"cache_read_price"`
 }
 
-const readonlyPricingMTok = 1000000
+const (
+	readonlyPricingMTok      = 1000000
+	readonlyPricingUnitScale = 10000
+)
 
 func handleReadonlyPricing(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	if r.Method != http.MethodGet {
@@ -900,7 +903,7 @@ func handleReadonlyPricing(w http.ResponseWriter, r *http.Request, svc *service.
 			"message": "",
 			"data": map[string]interface{}{
 				"prices":         []readonlyPricingRow{},
-				"quota_per_unit": float64(500000),
+				"quota_per_unit": float64(readonlyPricingUnitScale),
 				"unit":           "1M tokens",
 			},
 		})
@@ -914,7 +917,7 @@ func handleReadonlyPricing(w http.ResponseWriter, r *http.Request, svc *service.
 	optionMap := optionsByKey(options, "ModelPrice", "ModelRatio", "CompletionRatio", "QuotaPerUnit")
 	quotaPerUnit := parseReadonlyFloatOption(optionMap["QuotaPerUnit"])
 	if quotaPerUnit <= 0 {
-		quotaPerUnit = 500000
+		quotaPerUnit = readonlyPricingUnitScale
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

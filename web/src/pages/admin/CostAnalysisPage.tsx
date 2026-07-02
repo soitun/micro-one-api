@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/EmptyState';
 import { MetricCardsSkeleton } from '@/components/LoadingStates';
 import { ChannelCostComparison, CostBreakdownChart } from '@/components/admin/CostCharts';
+import { amountUnitsToCurrencyUnits, formatUSD } from '@/lib/quota';
 import { cn } from '@/lib/utils';
 
 interface AdminSummary {
@@ -68,12 +69,8 @@ interface AdminSummary {
   }>;
 }
 
-function formatQuota(q: number, digits = 2) {
-  return (q / 500000).toFixed(digits);
-}
-
-function formatMoney(q: number, digits = 2) {
-  return `US$${formatQuota(q, digits)}`;
+function formatMoney(q: number, digits = 4) {
+  return formatUSD(q, digits);
 }
 
 function MetricCard({
@@ -153,9 +150,9 @@ export function CostAnalysisPage() {
     const models = summary?.top_models ?? [];
     return models.map((m) => ({
       model: m.model || 'Unknown',
-      cost: (m.upstream_cost ?? 0) / 500000,
-      quota: (m.quota ?? 0) / 500000,
-      profit: (m.gross_profit ?? 0) / 500000,
+      cost: amountUnitsToCurrencyUnits(m.upstream_cost),
+      quota: amountUnitsToCurrencyUnits(m.quota),
+      profit: amountUnitsToCurrencyUnits(m.gross_profit),
     }));
   }, [summary]);
 
@@ -163,9 +160,9 @@ export function CostAnalysisPage() {
     const channels = summary?.top_channels ?? [];
     return channels.map((c) => ({
       name: c.name || 'Unknown',
-      cost: (c.upstream_cost ?? 0) / 500000,
-      quota: (c.quota ?? 0) / 500000,
-      profit: (c.gross_profit ?? 0) / 500000,
+      cost: amountUnitsToCurrencyUnits(c.upstream_cost),
+      quota: amountUnitsToCurrencyUnits(c.quota),
+      profit: amountUnitsToCurrencyUnits(c.gross_profit),
     }));
   }, [summary]);
 
@@ -175,9 +172,9 @@ export function CostAnalysisPage() {
       name: a.name || 'Unknown',
       platform: a.platform || '',
       status: a.status ?? 0,
-      cost: (a.upstream_cost ?? 0) / 500000,
-      quota: (a.quota ?? 0) / 500000,
-      profit: (a.gross_profit ?? 0) / 500000,
+      cost: amountUnitsToCurrencyUnits(a.upstream_cost),
+      quota: amountUnitsToCurrencyUnits(a.quota),
+      profit: amountUnitsToCurrencyUnits(a.gross_profit),
       count: a.count ?? 0,
     }));
   }, [summary]);

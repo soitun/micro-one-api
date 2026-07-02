@@ -5,6 +5,7 @@ import { apiClient } from '@/lib/api';
 import { getApiErrorMessage } from '@/lib/api-error';
 import { unwrapApiData } from '@/lib/api-response';
 import { bindableOAuthProviders, redirectToURL } from '@/lib/oauth';
+import { formatUSD } from '@/lib/quota';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -30,7 +31,7 @@ const ROLE_LABELS: Record<number, string> = {
 };
 
 function formatQuota(q: number) {
-  return `US$${(q / 500000).toFixed(2)}`;
+  return formatUSD(q);
 }
 
 export function ProfilePage() {

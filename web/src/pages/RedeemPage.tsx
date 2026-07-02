@@ -7,16 +7,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { apiClient } from '@/lib/api';
 import { unwrapApiData } from '@/lib/api-response';
+import { formatUSD } from '@/lib/quota';
 
 interface AccountDashboard {
   quota?: number;
 }
 
 function formatQuota(value?: number) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return '$0.00';
-  }
-  return `$${(value / 500000).toFixed(2)}`;
+  return formatUSD(value);
 }
 
 export function RedeemPage() {

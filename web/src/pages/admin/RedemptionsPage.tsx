@@ -13,6 +13,7 @@ import { SortableHeader } from '@/components/admin/SortableHeader';
 import { useAdminTableState } from '@/hooks/useAdminTableState';
 import { buildAdminListParams } from '@/lib/admin-table-query';
 import { ensureApiSuccess, unwrapApiData } from '@/lib/api-response';
+import { currencyUnitsToAmountUnits, formatAmountUnits } from '@/lib/quota';
 import { sortRows, type SortState } from '@/lib/table-utils';
 import {
   Table,
@@ -100,7 +101,7 @@ export function AdminRedemptionsPage() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const amount = Math.floor(parseFloat(newCodeAmount) * 500000);
+      const amount = currencyUnitsToAmountUnits(newCodeAmount);
       const count = parseInt(newCodeCount);
       const res = await adminApiClient.post('/redemption', {
         name: newCodeName,
@@ -134,7 +135,7 @@ export function AdminRedemptionsPage() {
   });
 
   function formatQuota(q: string) {
-    return (parseInt(q || '0') / 500000).toFixed(2);
+    return formatAmountUnits(q);
   }
 
   const handleCreate = () => {

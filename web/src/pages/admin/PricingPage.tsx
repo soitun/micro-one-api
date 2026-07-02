@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { adminApiClient } from '@/lib/api';
 import { ensureApiSuccess, unwrapApiData } from '@/lib/api-response';
+import { AMOUNT_SCALE } from '@/lib/quota';
 
 interface OptionItem {
   key: string;
@@ -34,7 +35,7 @@ const MODEL_RATIO_KEY = 'ModelRatio';
 const COMPLETION_RATIO_KEY = 'CompletionRatio';
 const MODEL_PRICE_KEY = 'ModelPrice';
 const QUOTA_PER_UNIT_KEY = 'QuotaPerUnit';
-const DEFAULT_QUOTA_PER_UNIT = 500000;
+const DEFAULT_QUOTA_PER_UNIT = AMOUNT_SCALE;
 const MTOK = 1_000_000;
 
 function optionValue(options: OptionItem[] | undefined, key: string, fallback = '') {

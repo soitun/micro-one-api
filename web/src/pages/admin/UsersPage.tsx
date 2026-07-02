@@ -12,6 +12,7 @@ import { SortableHeader } from '@/components/admin/SortableHeader';
 import { useAdminTableState } from '@/hooks/useAdminTableState';
 import { buildAdminListParams } from '@/lib/admin-table-query';
 import { ensureApiSuccess, unwrapApiData } from '@/lib/api-response';
+import { formatAmountUnits } from '@/lib/quota';
 import { sortRows, type SortState } from '@/lib/table-utils';
 import {
   Table,
@@ -142,7 +143,7 @@ export function AdminUsersPage() {
   });
 
   function formatQuota(q: string) {
-    return (parseInt(q || '0') / 500000).toFixed(2);
+    return formatAmountUnits(q);
   }
 
   const visibleUsers = useMemo(() => {

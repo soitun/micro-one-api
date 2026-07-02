@@ -192,10 +192,10 @@ func TestLedgerRepo_AggregateLedgerByDate(t *testing.T) {
 	err := db.Exec(`
 		INSERT INTO billing_ledgers (user_id, amount, balance_after, type, model_name, quota, prompt_tokens, completion_tokens, cache_read_tokens, elapsed_time, created_at)
 		VALUES
-			('u1', -217500, 782500, 'consume', 'mimo-v2.5-pro', 1000000, 600000, 400000, 120000, 500, ?),
-			('u1', -100, 782400, 'consume', 'gpt-4o', 200, 100, 100, 20, 200, ?),
+			('u1', -4350, 995650, 'consume', 'mimo-v2.5-pro', 1000000, 600000, 400000, 120000, 500, ?),
+			('u1', -100, 995550, 'consume', 'gpt-4o', 200, 100, 100, 20, 200, ?),
 			('u1', -300, 782100, 'consume', 'mimo-v2.5-pro', 500, 300, 200, 30, 300, ?),
-			('u1', 500000, 1282100, 'recharge', '', 0, 0, 0, 0, 0, ?),
+			('u1', 1000000, 1995550, 'recharge', '', 0, 0, 0, 0, 0, ?),
 			('u2', -999, 0, 'consume', 'other-model', 999, 500, 499, 50, 100, ?)
 	`, today, today, yesterday, yesterday, today).Error
 	require.NoError(t, err)
@@ -221,9 +221,9 @@ func TestLedgerRepo_AggregateLedgerByDate(t *testing.T) {
 	assert.Equal(t, int64(30), daily[0].CacheReadTokens)
 	assert.Equal(t, int64(1), daily[0].Count)
 
-	// Today: 2 entries, amount=(-217500)+(-100), quota=217600
+	// Today: 2 entries, amount=(-4350)+(-100), quota=4450
 	assert.Equal(t, today.Format("2006-01-02"), daily[1].Date)
-	assert.Equal(t, int64(217600), daily[1].Quota) // 217500 + 100
+	assert.Equal(t, int64(4450), daily[1].Quota) // 4350 + 100
 	assert.Equal(t, int64(600100), daily[1].PromptTokens)
 	assert.Equal(t, int64(400100), daily[1].CompletionTokens)
 	assert.Equal(t, int64(120020), daily[1].CacheReadTokens)
@@ -239,7 +239,7 @@ func TestLedgerRepo_AggregateLedgerByDate(t *testing.T) {
 	// Verify: recharge entry is excluded (type != consume)
 	// Verify: u2 entry is excluded (different user)
 	for _, d := range daily {
-		assert.NotEqual(t, int64(500000), d.Quota, "recharge should be excluded")
+		assert.NotEqual(t, int64(1000000), d.Quota, "recharge should be excluded")
 	}
 }
 

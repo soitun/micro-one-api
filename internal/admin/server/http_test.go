@@ -410,7 +410,7 @@ func (c *adminHTTPBillingClient) ListPaymentOrders(ctx context.Context, req *bil
 				TradeNo:          "PAY-1",
 				Channel:          "alipay",
 				AssetType:        "quota",
-				AssetAmount:      500000,
+				AssetAmount:      1000000,
 				MoneyCents:       1000,
 				Currency:         "CNY",
 				Status:           "paid",
@@ -458,7 +458,7 @@ func (c *adminHTTPBillingClient) GetPaymentOrderByTradeNo(ctx context.Context, r
 			TradeNo:          req.GetTradeNo(),
 			Channel:          "alipay",
 			AssetType:        "quota",
-			AssetAmount:      500000,
+			AssetAmount:      1000000,
 			MoneyCents:       1000,
 			Currency:         "CNY",
 			Status:           "paid",
@@ -693,7 +693,7 @@ func TestAdminHTTPProxiesUserTopUp(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		gotBody = body["key"]
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"success":true,"data":500000}`))
+		_, _ = w.Write([]byte(`{"success":true,"data":1000000}`))
 	}))
 	defer upstream.Close()
 
@@ -886,7 +886,7 @@ func TestReadonlyPricingReturnsModelPriceRows(t *testing.T) {
 		"ModelPrice":      `{"gpt-5.5":{"input_price":0.00000065,"output_price":0.0000039,"cache_read_price":0.000001}}`,
 		"ModelRatio":      `{"legacy-model":0.5}`,
 		"CompletionRatio": `{"legacy-model":2}`,
-		"QuotaPerUnit":    `500000`,
+		"QuotaPerUnit":    `10000`,
 	}})
 	req := httptest.NewRequest(http.MethodGet, "/api/pricing", nil)
 	rec := httptest.NewRecorder()
@@ -903,8 +903,8 @@ func TestReadonlyPricingReturnsModelPriceRows(t *testing.T) {
 		`"output_price":3.9`,
 		`"cache_read_price":1`,
 		`"model":"legacy-model"`,
-		`"input_price":1`,
-		`"output_price":2`,
+		`"input_price":50`,
+		`"output_price":100`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("pricing response missing %q: %s", want, body)
@@ -1950,8 +1950,8 @@ func TestAdminHTTPSummaryCountsOnlyPaidPaymentOrders(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	billingClient := &adminHTTPBillingClient{
 		paymentOrders: []*billingv1.PaymentOrder{
-			{TradeNo: "PAY-PAID", Status: "paid", AssetAmount: 500000, MoneyCents: 10000},
-			{TradeNo: "PAY-PENDING", Status: "pending", AssetAmount: 999999, MoneyCents: 20000},
+			{TradeNo: "PAY-PAID", Status: "paid", AssetAmount: 10000000, MoneyCents: 10000},
+			{TradeNo: "PAY-PENDING", Status: "pending", AssetAmount: 20000000, MoneyCents: 20000},
 		},
 		paymentTotal: 2,
 		reconRuns: []*billingv1.ReconciliationRun{

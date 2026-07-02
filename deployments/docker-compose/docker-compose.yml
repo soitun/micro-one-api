@@ -53,6 +53,7 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       - BILLING_GRPC_ENDPOINT=billing-service:9004
+      - RECHARGE_AMOUNT_MULTIPLIER=${RECHARGE_AMOUNT_MULTIPLIER:-10}
       - INITIAL_ADMIN_USERNAME=${INITIAL_ADMIN_USERNAME:-}
       - INITIAL_ADMIN_EMAIL=${INITIAL_ADMIN_EMAIL:-}
       - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD:-}
@@ -167,6 +168,7 @@ services:
       dockerfile: deployments/docker/Dockerfile
       args:
         SERVICE_NAME: admin-api
+        VITE_RECHARGE_AMOUNT_MULTIPLIER: ${RECHARGE_AMOUNT_MULTIPLIER:-10}
     container_name: admin-api
     environment:
       - CONF_PATH=/configs/admin-api.yaml

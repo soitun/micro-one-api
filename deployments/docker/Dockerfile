@@ -25,6 +25,9 @@ RUN npm ci --no-audit --no-fund
 
 COPY web/ ./
 
+ARG VITE_RECHARGE_AMOUNT_MULTIPLIER=10
+ENV VITE_RECHARGE_AMOUNT_MULTIPLIER=${VITE_RECHARGE_AMOUNT_MULTIPLIER}
+
 RUN npm run build
 
 # ---------------------------------------------------------------------------
