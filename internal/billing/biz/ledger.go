@@ -3,10 +3,11 @@ package biz
 import "time"
 
 const (
-	LedgerTypeConsume  = "consume"
-	LedgerTypeRecharge = "recharge"
-	LedgerTypeRefund   = "refund"
-	LedgerTypeRedeem   = "redeem"
+	LedgerTypeConsume      = "consume"
+	LedgerTypeRecharge     = "recharge"
+	LedgerTypeRefund       = "refund"
+	LedgerTypeRedeem       = "redeem"
+	LedgerTypeSubscription = "subscription"
 )
 
 type Ledger struct {

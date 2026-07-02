@@ -488,6 +488,8 @@ CREATE TABLE IF NOT EXISTS subscription_groups (
   monthly_limit_usd NUMERIC(12,4) DEFAULT NULL,
   rate_multiplier NUMERIC(4,2) NOT NULL DEFAULT 1.0,
   status INTEGER NOT NULL DEFAULT 1,
+  price_quota BIGINT NOT NULL DEFAULT 0,
+  duration_days INTEGER NOT NULL DEFAULT 0,
   created_at BIGINT NOT NULL DEFAULT 0,
   updated_at BIGINT NOT NULL DEFAULT 0
 );

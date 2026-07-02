@@ -270,6 +270,20 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandleFunc("/api/v1/subscriptions/progress", func(w http.ResponseWriter, r *http.Request) {
 		handleCurrentSubscriptionProgress(w, r, svc)
 	})
+	// User-facing self-purchase: the buyer is resolved from the bearer token
+	// inside the handlers, so these are intentionally not behind adminAuth.
+	srv.HandleFunc("/api/v1/subscriptions/groups", func(w http.ResponseWriter, r *http.Request) {
+		handlePurchasableSubscriptionGroups(w, r, svc)
+	})
+	srv.HandleFunc("/api/v1/subscriptions/purchase", func(w http.ResponseWriter, r *http.Request) {
+		handlePurchaseSubscription(w, r, svc)
+	})
+	srv.HandleFunc("/api/v1/subscriptions/purchase/payment", func(w http.ResponseWriter, r *http.Request) {
+		handlePurchaseSubscriptionWithPayment(w, r, svc)
+	})
+	srv.HandleFunc("/api/v1/subscriptions/purchase/complete", func(w http.ResponseWriter, r *http.Request) {
+		handleCompleteSubscriptionPurchase(w, r, svc)
+	})
 	srv.HandleFunc("/api/v1/admin/subscriptions", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleUserSubscriptions(w, r, svc)
 	}))

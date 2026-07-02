@@ -30,6 +30,8 @@ func setupSubscriptionTestDB(t *testing.T) *Repository {
 			monthly_limit_usd REAL DEFAULT NULL,
 			rate_multiplier REAL NOT NULL DEFAULT 1.0,
 			status INTEGER NOT NULL DEFAULT 1,
+			price_quota INTEGER NOT NULL DEFAULT 0,
+			duration_days INTEGER NOT NULL DEFAULT 0,
 			created_at INTEGER NOT NULL DEFAULT 0,
 			updated_at INTEGER NOT NULL DEFAULT 0
 		)

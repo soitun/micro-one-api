@@ -37,6 +37,7 @@ type PaymentOrder struct {
 	ProviderPayload  string
 	PayURL           string
 	AssetIssueStatus string
+	GroupID          int64 // Subscription group ID for auto-assignment after payment
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	PaidAt           *time.Time
@@ -49,6 +50,7 @@ type CreatePaymentOrderRequest struct {
 	AssetAmount int64
 	MoneyCents  int64
 	Currency    string
+	GroupID     int64 // Optional: subscription group ID for auto-assignment
 }
 
 type ListPaymentOrdersRequest struct {
@@ -108,14 +110,26 @@ type PaymentUsecase struct {
 	repo     PaymentRepo
 	provider PaymentProvider
 	issuer   PaymentAssetIssuer
+	assigner SubscriptionAssigner // Optional: assigns subscription after payment
 }
 
 type PaymentAssetIssuer interface {
 	IssueQuota(ctx context.Context, order *PaymentOrder) error
 }
 
+// SubscriptionAssigner is an optional interface that payment issuers can
+// implement to automatically assign subscriptions after payment.
+type SubscriptionAssigner interface {
+	AssignSubscriptionAfterPayment(ctx context.Context, order *PaymentOrder) error
+}
+
 func NewPaymentUsecase(repo PaymentRepo, provider PaymentProvider, issuer PaymentAssetIssuer) *PaymentUsecase {
 	return &PaymentUsecase{repo: repo, provider: provider, issuer: issuer}
+}
+
+// NewPaymentUsecaseWithAssigner creates a PaymentUsecase with subscription assignment support.
+func NewPaymentUsecaseWithAssigner(repo PaymentRepo, provider PaymentProvider, issuer PaymentAssetIssuer, assigner SubscriptionAssigner) *PaymentUsecase {
+	return &PaymentUsecase{repo: repo, provider: provider, issuer: issuer, assigner: assigner}
 }
 
 func (uc *PaymentUsecase) CreateOrder(ctx context.Context, req CreatePaymentOrderRequest) (*PaymentOrder, error) {
@@ -136,6 +150,7 @@ func (uc *PaymentUsecase) CreateOrder(ctx context.Context, req CreatePaymentOrde
 		Currency:         currency,
 		Status:           PaymentOrderStatusPending,
 		AssetIssueStatus: PaymentAssetIssueStatusPending,
+		GroupID:          req.GroupID,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
@@ -180,7 +195,16 @@ func (uc *PaymentUsecase) MarkOrderPaid(ctx context.Context, tradeNo, providerTr
 		return nil, errors.New("trade_no is required")
 	}
 	order, _, err := uc.repo.MarkOrderPaid(ctx, tradeNo, providerTradeNo, func(order *PaymentOrder) error {
-		return uc.issuer.IssueQuota(ctx, order)
+		if err := uc.issuer.IssueQuota(ctx, order); err != nil {
+			return err
+		}
+		// If order has a group_id, assign subscription after payment
+		if order.GroupID > 0 && uc.assigner != nil {
+			if err := uc.assigner.AssignSubscriptionAfterPayment(ctx, order); err != nil {
+				return fmt.Errorf("assign subscription after payment: %w", err)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

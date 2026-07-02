@@ -61,6 +61,35 @@ func (s *SessionStore) Pop(id string, now time.Time) (*Session, bool) {
 	return session, true
 }
 
+func (s *SessionStore) Get(id string, now time.Time) (*Session, bool) {
+	if s == nil || id == "" {
+		return nil, false
+	}
+	s.mu.RLock()
+	session, ok := s.sessions[id]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if now.Sub(session.CreatedAt) > s.ttl {
+		s.Delete(id)
+		return nil, false
+	}
+	return session, true
+}
+
+func (s *SessionStore) Delete(id string) {
+	if s == nil || id == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, id)
+}
+
 func (s *SessionStore) Cleanup(now time.Time) {
 	if s == nil {
 		return

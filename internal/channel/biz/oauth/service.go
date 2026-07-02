@@ -196,7 +196,7 @@ func (s *Service) Exchange(ctx context.Context, platform string, req ExchangeReq
 		return nil, fmt.Errorf("oauth service not configured")
 	}
 	platform = normalizePlatform(platform)
-	session, ok := s.store.Pop(req.SessionID, s.now())
+	session, ok := s.store.Get(req.SessionID, s.now())
 	if !ok || session.Platform != platform || session.State != req.State {
 		return nil, ErrInvalidSession
 	}
@@ -213,6 +213,7 @@ func (s *Service) Exchange(ctx context.Context, platform string, req ExchangeReq
 	if err := s.uc.CreateSubscriptionAccount(ctx, account); err != nil {
 		return nil, err
 	}
+	s.store.Delete(req.SessionID)
 	return &ExchangeResult{
 		AccountID: account.ID,
 		Platform:  platform,

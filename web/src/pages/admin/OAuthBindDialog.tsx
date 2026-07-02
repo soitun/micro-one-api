@@ -28,12 +28,21 @@ interface AuthURLResult {
 }
 
 // Extract the authorization code from a raw code or a full callback URL such as
-// `http://localhost/callback?code=xxx&state=yyy`. Mirrors sub2api's OAuth flow.
+// `http://localhost:1455/auth/callback?code=xxx&state=yyy`. Mirrors sub2api's OAuth flow.
+// Handles JWT-like codes containing dots (Claude) and regular codes (Codex).
 function extractCode(input: string): string {
   const trimmed = input.trim();
   if (trimmed.includes('code=')) {
-    const match = trimmed.match(/[?&]code=([^&\s]+)/);
-    if (match) return decodeURIComponent(match[1]);
+    // Use URL parsing for robustness: handles URL encoding correctly
+    try {
+      const url = new URL(trimmed.startsWith('http') ? trimmed : `http://unused/?${trimmed.split('?')[1] || ''}`);
+      const code = url.searchParams.get('code');
+      if (code) return code;
+    } catch {
+      // Fallback: parse manually if URL parsing fails
+      const match = trimmed.match(/[?&]code=([^&]+)/);
+      if (match) return match[1];
+    }
   }
   return trimmed;
 }
@@ -185,6 +194,14 @@ export function OAuthBindDialog({ onBound }: OAuthBindDialogProps) {
                 <p className="text-xs text-muted-foreground">
                   在浏览器完成授权后，把回调地址(含 <code>?code=...</code>)或授权码粘贴到下方。
                 </p>
+                {platform === 'codex' ? (
+                  <p className="rounded-md bg-amber-50 px-2.5 py-2 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+                    ⚠️ Codex 授权完成后浏览器会跳转到 <code>http://localhost:1455/auth/callback?...</code>，
+                    该页面<strong>无法打开(显示“无法访问/连接被拒绝”)属于正常现象</strong> —— 这个地址是
+                    Codex CLI 的本地回调，本系统并不在该端口监听。请直接<strong>从浏览器地址栏复制整段 URL</strong>
+                    (包含 <code>code=</code>)粘贴到下方即可。
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-2">

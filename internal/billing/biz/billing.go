@@ -110,17 +110,17 @@ func (uc *BillingUsecase) ReserveQuota(ctx context.Context, userID, requestID st
 	expiredAt := now.Add(5 * time.Minute)
 
 	reservation := &Reservation{
-		ReservationID: reservationID,
-		UserID:        userID,
-		RequestID:     requestID,
-		Amount:        cost,
-		Status:        ReservationStatusReserved,
-		Model:                model,
+		ReservationID:         reservationID,
+		UserID:                userID,
+		RequestID:             requestID,
+		Amount:                cost,
+		Status:                ReservationStatusReserved,
+		Model:                 model,
 		ChannelID:             channelID,
 		SubscriptionAccountID: strconv.FormatInt(subscriptionAccountID, 10),
 		CreatedAt:             now,
-		UpdatedAt:     now,
-		ExpiredAt:     expiredAt,
+		UpdatedAt:             now,
+		ExpiredAt:             expiredAt,
 	}
 
 	if err := uc.reservationRepo.CreateReservation(ctx, reservation); err != nil {
@@ -202,24 +202,24 @@ func (uc *BillingUsecase) CommitQuotaWithUsage(ctx context.Context, reservationI
 		}
 
 		ledger := &Ledger{
-			UserID:           reservation.UserID,
-			Amount:           -actualCost,
-			UpstreamCost:     uc.calculateUpstreamCostWithUsage(ctx, parseInt64Default(reservation.ChannelID, 0), reservation.Model, actualTokens, usage),
-			BalanceAfter:     balanceAfter,
-			Type:             LedgerTypeConsume,
-			ReferenceID:      reservationID,
-			Remark:           fmt.Sprintf("model=%s, tokens=%d", reservation.Model, actualTokens),
-			TokenName:        usage.TokenName,
-			ModelName:        reservation.Model,
-			Quota:            actualTokens,
-			PromptTokens:     usage.PromptTokens,
-			CompletionTokens: usage.CompletionTokens,
-			CacheReadTokens:  usage.CacheReadTokens,
-			ChannelID:        parseInt64Default(reservation.ChannelID, 0),
+			UserID:                reservation.UserID,
+			Amount:                -actualCost,
+			UpstreamCost:          uc.calculateUpstreamCostWithUsage(ctx, parseInt64Default(reservation.ChannelID, 0), reservation.Model, actualTokens, usage),
+			BalanceAfter:          balanceAfter,
+			Type:                  LedgerTypeConsume,
+			ReferenceID:           reservationID,
+			Remark:                fmt.Sprintf("model=%s, tokens=%d", reservation.Model, actualTokens),
+			TokenName:             usage.TokenName,
+			ModelName:             reservation.Model,
+			Quota:                 actualTokens,
+			PromptTokens:          usage.PromptTokens,
+			CompletionTokens:      usage.CompletionTokens,
+			CacheReadTokens:       usage.CacheReadTokens,
+			ChannelID:             parseInt64Default(reservation.ChannelID, 0),
 			SubscriptionAccountID: resolveSubscriptionAccountID(usage.SubscriptionAccountID, reservation.SubscriptionAccountID),
-			ElapsedTime:      usage.ElapsedTime,
-			IsStream:         usage.IsStream,
-			Endpoint:         usage.Endpoint,
+			ElapsedTime:           usage.ElapsedTime,
+			IsStream:              usage.IsStream,
+			Endpoint:              usage.Endpoint,
 		}
 
 		if err := uc.ledgerRepo.CreateLedger(ctx, ledger); err != nil {
@@ -335,6 +335,39 @@ func (uc *BillingUsecase) TopUpQuota(ctx context.Context, userID, operatorID str
 		Remark:       fmt.Sprintf("operator=%s, remark=%s", operatorID, remark),
 	}
 
+	if err := uc.ledgerRepo.CreateLedger(ctx, ledger); err != nil {
+		return 0, fmt.Errorf("create ledger: %w", err)
+	}
+
+	return newQuota, nil
+}
+
+// PurchaseSubscription atomically deducts priceQuota from the user's wallet and
+// records a "subscription" ledger entry. UpdateQuota rejects the operation with
+// ErrInsufficientQuota when the balance would go negative, so callers never need
+// a separate balance pre-check. The subscription row itself is created by the
+// caller (admin-api); on failure there it compensates via TopUpQuota.
+func (uc *BillingUsecase) PurchaseSubscription(ctx context.Context, userID string, priceQuota, groupID int64, remark string) (int64, error) {
+	if priceQuota <= 0 {
+		return 0, fmt.Errorf("price quota must be positive")
+	}
+	if _, err := uc.accountRepo.GetAccountSnapshot(ctx, userID); err != nil {
+		return 0, fmt.Errorf("get account snapshot: %w", err)
+	}
+
+	newQuota, err := uc.accountRepo.UpdateQuota(ctx, userID, -priceQuota, LedgerTypeSubscription)
+	if err != nil {
+		return 0, err
+	}
+
+	ledger := &Ledger{
+		UserID:       userID,
+		Amount:       -priceQuota,
+		BalanceAfter: newQuota,
+		Type:         LedgerTypeSubscription,
+		ReferenceID:  strconv.FormatInt(groupID, 10),
+		Remark:       remark,
+	}
 	if err := uc.ledgerRepo.CreateLedger(ctx, ledger); err != nil {
 		return 0, fmt.Errorf("create ledger: %w", err)
 	}

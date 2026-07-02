@@ -20,6 +20,8 @@ type groupModel struct {
 	MonthlyLimitUSD  *float64 `gorm:"column:monthly_limit_usd"`
 	RateMultiplier   float64  `gorm:"column:rate_multiplier"`
 	Status           int32    `gorm:"column:status"`
+	PriceQuota       int64    `gorm:"column:price_quota"`
+	DurationDays     int32    `gorm:"column:duration_days"`
 	CreatedAt        int64    `gorm:"column:created_at"`
 	UpdatedAt        int64    `gorm:"column:updated_at"`
 }
@@ -93,6 +95,8 @@ func (r *Repository) updateGroupDB(ctx context.Context, group *biz.SubscriptionG
 		"monthly_limit_usd": model.MonthlyLimitUSD,
 		"rate_multiplier":   model.RateMultiplier,
 		"status":            model.Status,
+		"price_quota":       model.PriceQuota,
+		"duration_days":     model.DurationDays,
 		"created_at":        model.CreatedAt,
 		"updated_at":        model.UpdatedAt,
 	}).Error
@@ -154,6 +158,8 @@ func groupToModel(group *biz.SubscriptionGroup) groupModel {
 		MonthlyLimitUSD:  group.MonthlyLimitUSD,
 		RateMultiplier:   group.RateMultiplier,
 		Status:           group.Status,
+		PriceQuota:       group.PriceQuota,
+		DurationDays:     group.DurationDays,
 		CreatedAt:        group.CreatedAt,
 		UpdatedAt:        group.UpdatedAt,
 	}
@@ -174,6 +180,8 @@ func groupFromModel(model *groupModel) biz.SubscriptionGroup {
 		MonthlyLimitUSD:  model.MonthlyLimitUSD,
 		RateMultiplier:   model.RateMultiplier,
 		Status:           model.Status,
+		PriceQuota:       model.PriceQuota,
+		DurationDays:     model.DurationDays,
 		CreatedAt:        model.CreatedAt,
 		UpdatedAt:        model.UpdatedAt,
 	}

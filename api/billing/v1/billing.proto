@@ -13,6 +13,7 @@ service BillingService {
   rpc ReleaseQuota(ReleaseQuotaRequest) returns (ReleaseQuotaResponse);
   rpc GetAccountSnapshot(GetAccountSnapshotRequest) returns (GetAccountSnapshotResponse);
   rpc TopUpQuota(TopUpQuotaRequest) returns (TopUpQuotaResponse);
+  rpc PurchaseSubscription(PurchaseSubscriptionRequest) returns (PurchaseSubscriptionResponse);
   rpc CreateRedeemCode(CreateRedeemCodeRequest) returns (CreateRedeemCodeResponse);
   rpc CreateRedeemCodesBatch(CreateRedeemCodesBatchRequest) returns (CreateRedeemCodesBatchResponse);
   rpc RedeemCode(RedeemCodeRequest) returns (RedeemCodeResponse);
@@ -115,6 +116,23 @@ message TopUpQuotaRequest {
 }
 
 message TopUpQuotaResponse {
+  bool success = 1;
+  int64 new_quota = 2;
+  string error_message = 3;
+}
+
+// PurchaseSubscription atomically deducts price_quota from the user's wallet and
+// records a "subscription" ledger entry. It does NOT create the subscription row
+// itself — the caller (admin-api) creates the subscription and, on failure,
+// compensates by topping the quota back up.
+message PurchaseSubscriptionRequest {
+  string user_id = 1;
+  int64 price_quota = 2;
+  int64 group_id = 3;
+  string remark = 4;
+}
+
+message PurchaseSubscriptionResponse {
   bool success = 1;
   int64 new_quota = 2;
   string error_message = 3;
@@ -242,9 +260,10 @@ message PaymentOrder {
   string provider_payload = 11;
   string pay_url = 12;
   string asset_issue_status = 13;
-  google.protobuf.Timestamp paid_at = 14;
-  google.protobuf.Timestamp created_at = 15;
-  google.protobuf.Timestamp updated_at = 16;
+  int64 group_id = 14;  // Subscription group ID for auto-assignment after payment
+  google.protobuf.Timestamp paid_at = 15;
+  google.protobuf.Timestamp created_at = 16;
+  google.protobuf.Timestamp updated_at = 17;
 }
 
 message CreatePaymentOrderRequest {
@@ -254,6 +273,7 @@ message CreatePaymentOrderRequest {
   int64 asset_amount = 4;
   int64 money_cents = 5;
   string currency = 6;
+  int64 group_id = 7;  // Optional: subscription group ID for auto-assignment after payment
 }
 
 message GetPaymentOrderByTradeNoRequest {

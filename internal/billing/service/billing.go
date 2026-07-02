@@ -141,6 +141,21 @@ func (s *BillingService) TopUpQuota(ctx context.Context, req *billingv1.TopUpQuo
 	}, nil
 }
 
+func (s *BillingService) PurchaseSubscription(ctx context.Context, req *billingv1.PurchaseSubscriptionRequest) (*billingv1.PurchaseSubscriptionResponse, error) {
+	newQuota, err := s.uc.PurchaseSubscription(ctx, req.UserId, req.PriceQuota, req.GroupId, req.Remark)
+	if err != nil {
+		return &billingv1.PurchaseSubscriptionResponse{
+			Success:      false,
+			ErrorMessage: err.Error(),
+		}, nil
+	}
+
+	return &billingv1.PurchaseSubscriptionResponse{
+		Success:  true,
+		NewQuota: newQuota,
+	}, nil
+}
+
 func (s *BillingService) CreateRedeemCode(ctx context.Context, req *billingv1.CreateRedeemCodeRequest) (*billingv1.CreateRedeemCodeResponse, error) {
 	err := s.uc.CreateRedeemCode(ctx, req.Code, req.Name, req.Amount, req.Count, req.OperatorId)
 	if err != nil {
@@ -330,25 +345,25 @@ func (s *BillingService) ListLedger(ctx context.Context, req *billingv1.ListLedg
 	entries := make([]*commonv1.LedgerEntry, len(ledgers))
 	for i, ledger := range ledgers {
 		entries[i] = &commonv1.LedgerEntry{
-			Id:               fmt.Sprintf("%d", ledger.ID),
-			UserId:           ledger.UserID,
-			Amount:           ledger.Amount,
-			BalanceAfter:     ledger.BalanceAfter,
-			Type:             ledger.Type,
-			ReferenceId:      ledger.ReferenceID,
-			Remark:           ledger.Remark,
-			CreatedAt:        toProtoTimestamp(ledger.CreatedAt),
-			TokenName:        ledger.TokenName,
-			ModelName:        ledger.ModelName,
-			Quota:            ledger.Quota,
-			PromptTokens:     ledger.PromptTokens,
-			CompletionTokens: ledger.CompletionTokens,
-			CacheReadTokens:  ledger.CacheReadTokens,
-			ChannelId:            ledger.ChannelID,
+			Id:                    fmt.Sprintf("%d", ledger.ID),
+			UserId:                ledger.UserID,
+			Amount:                ledger.Amount,
+			BalanceAfter:          ledger.BalanceAfter,
+			Type:                  ledger.Type,
+			ReferenceId:           ledger.ReferenceID,
+			Remark:                ledger.Remark,
+			CreatedAt:             toProtoTimestamp(ledger.CreatedAt),
+			TokenName:             ledger.TokenName,
+			ModelName:             ledger.ModelName,
+			Quota:                 ledger.Quota,
+			PromptTokens:          ledger.PromptTokens,
+			CompletionTokens:      ledger.CompletionTokens,
+			CacheReadTokens:       ledger.CacheReadTokens,
+			ChannelId:             ledger.ChannelID,
 			SubscriptionAccountId: ledger.SubscriptionAccountID,
-			ElapsedTime:          ledger.ElapsedTime,
-			IsStream:             ledger.IsStream,
-			Endpoint:             ledger.Endpoint,
+			ElapsedTime:           ledger.ElapsedTime,
+			IsStream:              ledger.IsStream,
+			Endpoint:              ledger.Endpoint,
 		}
 	}
 
@@ -417,13 +432,13 @@ func (s *BillingService) AggregateLedgerByDate(ctx context.Context, req *billing
 
 func (s *BillingService) AggregateUsage(ctx context.Context, req *billingv1.AggregateUsageRequest) (*billingv1.AggregateUsageResponse, error) {
 	filter := biz.UsageFilter{
-		GroupBy:              req.GetGroupBy(),
-		UserID:               req.GetUserId(),
-		ChannelID:            req.GetChannelId(),
+		GroupBy:               req.GetGroupBy(),
+		UserID:                req.GetUserId(),
+		ChannelID:             req.GetChannelId(),
 		SubscriptionAccountID: req.GetSubscriptionAccountId(),
-		Model:                req.GetModel(),
-		Type:                 req.GetType(),
-		Limit:                int(req.GetLimit()),
+		Model:                 req.GetModel(),
+		Type:                  req.GetType(),
+		Limit:                 int(req.GetLimit()),
 	}
 	if req.GetStartTime().IsValid() {
 		filter.StartTime = req.GetStartTime().AsTime()
@@ -440,22 +455,22 @@ func (s *BillingService) AggregateUsage(ctx context.Context, req *billingv1.Aggr
 	bucketsProto := make([]*billingv1.UsageBucket, len(buckets))
 	for i, b := range buckets {
 		bucketsProto[i] = &billingv1.UsageBucket{
-			UserId:               b.UserID,
-			ChannelId:            b.ChannelID,
+			UserId:                b.UserID,
+			ChannelId:             b.ChannelID,
 			SubscriptionAccountId: b.SubscriptionAccountID,
-			Model:                b.Model,
-			TokenName:        b.TokenName,
-			Type:             b.Type,
-			Day:              b.Day,
-			Hour:             b.Hour,
-			Quota:            b.Quota,
-			UpstreamCost:     b.UpstreamCost,
-			GrossProfit:      b.GrossProfit,
-			PromptTokens:     b.PromptTokens,
-			CompletionTokens: b.CompletionTokens,
-			CacheReadTokens:  b.CacheReadTokens,
-			Count:            b.Count,
-			ElapsedTime:      b.ElapsedTime,
+			Model:                 b.Model,
+			TokenName:             b.TokenName,
+			Type:                  b.Type,
+			Day:                   b.Day,
+			Hour:                  b.Hour,
+			Quota:                 b.Quota,
+			UpstreamCost:          b.UpstreamCost,
+			GrossProfit:           b.GrossProfit,
+			PromptTokens:          b.PromptTokens,
+			CompletionTokens:      b.CompletionTokens,
+			CacheReadTokens:       b.CacheReadTokens,
+			Count:                 b.Count,
+			ElapsedTime:           b.ElapsedTime,
 		}
 	}
 
@@ -497,6 +512,7 @@ func (s *BillingService) CreatePaymentOrder(ctx context.Context, req *billingv1.
 		AssetAmount: req.GetAssetAmount(),
 		MoneyCents:  req.GetMoneyCents(),
 		Currency:    req.GetCurrency(),
+		GroupID:     req.GetGroupId(),
 	})
 	if err != nil {
 		return &billingv1.PaymentOrderResponse{Success: false, ErrorMessage: err.Error()}, nil
@@ -600,6 +616,7 @@ func toProtoPaymentOrder(order *biz.PaymentOrder) *billingv1.PaymentOrder {
 		ProviderPayload:  order.ProviderPayload,
 		PayUrl:           order.PayURL,
 		AssetIssueStatus: order.AssetIssueStatus,
+		GroupId:          order.GroupID,
 		PaidAt:           toProtoTimestampPtr(order.PaidAt),
 		CreatedAt:        toProtoTimestamp(order.CreatedAt),
 		UpdatedAt:        toProtoTimestamp(order.UpdatedAt),

@@ -25,6 +25,63 @@ func handleCurrentSubscriptionProgress(w http.ResponseWriter, r *http.Request, s
 	writeSubscriptionResponse(w, progress, err)
 }
 
+// handlePurchasableSubscriptionGroups lists the subscription groups a user may
+// buy for themselves. Any authenticated user may read the catalogue.
+func handlePurchasableSubscriptionGroups(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	if _, ok := authenticatedUserID(w, r, svc); !ok {
+		return
+	}
+	groups, err := svc.ListPurchasableSubscriptionGroups(r.Context())
+	writeSubscriptionResponse(w, groups, err)
+}
+
+// handlePurchaseSubscription lets the authenticated user buy a subscription with
+// their wallet quota. The buyer is taken from the bearer token, never from the
+// request body, so a user cannot purchase on someone else's balance.
+func handlePurchaseSubscription(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	userID, ok := authenticatedUserID(w, r, svc)
+	if !ok {
+		return
+	}
+	var req struct {
+		GroupID int64 `json:"group_id"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.GroupID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "group_id is required", nil))
+		return
+	}
+	sub, err := svc.PurchaseSubscription(r.Context(), userID, req.GroupID)
+	writeSubscriptionResponse(w, sub, err)
+}
+
+// authenticatedUserID resolves the bearer token to a user id, writing a 401 and
+// returning ok=false when the token is missing or invalid.
+func authenticatedUserID(w http.ResponseWriter, r *http.Request, svc *service.AdminService) (int64, bool) {
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing or invalid authorization header"})
+		return 0, false
+	}
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	userID, err := svc.ResolveUserIDFromToken(r.Context(), token)
+	if err != nil || userID <= 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+		return 0, false
+	}
+	return userID, true
+}
+
 func handleUserSubscriptions(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -156,6 +213,79 @@ func writeSubscriptionResponse(w http.ResponseWriter, data interface{}, err erro
 	writeJSON(w, http.StatusOK, apiResponse(true, "", normalizeSubscriptionResponse(data)))
 }
 
+// handlePurchaseSubscriptionWithPayment lets an authenticated user buy a subscription
+// with their wallet quota or creates a payment order if balance is insufficient.
+func handlePurchaseSubscriptionWithPayment(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	userID, ok := authenticatedUserID(w, r, svc)
+	if !ok {
+		return
+	}
+	var req struct {
+		GroupID    int64  `json:"group_id"`
+		Channel    string `json:"channel"`     // Optional: payment channel (default: alipay)
+		MoneyCents int64  `json:"money_cents"` // Optional: amount in cents (default: derived from price_quota)
+		Currency   string `json:"currency"`    // Optional: currency code (default: CNY)
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.GroupID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "group_id is required", nil))
+		return
+	}
+
+	sub, paymentOrder, err := svc.CreateSubscriptionPaymentOrder(r.Context(), userID, req.GroupID, req.Channel, req.MoneyCents, req.Currency)
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse(false, err.Error(), nil))
+		return
+	}
+
+	// If subscription was created directly (balance sufficient)
+	if sub != nil {
+		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{
+			"subscription": subscriptionResponse(sub),
+			"payment":      nil,
+		}))
+		return
+	}
+
+	// If payment order was created (balance insufficient)
+	writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{
+		"subscription": nil,
+		"payment":      paymentOrder,
+	}))
+}
+
+// handleCompleteSubscriptionPurchase completes a subscription purchase after payment.
+// It is called after the user completes the payment to assign the subscription.
+func handleCompleteSubscriptionPurchase(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	userID, ok := authenticatedUserID(w, r, svc)
+	if !ok {
+		return
+	}
+	var req struct {
+		TradeNo string `json:"trade_no"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.TradeNo == "" {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "trade_no is required", nil))
+		return
+	}
+
+	sub, err := svc.CompleteSubscriptionPurchase(r.Context(), userID, req.TradeNo)
+	writeSubscriptionResponse(w, sub, err)
+}
+
 func normalizeSubscriptionResponse(data interface{}) interface{} {
 	switch v := data.(type) {
 	case *subscriptionbiz.UserSubscription:
@@ -233,6 +363,8 @@ type subscriptionGroupDTO struct {
 	MonthlyLimitUSD  *float64 `json:"monthly_limit_usd"`
 	RateMultiplier   float64  `json:"rate_multiplier"`
 	Status           int32    `json:"status"`
+	PriceQuota       int64    `json:"price_quota"`
+	DurationDays     int32    `json:"duration_days"`
 	CreatedAt        int64    `json:"created_at"`
 	UpdatedAt        int64    `json:"updated_at"`
 }
@@ -252,6 +384,8 @@ func groupResponse(group *subscriptionbiz.SubscriptionGroup) subscriptionGroupDT
 		MonthlyLimitUSD:  group.MonthlyLimitUSD,
 		RateMultiplier:   group.RateMultiplier,
 		Status:           group.Status,
+		PriceQuota:       group.PriceQuota,
+		DurationDays:     group.DurationDays,
 		CreatedAt:        group.CreatedAt,
 		UpdatedAt:        group.UpdatedAt,
 	}
