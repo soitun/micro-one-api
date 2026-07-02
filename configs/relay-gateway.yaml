@@ -58,4 +58,12 @@ hybrid_adaptor:
 # Disabled by default; only effective when hybrid_adaptor is enabled. The
 # binding TTL reuses openai_ws.sticky_ttl (default 1h).
 session_sticky:
-  enabled: false
+  enabled: true
+
+# subscription gates the user-subscription quota-enforcement middleware at the
+# relay entry point: when a user exceeds their daily/weekly/monthly USD limit
+# the request is rejected with 429 + Retry-After. Fail-open — users without an
+# active subscription (or when the check errors) pass through unaffected.
+# Requires relay-gateway to reach the subscription DB (SQL_DSN / SUBSCRIPTION_SQL_DSN).
+subscription:
+  enabled: true
