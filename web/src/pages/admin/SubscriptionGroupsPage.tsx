@@ -43,6 +43,8 @@ interface SubscriptionGroup {
   monthly_limit_usd: number | null;
   rate_multiplier: number;
   status: number;
+  price_quota: number;
+  duration_days: number;
   created_at: number;
   updated_at: number;
 }
@@ -59,6 +61,8 @@ interface GroupPayload {
   monthly_limit_usd: number | null;
   rate_multiplier: number;
   status: number;
+  price_quota: number;
+  duration_days: number;
 }
 
 // Keep in sync with the platforms accepted by the hybrid relay adaptor layer.
@@ -79,6 +83,8 @@ interface GroupDraft {
   monthlyLimit: string;
   rateMultiplier: string;
   status: string;
+  price: string;
+  durationDays: string;
 }
 
 const emptyDraft: GroupDraft = {
@@ -91,6 +97,8 @@ const emptyDraft: GroupDraft = {
   monthlyLimit: '',
   rateMultiplier: '1',
   status: '1',
+  price: '0',
+  durationDays: '0',
 };
 
 function platformLabel(platform: string) {
@@ -99,6 +107,16 @@ function platformLabel(platform: string) {
 
 function formatLimit(value: number | null) {
   return value == null ? '不限' : `$${value}`;
+}
+
+function formatPrice(value: number) {
+  return `$${Number(value || 0).toFixed(2)}`;
+}
+
+function parsePrice(value: string) {
+  const parsed = Number(value.trim() || '0');
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.trunc(parsed);
 }
 
 function toDraft(group: SubscriptionGroup): GroupDraft {
@@ -113,6 +131,8 @@ function toDraft(group: SubscriptionGroup): GroupDraft {
     monthlyLimit: group.monthly_limit_usd == null ? '' : String(group.monthly_limit_usd),
     rateMultiplier: String(group.rate_multiplier ?? 1),
     status: String(group.status ?? 1),
+    price: String(group.price_quota ?? 0),
+    durationDays: String(group.duration_days ?? 0),
   };
 }
 
@@ -136,6 +156,8 @@ function draftToPayload(draft: GroupDraft): GroupPayload {
     monthly_limit_usd: parseLimit(draft.monthlyLimit),
     rate_multiplier: Number(draft.rateMultiplier.trim() || '1'),
     status: parseInt(draft.status || '1', 10),
+    price_quota: parsePrice(draft.price),
+    duration_days: Math.max(0, Math.trunc(Number(draft.durationDays.trim() || '0'))),
   };
 }
 
@@ -235,7 +257,7 @@ export function AdminSubscriptionGroupsPage() {
       />
 
       {isLoading ? (
-        <TableSkeleton columns={['ID', '名称', '平台', '类型', '日限额', '周限额', '月限额', '倍率', '状态', '操作']} />
+        <TableSkeleton columns={['ID', '名称', '平台', '类型', '日限额', '周限额', '月限额', '倍率', '售价/有效期', '状态', '操作']} />
       ) : !groups || groups.length === 0 ? (
         <EmptyState title="暂无订阅分组" description="新建一个订阅分组以配置平台、配额限额与计费倍率。" />
       ) : visibleGroups.length === 0 ? (
@@ -257,6 +279,7 @@ export function AdminSubscriptionGroupsPage() {
                 <TableHead className="hidden xl:table-cell">周限额</TableHead>
                 <TableHead className="hidden xl:table-cell">月限额</TableHead>
                 <TableHead className="hidden md:table-cell">倍率</TableHead>
+                <TableHead className="hidden lg:table-cell">售价/有效期</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
@@ -275,6 +298,11 @@ export function AdminSubscriptionGroupsPage() {
                   <TableCell className="hidden xl:table-cell">{formatLimit(group.weekly_limit_usd)}</TableCell>
                   <TableCell className="hidden xl:table-cell">{formatLimit(group.monthly_limit_usd)}</TableCell>
                   <TableCell className="hidden md:table-cell">×{group.rate_multiplier}</TableCell>
+                  <TableCell className="hidden lg:table-cell">
+                    {group.price_quota > 0 && group.duration_days > 0
+                      ? `${formatPrice(group.price_quota)} / ${group.duration_days}天`
+                      : '不可购买'}
+                  </TableCell>
                   <TableCell>
                     <span
                       className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
@@ -355,7 +383,7 @@ function GroupDialog({ mode, open, onOpenChange, onSubmit, pending, draft }: Gro
       <DialogHeader>
         <DialogTitle>{mode === 'create' ? '新建订阅分组' : '编辑订阅分组'}</DialogTitle>
         <DialogDescription>
-          配置平台、订阅类型、日/周/月 USD 配额限额(留空表示不限)与计费倍率。
+          配置平台、订阅类型、日/周/月 USD 配额限额(留空表示不限)、计费倍率，以及用户自助购买的价格与有效期。
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-4 pt-2 sm:grid-cols-2">
@@ -438,6 +466,31 @@ function GroupDialog({ mode, open, onOpenChange, onSubmit, pending, draft }: Gro
             onChange={(e) => setForm({ ...form, rateMultiplier: e.target.value })}
           />
         </div>
+        <div className="space-y-2">
+          <Label htmlFor="grp-price">购买价格(USD)</Label>
+          <Input
+            id="grp-price"
+            type="number"
+            min="0"
+            value={form.price}
+            onChange={(e) => setForm({ ...form, price: e.target.value })}
+            placeholder="10"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="grp-duration">有效期(天)</Label>
+          <Input
+            id="grp-duration"
+            type="number"
+            min="0"
+            value={form.durationDays}
+            onChange={(e) => setForm({ ...form, durationDays: e.target.value })}
+            placeholder="30"
+          />
+        </div>
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          价格与有效期任一为 0 时，该分组仅供管理员分配、不在用户端出售。
+        </p>
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="grp-status">状态</Label>
           <select

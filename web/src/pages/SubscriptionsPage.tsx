@@ -3,7 +3,6 @@ import { CalendarClock, Check, Loader2, Wallet } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api';
-import { quotaToCurrencyUnits } from '@/lib/quota';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -33,6 +32,21 @@ interface PurchasableGroup {
   monthly_limit_usd: number | null;
   price_quota: number;
   duration_days: number;
+}
+
+interface PaymentOrder {
+  trade_no?: string;
+  pay_url?: string;
+}
+
+interface PurchaseResponse {
+  subscription?: SubscriptionProgressData | null;
+  payment?: PaymentOrder | null;
+}
+
+interface PurchaseVariables {
+  groupId: number;
+  paymentWindow: Window | null;
 }
 
 function formatUsd(value: number) {
@@ -68,21 +82,51 @@ export function SubscriptionsPage() {
   });
 
   const purchase = useMutation({
-    mutationFn: async (groupId: number) => {
-      const res = await apiClient.post('/v1/subscriptions/purchase', { group_id: groupId });
+    mutationFn: async ({ groupId }: PurchaseVariables) => {
+      const res = await apiClient.post('/v1/subscriptions/purchase/payment', {
+        group_id: groupId,
+        channel: 'alipay',
+      });
       if (res.data?.success === false) {
         throw new Error(res.data?.message || '购买失败');
       }
-      return res.data;
+      return (res.data?.data ?? {}) as PurchaseResponse;
     },
-    onSuccess: () => {
-      toast.success('订阅购买成功');
+    onSuccess: (data, variables) => {
+      if (data.subscription) {
+        variables.paymentWindow?.close();
+        toast.success('订阅购买成功');
+        setPendingPlan(null);
+        void queryClient.invalidateQueries({ queryKey: ['my-subscription-progress'] });
+        void queryClient.invalidateQueries({ queryKey: ['user-dashboard'] });
+        return;
+      }
+
+      const payURL = data.payment?.pay_url;
+      if (!payURL) {
+        variables.paymentWindow?.close();
+        toast.success('支付订单已创建，请在我的订单中查看状态');
+        setPendingPlan(null);
+        return;
+      }
+      if (payURL.startsWith('mock://')) {
+        variables.paymentWindow?.close();
+        toast.success(`测试支付订单已创建：${data.payment?.trade_no || '-'}`);
+        setPendingPlan(null);
+        return;
+      }
+      if (variables.paymentWindow) {
+        variables.paymentWindow.location.href = payURL;
+      } else {
+        window.open(payURL, '_blank', 'noopener,noreferrer');
+      }
       setPendingPlan(null);
-      void queryClient.invalidateQueries({ queryKey: ['my-subscription-progress'] });
-      // Wallet balance changed — refresh any dashboard/quota views too.
-      void queryClient.invalidateQueries({ queryKey: ['user-dashboard'] });
+      toast.success('支付订单已创建，请在新打开的页面完成支付');
     },
-    onError: (error: Error) => toast.error(error.message || '购买失败'),
+    onError: (error: Error, variables) => {
+      variables.paymentWindow?.close();
+      toast.error(error.message || '购买失败');
+    },
   });
 
   const hasActive = !!progress;
@@ -91,7 +135,7 @@ export function SubscriptionsPage() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold">我的订阅</h2>
-        <p className="mt-1 text-sm text-muted-foreground">查看当前订阅用量，或使用钱包余额购买订阅套餐。</p>
+        <p className="mt-1 text-sm text-muted-foreground">查看当前订阅用量，或选择套餐创建支付订单。</p>
       </div>
 
       {isLoading ? (
@@ -139,7 +183,7 @@ export function SubscriptionsPage() {
                 </CardHeader>
                 <CardContent className="flex flex-1 flex-col gap-3">
                   <div className="text-2xl font-bold">
-                    {formatUsd(quotaToCurrencyUnits(plan.price_quota))}
+                    {formatUsd(plan.price_quota)}
                   </div>
                   <ul className="space-y-1.5 text-sm text-muted-foreground">
                     <li className="flex items-center gap-2">
@@ -158,7 +202,7 @@ export function SubscriptionsPage() {
                     onClick={() => setPendingPlan(plan)}
                   >
                     <Wallet className="size-4" />
-                    {hasActive ? '已有生效订阅' : '使用余额购买'}
+                    {hasActive ? '已有生效订阅' : '购买订阅'}
                   </Button>
                 </CardContent>
               </Card>
@@ -172,8 +216,8 @@ export function SubscriptionsPage() {
           <DialogHeader>
             <DialogTitle>确认购买订阅</DialogTitle>
             <DialogDescription>
-              将从你的钱包余额扣除{' '}
-              <strong>{pendingPlan ? formatUsd(quotaToCurrencyUnits(pendingPlan.price_quota)) : ''}</strong>
+              将创建支付订单并跳转支付。套餐价格{' '}
+              <strong>{pendingPlan ? formatUsd(pendingPlan.price_quota) : ''}</strong>
               ，开通「{pendingPlan?.display_name || pendingPlan?.name}」订阅，有效期{' '}
               {pendingPlan?.duration_days} 天。
             </DialogDescription>
@@ -183,7 +227,16 @@ export function SubscriptionsPage() {
               取消
             </Button>
             <Button
-              onClick={() => pendingPlan && purchase.mutate(pendingPlan.id)}
+              onClick={() => {
+                if (!pendingPlan) return;
+                const paymentWindow = window.open('about:blank', '_blank');
+                if (paymentWindow) {
+                  paymentWindow.opener = null;
+                  paymentWindow.document.title = '正在前往支付';
+                  paymentWindow.document.body.innerHTML = '<p style="font-family: sans-serif; padding: 24px;">正在创建支付订单，请稍候...</p>';
+                }
+                purchase.mutate({ groupId: pendingPlan.id, paymentWindow });
+              }}
               disabled={purchase.isPending}
             >
               {purchase.isPending ? <Loader2 className="size-4 animate-spin" /> : <Wallet className="size-4" />}

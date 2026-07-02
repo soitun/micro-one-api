@@ -40,7 +40,7 @@ func handlePurchasableSubscriptionGroups(w http.ResponseWriter, r *http.Request,
 }
 
 // handlePurchaseSubscription lets the authenticated user buy a subscription with
-// their wallet quota. The buyer is taken from the bearer token, never from the
+// their wallet balance. The buyer is taken from the bearer token, never from the
 // request body, so a user cannot purchase on someone else's balance.
 func handlePurchaseSubscription(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	if r.Method != http.MethodPost {
@@ -213,8 +213,8 @@ func writeSubscriptionResponse(w http.ResponseWriter, data interface{}, err erro
 	writeJSON(w, http.StatusOK, apiResponse(true, "", normalizeSubscriptionResponse(data)))
 }
 
-// handlePurchaseSubscriptionWithPayment lets an authenticated user buy a subscription
-// with their wallet quota or creates a payment order if balance is insufficient.
+// handlePurchaseSubscriptionWithPayment lets an authenticated user create a
+// payment order for a subscription purchase.
 func handlePurchaseSubscriptionWithPayment(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -227,7 +227,7 @@ func handlePurchaseSubscriptionWithPayment(w http.ResponseWriter, r *http.Reques
 	var req struct {
 		GroupID    int64  `json:"group_id"`
 		Channel    string `json:"channel"`     // Optional: payment channel (default: alipay)
-		MoneyCents int64  `json:"money_cents"` // Optional: amount in cents (default: derived from price_quota)
+		MoneyCents int64  `json:"money_cents"` // Optional: amount in cents (default: price * 100)
 		Currency   string `json:"currency"`    // Optional: currency code (default: CNY)
 	}
 	if !decodeBody(w, r, &req) {

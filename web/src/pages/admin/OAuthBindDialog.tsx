@@ -27,24 +27,37 @@ interface AuthURLResult {
   expires_at: number;
 }
 
-// Extract the authorization code from a raw code or a full callback URL such as
-// `http://localhost:1455/auth/callback?code=xxx&state=yyy`. Mirrors sub2api's OAuth flow.
-// Handles JWT-like codes containing dots (Claude) and regular codes (Codex).
-function extractCode(input: string): string {
-  const trimmed = input.trim();
+interface OAuthCallbackInput {
+  code: string;
+  state?: string;
+}
+
+// Extract the authorization code/state from a raw code, a raw query string, or
+// a full callback URL such as `http://localhost:1455/auth/callback?code=xxx&state=yyy`.
+export function parseOAuthCallbackInput(input: string): OAuthCallbackInput {
+  const trimmed = input.trim().replaceAll('？', '?');
   if (trimmed.includes('code=')) {
-    // Use URL parsing for robustness: handles URL encoding correctly
     try {
-      const url = new URL(trimmed.startsWith('http') ? trimmed : `http://unused/?${trimmed.split('?')[1] || ''}`);
+      const rawURL = trimmed.startsWith('http')
+        ? trimmed
+        : `http://unused/${trimmed.startsWith('?') ? trimmed : `?${trimmed.split('?').pop() || ''}`}`;
+      const url = new URL(rawURL);
       const code = url.searchParams.get('code');
-      if (code) return code;
+      if (code) {
+        return { code, state: url.searchParams.get('state') || undefined };
+      }
     } catch {
-      // Fallback: parse manually if URL parsing fails
       const match = trimmed.match(/[?&]code=([^&]+)/);
-      if (match) return match[1];
+      const stateMatch = trimmed.match(/[?&]state=([^&]+)/);
+      if (match) {
+        return {
+          code: decodeURIComponent(match[1]),
+          state: stateMatch ? decodeURIComponent(stateMatch[1]) : undefined,
+        };
+      }
     }
   }
-  return trimmed;
+  return { code: trimmed };
 }
 
 interface OAuthBindDialogProps {
@@ -100,14 +113,17 @@ export function OAuthBindDialog({ onBound }: OAuthBindDialogProps) {
   const exchangeMutation = useMutation({
     mutationFn: async () => {
       if (!session) throw new Error('请先生成授权链接');
-      const code = extractCode(codeInput);
-      if (!code) throw new Error('请填写授权码或回调 URL');
+      const parsed = parseOAuthCallbackInput(codeInput);
+      if (!parsed.code) throw new Error('请填写授权码或回调 URL');
+      if (parsed.state && parsed.state !== session.state) {
+        throw new Error('回调 URL 的 state 与当前授权会话不一致，请重新生成授权链接');
+      }
       const res = await adminApiClient.post(
         `/v1/admin/accounts/subscription/oauth/${platform}/exchange`,
         {
           session_id: session.session_id,
           state: session.state,
-          code,
+          code: parsed.code,
           name: name.trim(),
           group: group.trim(),
           models: models.trim(),

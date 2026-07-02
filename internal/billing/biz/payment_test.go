@@ -84,6 +84,7 @@ func TestPaymentUsecaseGetOrderRefreshesPaidAlipayOrder(t *testing.T) {
 	repo := &memoryPaymentRepo{order: &PaymentOrder{
 		TradeNo:          "PAY-1",
 		Channel:          PaymentChannelAlipay,
+		AssetType:        PaymentAssetTypeQuota,
 		Status:           PaymentOrderStatusPending,
 		AssetIssueStatus: PaymentAssetIssueStatusPending,
 	}}
@@ -113,6 +114,7 @@ func TestPaymentUsecaseGetOrderRefreshesClosedAlipayOrder(t *testing.T) {
 	repo := &memoryPaymentRepo{order: &PaymentOrder{
 		TradeNo:          "PAY-1",
 		Channel:          PaymentChannelAlipay,
+		AssetType:        PaymentAssetTypeQuota,
 		Status:           PaymentOrderStatusPending,
 		AssetIssueStatus: PaymentAssetIssueStatusPending,
 	}}
@@ -128,6 +130,34 @@ func TestPaymentUsecaseGetOrderRefreshesClosedAlipayOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	if order.Status != PaymentOrderStatusClosed {
+		t.Fatalf("status = %q", order.Status)
+	}
+	if issuer.issued != 0 {
+		t.Fatalf("issued = %d", issuer.issued)
+	}
+}
+
+func TestPaymentUsecasePaidSubscriptionOrderDoesNotIssueQuota(t *testing.T) {
+	repo := &memoryPaymentRepo{order: &PaymentOrder{
+		TradeNo:          "PAY-SUB-1",
+		Channel:          PaymentChannelAlipay,
+		AssetType:        PaymentAssetTypeSubscription,
+		AssetAmount:      1,
+		GroupID:          9,
+		Status:           PaymentOrderStatusPending,
+		AssetIssueStatus: PaymentAssetIssueStatusPending,
+	}}
+	issuer := &countingPaymentIssuer{}
+	uc := NewPaymentUsecase(repo, &statusPaymentProvider{status: &PaymentProviderStatus{
+		ProviderTradeNo: "ALI-SUB-1",
+		Paid:            true,
+	}}, issuer)
+
+	order, err := uc.GetOrderByTradeNo(context.Background(), "PAY-SUB-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if order.Status != PaymentOrderStatusPaid {
 		t.Fatalf("status = %q", order.Status)
 	}
 	if issuer.issued != 0 {

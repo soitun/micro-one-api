@@ -140,6 +140,38 @@ func TestExchangeCodexCreatesAccountAndBestEffortPrivacy(t *testing.T) {
 	assert.Contains(t, uc.created.Metadata, `"source":"oauth"`)
 }
 
+func TestExchangeAcceptsFullCallbackURL(t *testing.T) {
+	now := time.Unix(1000, 0)
+	var exchangedCode string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		exchangedCode = r.PostForm.Get("code")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"access","refresh_token":"refresh","expires_in":3600}`))
+	}))
+	defer ts.Close()
+
+	uc := &fakeChannelUsecase{}
+	svc := NewService(
+		uc,
+		WithNow(func() time.Time { return now }),
+		WithHTTPClient(ts.Client()),
+		WithTokenURL(PlatformClaude, ts.URL),
+	)
+	auth, err := svc.AuthURL(context.Background(), PlatformClaude, AuthURLRequest{})
+	require.NoError(t, err)
+
+	_, err = svc.Exchange(context.Background(), PlatformClaude, ExchangeRequest{
+		SessionID: auth.SessionID,
+		State:     auth.State,
+		Code:      "http://localhost:1455/auth/callback?code=code-123&state=" + url.QueryEscape(auth.State),
+		Name:      "claude-pro",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "code-123", exchangedCode)
+	require.NotNil(t, uc.created)
+}
+
 func mustParseURL(t *testing.T, raw string) *url.URL {
 	t.Helper()
 	u, err := url.Parse(raw)

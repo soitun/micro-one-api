@@ -47,9 +47,8 @@ type SubscriptionGroup struct {
 	MonthlyLimitUSD *float64 `json:"monthly_limit_usd"`
 	RateMultiplier  float64  `json:"rate_multiplier"`
 	Status          int32    `json:"status"`
-	// PriceQuota is the self-purchase price in wallet quota units (0 = not
-	// purchasable, admin-assign only). DurationDays is how long a purchased
-	// subscription lasts (0 = not purchasable).
+	// PriceQuota stores the configured self-purchase price amount. The JSON/DB
+	// name is kept for compatibility with earlier quota-based pricing.
 	PriceQuota   int64 `json:"price_quota"`
 	DurationDays int32 `json:"duration_days"`
 	CreatedAt    int64 `json:"created_at"`

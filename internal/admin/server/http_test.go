@@ -284,6 +284,7 @@ type adminHTTPBillingClient struct {
 	paymentTotal       int64
 	paymentListLastReq *billingv1.ListPaymentOrdersRequest
 	paymentGetLastReq  *billingv1.GetPaymentOrderByTradeNoRequest
+	paymentCreateReq   *billingv1.CreatePaymentOrderRequest
 	aggregateReqs      []*billingv1.AggregateUsageRequest
 }
 
@@ -424,6 +425,29 @@ func (c *adminHTTPBillingClient) ListPaymentOrders(ctx context.Context, req *bil
 	}, nil
 }
 
+func (c *adminHTTPBillingClient) CreatePaymentOrder(ctx context.Context, req *billingv1.CreatePaymentOrderRequest, opts ...grpc.CallOption) (*billingv1.PaymentOrderResponse, error) {
+	c.paymentCreateReq = req
+	return &billingv1.PaymentOrderResponse{
+		Success: true,
+		Order: &billingv1.PaymentOrder{
+			Id:               99,
+			UserId:           req.GetUserId(),
+			TradeNo:          "PAY-SUB-1",
+			Channel:          req.GetChannel(),
+			AssetType:        req.GetAssetType(),
+			AssetAmount:      req.GetAssetAmount(),
+			MoneyCents:       req.GetMoneyCents(),
+			Currency:         req.GetCurrency(),
+			Status:           "pending",
+			PayUrl:           "mock://payment/PAY-SUB-1",
+			AssetIssueStatus: "pending",
+			GroupId:          req.GetGroupId(),
+			CreatedAt:        timestamppb.Now(),
+			UpdatedAt:        timestamppb.Now(),
+		},
+	}, nil
+}
+
 func (c *adminHTTPBillingClient) GetPaymentOrderByTradeNo(ctx context.Context, req *billingv1.GetPaymentOrderByTradeNoRequest, opts ...grpc.CallOption) (*billingv1.PaymentOrderResponse, error) {
 	c.paymentGetLastReq = req
 	return &billingv1.PaymentOrderResponse{
@@ -508,6 +532,16 @@ func newAdminHTTPSubscriptionTestServer() http.Handler {
 	return NewHTTPServer(":0", adminSvc)
 }
 
+func newAdminHTTPSubscriptionPaymentTestServer(identity identityv1.IdentityServiceClient, billing billingv1.BillingServiceClient) http.Handler {
+	adminSvc := service.NewAdminService(billing, identity, nil, nil)
+	repo := subscriptiondata.NewMemoryRepositoryForTest()
+	adminSvc.SetSubscriptionUsecases(
+		subscriptionbiz.NewSubscriptionUsecase(repo, repo),
+		subscriptionbiz.NewGroupUsecase(repo),
+	)
+	return NewHTTPServer(":0", adminSvc)
+}
+
 func TestAdminHTTPSubscriptionManagement(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	srv := newAdminHTTPSubscriptionTestServer()
@@ -574,6 +608,38 @@ func TestAdminHTTPSubscriptionManagement(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"remaining_seconds"`) {
 		t.Fatalf("progress status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserSubscriptionPurchaseCreatesPaymentOrder(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	identityClient := &adminHTTPIdentityClient{validateValid: true, validateUserID: 42}
+	billingClient := &adminHTTPBillingClient{}
+	srv := newAdminHTTPSubscriptionPaymentTestServer(identityClient, billingClient)
+
+	createBody := `{"name":"codex-pro","display_name":"Codex Pro","platform":"openai","status":1,"price_quota":10,"duration_days":30}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/subscription-groups", strings.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("create group status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/subscriptions/purchase/payment", strings.NewReader(`{"group_id":1,"channel":"mock"}`))
+	req.Header.Set("Authorization", "Bearer user-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("purchase payment status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	got := billingClient.paymentCreateReq
+	if got == nil {
+		t.Fatal("CreatePaymentOrder was not called")
+	}
+	if got.GetUserId() != "42" || got.GetChannel() != "mock" || got.GetAssetType() != "subscription" || got.GetAssetAmount() != 1 || got.GetMoneyCents() != 1000 || got.GetGroupId() != 1 {
+		t.Fatalf("CreatePaymentOrder request = %+v", got)
 	}
 }
 

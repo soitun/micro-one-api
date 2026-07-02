@@ -196,11 +196,19 @@ func (s *Service) Exchange(ctx context.Context, platform string, req ExchangeReq
 		return nil, fmt.Errorf("oauth service not configured")
 	}
 	platform = normalizePlatform(platform)
+	callback := parseOAuthCallbackInput(req.Code)
+	state := strings.TrimSpace(req.State)
+	if callback.State != "" {
+		if state != "" && state != callback.State {
+			return nil, ErrInvalidSession
+		}
+		state = callback.State
+	}
 	session, ok := s.store.Get(req.SessionID, s.now())
-	if !ok || session.Platform != platform || session.State != req.State {
+	if !ok || session.Platform != platform || session.State != state {
 		return nil, ErrInvalidSession
 	}
-	code := strings.TrimSpace(req.Code)
+	code := callback.Code
 	if code == "" {
 		return nil, fmt.Errorf("oauth code is required")
 	}
@@ -219,6 +227,44 @@ func (s *Service) Exchange(ctx context.Context, platform string, req ExchangeReq
 		Platform:  platform,
 		Metadata:  account.Metadata,
 	}, nil
+}
+
+type oauthCallbackInput struct {
+	Code  string
+	State string
+}
+
+func parseOAuthCallbackInput(input string) oauthCallbackInput {
+	trimmed := strings.TrimSpace(strings.ReplaceAll(input, "？", "?"))
+	if trimmed == "" {
+		return oauthCallbackInput{}
+	}
+	if !strings.Contains(trimmed, "code=") {
+		return oauthCallbackInput{Code: trimmed}
+	}
+	rawQuery := ""
+	if parsed, err := url.Parse(trimmed); err == nil {
+		rawQuery = parsed.RawQuery
+	}
+	if rawQuery == "" {
+		if idx := strings.Index(trimmed, "?"); idx >= 0 {
+			rawQuery = trimmed[idx+1:]
+		} else {
+			rawQuery = strings.TrimPrefix(trimmed, "?")
+		}
+	}
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return oauthCallbackInput{Code: trimmed}
+	}
+	code := strings.TrimSpace(values.Get("code"))
+	if code == "" {
+		return oauthCallbackInput{Code: trimmed}
+	}
+	return oauthCallbackInput{
+		Code:  code,
+		State: strings.TrimSpace(values.Get("state")),
+	}
 }
 
 func (s *Service) exchangeCode(ctx context.Context, session *Session, code string) (*tokenResponse, error) {

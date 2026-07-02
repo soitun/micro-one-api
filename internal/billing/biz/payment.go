@@ -17,7 +17,8 @@ const (
 	PaymentAssetIssueStatusPending = "pending"
 	PaymentAssetIssueStatusIssued  = "issued"
 
-	PaymentAssetTypeQuota = "quota"
+	PaymentAssetTypeQuota        = "quota"
+	PaymentAssetTypeSubscription = "subscription"
 
 	PaymentChannelMock   = "mock"
 	PaymentChannelAlipay = "alipay"
@@ -195,11 +196,12 @@ func (uc *PaymentUsecase) MarkOrderPaid(ctx context.Context, tradeNo, providerTr
 		return nil, errors.New("trade_no is required")
 	}
 	order, _, err := uc.repo.MarkOrderPaid(ctx, tradeNo, providerTradeNo, func(order *PaymentOrder) error {
-		if err := uc.issuer.IssueQuota(ctx, order); err != nil {
-			return err
+		if order.AssetType == PaymentAssetTypeQuota {
+			if err := uc.issuer.IssueQuota(ctx, order); err != nil {
+				return err
+			}
 		}
-		// If order has a group_id, assign subscription after payment
-		if order.GroupID > 0 && uc.assigner != nil {
+		if order.AssetType == PaymentAssetTypeSubscription && order.GroupID > 0 && uc.assigner != nil {
 			if err := uc.assigner.AssignSubscriptionAfterPayment(ctx, order); err != nil {
 				return fmt.Errorf("assign subscription after payment: %w", err)
 			}
@@ -251,7 +253,7 @@ func validateCreatePaymentOrderRequest(req CreatePaymentOrderRequest) error {
 	if req.UserID == "" {
 		return errors.New("user_id is required")
 	}
-	if req.AssetType != PaymentAssetTypeQuota {
+	if req.AssetType != PaymentAssetTypeQuota && req.AssetType != PaymentAssetTypeSubscription {
 		return fmt.Errorf("unsupported payment asset type %q", req.AssetType)
 	}
 	if req.AssetAmount <= 0 {

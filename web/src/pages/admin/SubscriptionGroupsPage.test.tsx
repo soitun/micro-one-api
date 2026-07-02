@@ -18,6 +18,8 @@ const group = {
   monthly_limit_usd: 100,
   rate_multiplier: 1,
   status: 1,
+  price_quota: 10,
+  duration_days: 30,
   created_at: 1700000000,
   updated_at: 1700000000,
 };
@@ -42,6 +44,7 @@ describe('AdminSubscriptionGroupsPage', () => {
     expect(row?.textContent).toContain('Anthropic / Claude');
     expect(row?.textContent).toContain('$10'); // daily limit
     expect(row?.textContent).toContain('不限'); // weekly limit is null
+    expect(row?.textContent).toContain('$10.00 / 30天');
   });
 
   it('creates a group, sending null for empty limits', async () => {
@@ -65,11 +68,17 @@ describe('AdminSubscriptionGroupsPage', () => {
     await screen.findByText('暂无订阅分组');
     await userEvent.click(screen.getByRole('button', { name: /新建分组/ }));
     await userEvent.type(screen.getByLabelText('名称(唯一)'), 'team-plan');
+    await userEvent.clear(screen.getByLabelText('购买价格(USD)'));
+    await userEvent.type(screen.getByLabelText('购买价格(USD)'), '10');
+    await userEvent.clear(screen.getByLabelText('有效期(天)'));
+    await userEvent.type(screen.getByLabelText('有效期(天)'), '30');
     await userEvent.click(screen.getByRole('button', { name: /创建/ }));
 
     await waitFor(() => expect(captured.body).not.toBeNull());
     expect(captured.body?.name).toBe('team-plan');
     expect(captured.body?.daily_limit_usd).toBeNull();
     expect(captured.body?.monthly_limit_usd).toBeNull();
+    expect(captured.body?.price_quota).toBe(10);
+    expect(captured.body?.duration_days).toBe(30);
   });
 });

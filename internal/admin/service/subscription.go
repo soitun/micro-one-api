@@ -15,12 +15,11 @@ import (
 var ErrSubscriptionServiceNotConfigured = errors.New("subscription service not configured")
 
 // ErrSubscriptionNotPurchasable is returned when a user tries to buy a group
-// that admins have not priced for self-purchase (price_quota or duration_days
-// is zero, or the group is disabled).
+// that admins have not priced for self-purchase (price or duration_days is
+// zero, or the group is disabled).
 var ErrSubscriptionNotPurchasable = errors.New("subscription group is not available for purchase")
 
 const secondsPerDay = 24 * 60 * 60
-const subscriptionPaymentQuotaPerCNY = int64(5000000)
 
 // ResolveUserIDFromToken validates a user session token and returns the owning
 // user id. Unlike AuthorizeAdminToken it does not require an admin role, so it
@@ -67,10 +66,10 @@ func isPurchasableGroup(g *subscriptionbiz.SubscriptionGroup) bool {
 }
 
 // PurchaseSubscription lets an authenticated user buy a subscription group with
-// their wallet quota. It orchestrates two services (billing owns the wallet,
+// their wallet balance. It orchestrates two services (billing owns the wallet,
 // subscription owns the entitlement) as a compensating saga:
 //  1. validate the group is purchasable and the user has no active subscription;
-//  2. deduct price_quota from the wallet (billing, atomic, rejects overdraft);
+//  2. deduct the configured price from the wallet (billing, atomic, rejects overdraft);
 //  3. create the subscription row (subscription usecase);
 //  4. if step 3 fails, refund the wallet so no charge lingers without service.
 //
@@ -231,9 +230,6 @@ func (s *AdminService) ListSubscriptionGroups(ctx context.Context) ([]*subscript
 }
 
 // CreateSubscriptionPaymentOrder creates a payment order for subscription purchase.
-// It checks if the user has enough balance first:
-// - If balance is sufficient, it purchases the subscription directly.
-// - If balance is insufficient, it creates a payment order for the user to pay.
 func (s *AdminService) CreateSubscriptionPaymentOrder(ctx context.Context, userID, groupID int64, channel string, moneyCents int64, currency string) (subscription *subscriptionbiz.UserSubscription, paymentOrder *PaymentOrderInfo, err error) {
 	if s == nil || s.subscriptionUc == nil || s.groupUc == nil {
 		return nil, nil, ErrSubscriptionServiceNotConfigured
@@ -262,22 +258,8 @@ func (s *AdminService) CreateSubscriptionPaymentOrder(ctx context.Context, userI
 
 	userIDStr := strconv.FormatInt(userID, 10)
 
-	// Check if user has enough balance
-	snapshot, err := s.billingClient.GetAccountSnapshot(ctx, &billingv1.GetAccountSnapshotRequest{UserId: userIDStr})
-	if err == nil && snapshot != nil && snapshot.Snapshot != nil {
-		if snapshot.Snapshot.Quota >= group.PriceQuota {
-			// Balance sufficient, purchase directly
-			sub, err := s.PurchaseSubscription(ctx, userID, groupID)
-			if err != nil {
-				return nil, nil, err
-			}
-			return sub, nil, nil
-		}
-	}
-
-	// Balance insufficient, create payment order
 	if moneyCents <= 0 {
-		moneyCents = quotaToMoneyCents(group.PriceQuota)
+		moneyCents = group.PriceQuota * 100
 	}
 	if currency == "" {
 		currency = "CNY"
@@ -289,8 +271,8 @@ func (s *AdminService) CreateSubscriptionPaymentOrder(ctx context.Context, userI
 	paymentResp, err := s.billingClient.CreatePaymentOrder(ctx, &billingv1.CreatePaymentOrderRequest{
 		UserId:      userIDStr,
 		Channel:     channel,
-		AssetType:   "quota",
-		AssetAmount: group.PriceQuota,
+		AssetType:   "subscription",
+		AssetAmount: 1,
 		MoneyCents:  moneyCents,
 		Currency:    currency,
 		GroupId:     groupID,
@@ -317,17 +299,6 @@ func (s *AdminService) CreateSubscriptionPaymentOrder(ctx context.Context, userI
 		CreatedAt:   paymentResp.Order.CreatedAt.AsTime().Unix(),
 	}
 	return nil, order, nil
-}
-
-func quotaToMoneyCents(quota int64) int64 {
-	if quota <= 0 {
-		return 0
-	}
-	cents := quota * 100 / subscriptionPaymentQuotaPerCNY
-	if cents <= 0 {
-		return 1
-	}
-	return cents
 }
 
 // PaymentOrderInfo represents a payment order for subscription purchase.
