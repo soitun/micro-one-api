@@ -841,7 +841,7 @@ func TestHTTPServerBillingMutationsIgnoreCanceledRequestContext(t *testing.T) {
 	}
 }
 
-func TestHTTPServerCommitQuotaRecordsSubscriptionUsage(t *testing.T) {
+func TestHTTPServerCommitQuotaSkipsRelaySubscriptionUsage(t *testing.T) {
 	t.Setenv("PAYMENT_QUOTA_PER_UNIT", "100")
 	billingClient := &rawBillingClient{failOnCanceledContext: true}
 	repo := subscriptiondata.NewMemoryRepositoryForTest()
@@ -864,8 +864,8 @@ func TestHTTPServerCommitQuotaRecordsSubscriptionUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProgress() error = %v", err)
 	}
-	if progress.DailyUsed.Used != 2.5 || progress.WeeklyUsed.Used != 2.5 || progress.MonthlyUsed.Used != 2.5 {
-		t.Fatalf("subscription usage = daily:%v weekly:%v monthly:%v, want 2.5", progress.DailyUsed.Used, progress.WeeklyUsed.Used, progress.MonthlyUsed.Used)
+	if progress.DailyUsed.Used != 0 || progress.WeeklyUsed.Used != 0 || progress.MonthlyUsed.Used != 0 {
+		t.Fatalf("subscription usage = daily:%v weekly:%v monthly:%v, want 0", progress.DailyUsed.Used, progress.WeeklyUsed.Used, progress.MonthlyUsed.Used)
 	}
 }
 

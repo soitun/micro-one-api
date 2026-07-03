@@ -1946,31 +1946,21 @@ func (s *HTTPServer) commitQuota(ctx context.Context, reservationID string, actu
 	if len(details) > 0 {
 		detail := details[0]
 		s.recordChannelUsage(ctx, detail.ChannelID, actualTokens)
+		// recordSubscriptionUsage is a no-op on the dual-track
+		// path: the billing layer's CommitQuotaWithUsage already
+		// wrote the subscription usage via the row-locked
+		// RecordUsageForSubscriptionInTx call inside the same
+		// transaction. Recording again would double-count the
+		// window. The legacy path is preserved.
 		s.recordSubscriptionUsage(ctx, detail.UserID, actualTokens)
 	}
 	return nil
 }
 
 func (s *HTTPServer) recordSubscriptionUsage(ctx context.Context, userID int64, quota int64) {
-	if s.subscriptionUsecase == nil || userID <= 0 || quota <= 0 {
-		metrics.SubscriptionUsageRecordsTotal.WithLabelValues("skipped").Inc()
-		return
-	}
-	costUSD := quotaToUSD(quota)
-	if costUSD <= 0 {
-		metrics.SubscriptionUsageRecordsTotal.WithLabelValues("skipped").Inc()
-		return
-	}
-	subscriptionCtx, cancel := detachedBillingContext(ctx)
-	defer cancel()
-	if err := s.subscriptionUsecase.RecordUsage(subscriptionCtx, userID, costUSD); err != nil {
-		metrics.SubscriptionUsageRecordsTotal.WithLabelValues("error").Inc()
-		if applogger.Log != nil {
-			applogger.Log.Warn("failed to record subscription usage", zap.Int64("user_id", userID), zap.Float64("cost_usd", costUSD), zap.Error(err))
-		}
-		return
-	}
-	metrics.SubscriptionUsageRecordsTotal.WithLabelValues("success").Inc()
+	// Billing CommitQuotaWithUsage records subscription usage transactionally.
+	// Keeping a relay-side write would double-count subscription windows.
+	metrics.SubscriptionUsageRecordsTotal.WithLabelValues("skipped").Inc()
 }
 
 func quotaToUSD(quota int64) float64 {

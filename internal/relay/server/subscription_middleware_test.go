@@ -15,7 +15,7 @@ import (
 	subscriptiondata "micro-one-api/internal/subscription/data"
 )
 
-func TestSubscriptionQuotaMiddlewareRejectsExceededQuota(t *testing.T) {
+func TestSubscriptionQuotaMiddlewareAllowsExceededQuota(t *testing.T) {
 	repo := subscriptiondata.NewMemoryRepositoryForTest()
 	group := &subscriptionbiz.SubscriptionGroup{
 		Name:          "pro",
@@ -48,14 +48,11 @@ func TestSubscriptionQuotaMiddlewareRejectsExceededQuota(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if nextCalled {
-		t.Fatal("next handler was called")
+	if !nextCalled {
+		t.Fatal("next handler was not called")
 	}
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429, body=%s", rec.Code, rec.Body.String())
-	}
-	if rec.Header().Get("Retry-After") == "" {
-		t.Fatal("Retry-After header missing")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
 	rejectedAfter := testutil.ToFloat64(metrics.SubscriptionQuotaChecksTotal.WithLabelValues("rejected"))
 	if rejectedAfter-rejectedBefore != 1 {

@@ -7,7 +7,16 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	gormdb "gorm.io/gorm"
 )
+
+// gormDB is a thin alias that keeps the package import line short while
+// the type still resolves unambiguously. The alias is local to this
+// file so other files in the package do not need to import gorm to
+// reference the dual-track methods.
+type gormDB = gormdb.DB
+
 
 const (
 	quotaDailyWindow   = 24 * time.Hour
@@ -152,6 +161,53 @@ func (uc *SubscriptionUsecase) RecordUsage(ctx context.Context, userID int64, co
 	// concurrent requests read the same base row and clobber each other's
 	// increment, letting users blow past their quota.
 	return uc.repo.AddUsage(ctx, userID, effectiveCost, uc.now().Unix())
+}
+
+// RecordUsageForSubscriptionInTx is the row-locked variant of RecordUsage.
+// It is the canonical write path for the dual-track commit pipeline: it
+// takes a *gorm.DB owned by the caller so the subscription write commits
+// in the same transaction as the wallet side-effects. costUSD is the
+// *original* (un-multiplied) USD cost; this function multiplies by the
+// group's RateMultiplier before storing so the running usage matches
+// the limit/usage accounting space.
+func (uc *SubscriptionUsecase) RecordUsageForSubscriptionInTx(ctx context.Context, tx *gormDB, subscriptionID int64, costUSD float64, now int64) error {
+	if costUSD < 0 {
+		return fmt.Errorf("negative usage")
+	}
+	subscription, err := uc.repo.GetByIDInTx(ctx, tx, subscriptionID)
+	if err != nil {
+		return err
+	}
+	if subscription == nil {
+		return ErrSubscriptionNotFound
+	}
+	effectiveCost := costUSD
+	if group, gerr := uc.groupRepo.GetGroupByID(ctx, subscription.GroupID); gerr == nil && group != nil && group.RateMultiplier > 0 {
+		effectiveCost = costUSD * group.RateMultiplier
+	}
+	return uc.repo.AddUsageByIDInTx(ctx, tx, subscriptionID, effectiveCost, now)
+}
+
+// GetActiveSubscriptionForUser is the read-only variant of
+// GetActiveSubscriptionByUser. The billing domain uses it during
+// pre-deduction so the reservation is bound to a specific subscription
+// row id (the same id the dual-track commit pipeline later writes the
+// actual cost to).
+func (uc *SubscriptionUsecase) GetActiveSubscriptionForUser(ctx context.Context, userID int64) (*UserSubscription, error) {
+	return uc.repo.GetActiveSubscriptionByUser(ctx, userID)
+}
+
+// GetGroupForSubscription is a convenience wrapper used by the billing
+// domain to load the limits + multiplier for a subscription's group.
+// It deliberately does not return early when the subscription is in a
+// non-active state: the billing domain still needs the limits to decide
+// how much to absorb when the subscription has been revoked mid-window
+// (the row-lock guarantees we still see a consistent snapshot).
+func (uc *SubscriptionUsecase) GetGroupForSubscription(ctx context.Context, subscription *UserSubscription) (*SubscriptionGroup, error) {
+	if subscription == nil {
+		return nil, ErrSubscriptionNotFound
+	}
+	return uc.groupRepo.GetGroupByID(ctx, subscription.GroupID)
 }
 
 func (uc *SubscriptionUsecase) CheckQuota(ctx context.Context, userID int64, estimatedCost float64) (*QuotaCheckResult, error) {

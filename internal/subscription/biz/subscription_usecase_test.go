@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type mockSubscriptionRepo struct {
@@ -108,6 +110,29 @@ func (m *mockSubscriptionRepo) AddUsage(ctx context.Context, userID int64, costU
 		return nil
 	}
 	return ErrSubscriptionNotFound
+}
+
+func (m *mockSubscriptionRepo) AddUsageByIDInTx(ctx context.Context, tx *gorm.DB, subscriptionID int64, costUSD float64, now int64) error {
+	subscription, ok := m.subscriptions[subscriptionID]
+	if !ok {
+		return ErrSubscriptionNotFound
+	}
+	subscription.DailyUsageUSD += costUSD
+	subscription.WeeklyUsageUSD += costUSD
+	subscription.MonthlyUsageUSD += costUSD
+	subscription.UpdatedAt = now
+	cloned := *subscription
+	m.subscriptions[subscriptionID] = &cloned
+	return nil
+}
+
+func (m *mockSubscriptionRepo) GetByIDInTx(ctx context.Context, tx *gorm.DB, subscriptionID int64) (*UserSubscription, error) {
+	subscription, ok := m.subscriptions[subscriptionID]
+	if !ok {
+		return nil, ErrSubscriptionNotFound
+	}
+	cloned := *subscription
+	return &cloned, nil
 }
 
 func (m *mockSubscriptionRepo) CreateGroup(ctx context.Context, group *SubscriptionGroup) error {

@@ -35,16 +35,27 @@ func (s *BillingService) ReserveQuota(ctx context.Context, req *billingv1.Reserv
 			ErrorMessage: err.Error(),
 		}, nil
 	}
-
-	return &billingv1.ReserveQuotaResponse{
-		Success:        true,
-		ReservationId:  reservation.ReservationID,
-		ReservedAmount: reservation.Amount,
-	}, nil
+	// The relay layer and any debugging tools read the cost-dimension
+	// split off the response. We forward the raw float USD as int64
+	// nanodollars (USD * 1e9) so the wire type is a stable integer
+	// regardless of float precision; the relay converts back to a
+	// display USD when needed.
+	resp := &billingv1.ReserveQuotaResponse{
+		Success:            true,
+		ReservationId:      reservation.ReservationID,
+		ReservedAmount:     reservation.Amount,
+		BalanceAmountQuota: reservation.BalanceAmountQuota,
+		SubscriptionId:     reservation.SubscriptionID,
+	}
+	if reservation.SubscriptionAmountUSD > 0 {
+		// Convert to nanodollars for stable int64 transport.
+		resp.SubscriptionAmountUsd = int64(reservation.SubscriptionAmountUSD * 1e9)
+	}
+	return resp, nil
 }
 
 func (s *BillingService) CommitQuota(ctx context.Context, req *billingv1.CommitQuotaRequest) (*billingv1.CommitQuotaResponse, error) {
-	committedAmount, refundAmount, err := s.uc.CommitQuotaWithUsage(ctx, req.ReservationId, req.ActualTokens, req.Success, biz.LedgerUsage{
+	committedAmount, refundAmount, result, err := s.uc.CommitQuotaWithUsageAndSplit(ctx, req.ReservationId, req.ActualTokens, req.Success, biz.LedgerUsage{
 		TokenName:             req.TokenName,
 		Endpoint:              req.Endpoint,
 		PromptTokens:          req.PromptTokens,
@@ -63,9 +74,11 @@ func (s *BillingService) CommitQuota(ctx context.Context, req *billingv1.CommitQ
 	}
 
 	return &billingv1.CommitQuotaResponse{
-		Success:         true,
-		CommittedAmount: committedAmount,
-		RefundAmount:    refundAmount,
+		Success:          true,
+		CommittedAmount:  committedAmount,
+		RefundAmount:     refundAmount,
+		SubscriptionCost: result.SubscriptionCost,
+		BalanceCost:      result.BalanceCost,
 	}, nil
 }
 
@@ -171,7 +184,7 @@ func (s *BillingService) CreateRedeemCode(ctx context.Context, req *billingv1.Cr
 }
 
 func (s *BillingService) CreateRedeemCodesBatch(ctx context.Context, req *billingv1.CreateRedeemCodesBatchRequest) (*billingv1.CreateRedeemCodesBatchResponse, error) {
-	codes, err := s.uc.CreateRedeemCodesBatch(ctx, req.Name, req.Amount, req.Count, req.BatchSize, req.OperatorId)
+	codes, err := s.uc.CreateRedeemCodesBatch(ctx, req.Name, req.Amount, req.Count, req.BatchSize)
 	if err != nil {
 		return &billingv1.CreateRedeemCodesBatchResponse{
 			Success:      false,

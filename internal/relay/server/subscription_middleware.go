@@ -43,19 +43,14 @@ func (s *HTTPServer) withSubscriptionQuotaCheck(next http.Handler) http.Handler 
 			next.ServeHTTP(w, r)
 			return
 		}
+		// The billing layer is the final authority: it falls back to
+		// wallet deduction when the subscription is exhausted.
 		if result == nil || result.Allowed {
 			metrics.SubscriptionQuotaChecksTotal.WithLabelValues("allowed").Inc()
-			next.ServeHTTP(w, r)
-			return
+		} else {
+			metrics.SubscriptionQuotaChecksTotal.WithLabelValues("rejected").Inc()
 		}
-		metrics.SubscriptionQuotaChecksTotal.WithLabelValues("rejected").Inc()
-		w.Header().Set("Retry-After", "60")
-		s.writeJSON(w, http.StatusTooManyRequests, map[string]interface{}{
-			"error": map[string]interface{}{
-				"message": "subscription quota exceeded",
-				"reasons": result.Reasons,
-			},
-		})
+		next.ServeHTTP(w, r)
 	})
 }
 

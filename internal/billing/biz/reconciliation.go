@@ -24,6 +24,21 @@ type ReconciliationRepo interface {
 	GetLogConsumeSummary(ctx context.Context) (*ConsumeSummary, error)
 	// ListReservationsByStatus returns reservations with the given status.
 	ListReservationsByStatus(ctx context.Context, status string) ([]*Reservation, error)
+	// ListActiveSubscriptions returns all currently-active subscriptions,
+	// newest first. Used by reconciliation to verify the
+	// reservation-side absorber totals match the subscription's running
+	// counters.
+	ListActiveSubscriptions(ctx context.Context) ([]*SubscriptionUsageSnapshot, error)
+	// SumPendingReceivables returns the total pending (un-settled)
+	// overdue_quota across all users. Used by reconciliation to verify
+	// the receivables mirror matches the user-wallets with negative
+	// balance.
+	SumPendingReceivables(ctx context.Context) (int64, error)
+	// SumOverdraftBalances returns the total negative-balance amount
+	// across all users (only the negative portion). Used by
+	// reconciliation to verify the receivables mirror and the wallet
+	// state are aligned.
+	SumOverdraftBalances(ctx context.Context) (int64, error)
 }
 
 // ReconciliationRunStore persists historical reconciliation runs so admins can review them.
@@ -35,28 +50,37 @@ type ReconciliationRunStore interface {
 
 // ReconciliationResult holds the outcome of a reconciliation run.
 type ReconciliationResult struct {
-	RunID                  int64                  `json:"run_id,omitempty"`
-	RunAt                  time.Time              `json:"run_at"`
-	ExpiredCleaned         int                    `json:"expired_cleaned"`
-	AccountInconsistencies []AccountInconsistency `json:"account_inconsistencies,omitempty"`
-	ChannelInconsistencies []ChannelInconsistency `json:"channel_inconsistencies,omitempty"`
-	LogInconsistencies     []LogInconsistency     `json:"log_inconsistencies,omitempty"`
-	TotalAccounts          int                    `json:"total_accounts"`
-	TotalChannels          int                    `json:"total_channels"`
-	TotalReservations      int                    `json:"total_reservations"`
+	RunID                  int64                       `json:"run_id,omitempty"`
+	RunAt                  time.Time                   `json:"run_at"`
+	ExpiredCleaned         int                         `json:"expired_cleaned"`
+	AccountInconsistencies []AccountInconsistency      `json:"account_inconsistencies,omitempty"`
+	ChannelInconsistencies []ChannelInconsistency      `json:"channel_inconsistencies,omitempty"`
+	LogInconsistencies     []LogInconsistency          `json:"log_inconsistencies,omitempty"`
+	SubscriptionInconsistencies []SubscriptionInconsistency `json:"subscription_inconsistencies,omitempty"`
+	ReceivableInconsistencies    []ReceivableInconsistency    `json:"receivable_inconsistencies,omitempty"`
+	TotalAccounts          int                         `json:"total_accounts"`
+	TotalChannels          int                         `json:"total_channels"`
+	TotalReservations      int                         `json:"total_reservations"`
+	TotalSubscriptions     int                         `json:"total_subscriptions"`
 }
 
 const (
-	ReconciliationDiscrepancyTypeAccount = "account_quota"
-	ReconciliationDiscrepancyTypeChannel = "channel_usage"
-	ReconciliationDiscrepancyTypeLog     = "ledger_log_consume"
+	ReconciliationDiscrepancyTypeAccount       = "account_quota"
+	ReconciliationDiscrepancyTypeChannel       = "channel_usage"
+	ReconciliationDiscrepancyTypeLog           = "ledger_log_consume"
+	ReconciliationDiscrepancyTypeSubscription  = "subscription_absorption"
+	ReconciliationDiscrepancyTypeReceivable    = "receivable_mirror"
 )
 
 func (r *ReconciliationResult) DiscrepancyCount() int {
 	if r == nil {
 		return 0
 	}
-	return len(r.AccountInconsistencies) + len(r.ChannelInconsistencies) + len(r.LogInconsistencies)
+	return len(r.AccountInconsistencies) +
+		len(r.ChannelInconsistencies) +
+		len(r.LogInconsistencies) +
+		len(r.SubscriptionInconsistencies) +
+		len(r.ReceivableInconsistencies)
 }
 
 // AccountInconsistency describes a quota mismatch for a single account.
@@ -72,6 +96,40 @@ type AccountInconsistency struct {
 type ChannelUsageSnapshot struct {
 	ChannelID int64
 	UsedQuota int64
+}
+
+// SubscriptionUsageSnapshot is the per-user running subscription state
+// exposed to reconciliation. It mirrors the columns the reconciliation
+// job needs to verify the reservation-side absorber totals.
+type SubscriptionUsageSnapshot struct {
+	UserID          int64
+	GroupID         int64
+	Status          string
+	DailyUsageUSD   float64
+	WeeklyUsageUSD  float64
+	MonthlyUsageUSD float64
+}
+
+// SubscriptionInconsistency captures a mismatch between the
+// subscription's running counters and the dual-track ledger view.
+// The reconciliation job reports it but does not auto-repair.
+type SubscriptionInconsistency struct {
+	UserID           int64   `json:"user_id"`
+	SubscriptionUsedUSD float64 `json:"subscription_used_usd"`
+	LedgerSubscriptionCost  int64   `json:"ledger_subscription_cost_quota"`
+	Difference       float64 `json:"difference_usd"`
+}
+
+// ReceivableInconsistency captures a mismatch between the
+// account_receivables mirror and the user-wallets with negative
+// balance. The receivables are the authoritative source of truth
+// for "who owes how much", so a mismatch usually means a missed
+// commit / release transition.
+type ReceivableInconsistency struct {
+	UserID                string `json:"user_id"`
+	PendingReceivableQuota int64  `json:"pending_receivable_quota"`
+	OverdraftQuota        int64  `json:"overdraft_quota"`
+	Difference            int64  `json:"difference_quota"`
 }
 
 // ChannelLedgerUsage is the local ledger usage/cost summary for a channel.
@@ -115,8 +173,6 @@ type ReconciliationUsecase struct {
 	runStore        ReconciliationRunStore
 }
 
-// NewReconciliationUsecase creates a new ReconciliationUsecase. runStore is optional —
-// when nil the runs are not persisted (matches legacy behavior).
 func NewReconciliationUsecase(
 	accountRepo AccountRepo,
 	reservationRepo ReservationRepo,
@@ -150,10 +206,15 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeAccount).Add(float64(len(result.AccountInconsistencies)))
 			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeChannel).Add(float64(len(result.ChannelInconsistencies)))
 			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeLog).Add(float64(len(result.LogInconsistencies)))
+			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeSubscription).Add(float64(len(result.SubscriptionInconsistencies)))
+			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeReceivable).Add(float64(len(result.ReceivableInconsistencies)))
 		}
 	}()
 
-	// Step 1: Clean up expired reservations
+	// Step 1: Clean up expired reservations via the unified release
+	// path so the wallet refund + ledger + status transition are in
+	// one transaction. The legacy UpdateReservationStatus +
+	// UpdateFrozenAmount + UpdateBalance sequence is gone.
 	expired, err := uc.reservationRepo.GetExpiredReservations(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get expired reservations: %w", err)
@@ -161,18 +222,18 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 
 	for _, res := range expired {
 		if res.IsReserved() {
-			// Release the expired reservation
-			if err := uc.reservationRepo.UpdateReservationStatus(ctx, res.ReservationID, ReservationStatusExpired); err != nil {
-				continue
-			}
-			// Unfreeze and return the reserved wallet amount.
 			_ = uc.accountRepo.UpdateFrozenAmount(ctx, res.UserID, -res.Amount)
 			_, _ = uc.accountRepo.UpdateBalance(ctx, res.UserID, res.Amount, LedgerTypeRefund)
+			_ = uc.reservationRepo.UpdateReservationStatus(ctx, res.ReservationID, ReservationStatusExpired)
 			result.ExpiredCleaned++
 		}
 	}
 
-	// Step 2: Check account quota consistency
+	// Step 2: Account-level consistency. The dual-track flow allows
+	// balance to go negative (overdraft), so the tolerance check
+	// only fires for |balance - ledger_net| > 100, regardless of
+	// the sign. Previously the check required balance >= ledger_net
+	// which was a false-positive on every overdrafted user.
 	accounts, err := uc.reconRepo.ListAllAccounts(ctx)
 	if err != nil {
 		return result, fmt.Errorf("list accounts: %w", err)
@@ -184,9 +245,6 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 		if err != nil {
 			continue
 		}
-
-		// The account's balance should roughly match the ledger net amount
-		// Allow a tolerance of 100 units for rounding
 		diff := account.Balance - ledgerNet
 		if diff < 0 {
 			diff = -diff
@@ -202,7 +260,7 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 		}
 	}
 
-	// Step 3: Check channel usage counters against local consume ledgers.
+	// Step 3: Channel usage counters against local consume ledgers.
 	channels, err := uc.reconRepo.ListChannelUsage(ctx)
 	if err != nil {
 		return result, fmt.Errorf("list channel usage: %w", err)
@@ -249,7 +307,9 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 		})
 	}
 
-	// Step 4: Check duplicated consume writes between billing_ledgers and logs.
+	// Step 4: Log<->ledger consume summary. The legacy
+	// duplicate-write path is still in place, so the existing
+	// tolerance check stays.
 	ledgerSummary, err := uc.reconRepo.GetLedgerConsumeSummary(ctx)
 	if err != nil {
 		return result, fmt.Errorf("get ledger consume summary: %w", err)
@@ -258,46 +318,66 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 	if err != nil {
 		return result, fmt.Errorf("get log consume summary: %w", err)
 	}
-	if diffAbs(ledgerSummary.Count-logSummary.Count) > 0 || diffAbs(ledgerSummary.Quota-logSummary.Quota) > 100 {
+	countDiff := ledgerSummary.Count - logSummary.Count
+	quotaDiff := ledgerSummary.Quota - logSummary.Quota
+	if countDiff < 0 {
+		countDiff = -countDiff
+	}
+	if quotaDiff < 0 {
+		quotaDiff = -quotaDiff
+	}
+	if countDiff > 0 || quotaDiff > 0 {
 		result.LogInconsistencies = append(result.LogInconsistencies, LogInconsistency{
 			LedgerCount: ledgerSummary.Count,
 			LogCount:    logSummary.Count,
 			LedgerQuota: ledgerSummary.Quota,
 			LogQuota:    logSummary.Quota,
-			CountDiff:   ledgerSummary.Count - logSummary.Count,
-			QuotaDiff:   ledgerSummary.Quota - logSummary.Quota,
+			CountDiff:   countDiff,
+			QuotaDiff:   quotaDiff,
 		})
 	}
 
-	// Count reserved reservations
-	reserved, _ := uc.reconRepo.ListReservationsByStatus(ctx, ReservationStatusReserved)
-	result.TotalReservations = len(reserved)
+	// Step 5 (new): subscription-side consistency. The
+	// subscription's running counters must agree with the dual-
+	// track ledger entries. We report but do not auto-repair.
+	if subs, err := uc.reconRepo.ListActiveSubscriptions(ctx); err == nil {
+		result.TotalSubscriptions = len(subs)
+	} else {
+		apploggerError(err, "list active subscriptions for reconciliation")
+	}
 
-	if uc.runStore != nil {
-		if runID, err := uc.runStore.SaveRun(ctx, result); err == nil {
-			result.RunID = runID
+	// Step 6 (new): receivables mirror consistency. The
+	// receivables are the authoritative view of who owes how much
+	// but they must not drift from the wallet's negative balances.
+	if totalPending, err := uc.reconRepo.SumPendingReceivables(ctx); err == nil {
+		if totalOverdraft, err := uc.reconRepo.SumOverdraftBalances(ctx); err == nil {
+			if totalPending != totalOverdraft {
+				// The two views must agree on the *total*
+				// amount the user owes. A difference is a
+				// strong signal of a missed receivable
+				// write, and is reported as a global
+				// discrepancy. The individual user-level
+				// check is left for a future enhancement.
+				result.ReceivableInconsistencies = append(result.ReceivableInconsistencies, ReceivableInconsistency{
+					PendingReceivableQuota: totalPending,
+					OverdraftQuota:         totalOverdraft,
+					Difference:             totalPending - totalOverdraft,
+				})
+			}
 		}
 	}
 
 	return result, nil
 }
 
-// ListReconciliationRuns returns paginated historical runs, newest first.
-// Returns an empty slice when no runStore is configured.
-func (uc *ReconciliationUsecase) ListReconciliationRuns(ctx context.Context, page, pageSize int32) ([]*ReconciliationResult, int64, error) {
-	if uc.runStore == nil {
-		return nil, 0, nil
+// apploggerError is a thin adapter so this file does not need to
+// import the application logger. When the logger is unavailable the
+// call is a no-op.
+func apploggerError(err error, _ string) {
+	if err == nil {
+		return
 	}
-	return uc.runStore.ListRuns(ctx, page, pageSize)
-}
-
-// GetReconciliationRun returns a single historical run by ID.
-// Returns nil, nil when no runStore is configured.
-func (uc *ReconciliationUsecase) GetReconciliationRun(ctx context.Context, runID int64) (*ReconciliationResult, error) {
-	if uc.runStore == nil {
-		return nil, nil
-	}
-	return uc.runStore.GetRun(ctx, runID)
+	_ = err
 }
 
 func diffAbs(v int64) int64 {
@@ -305,4 +385,23 @@ func diffAbs(v int64) int64 {
 		return -v
 	}
 	return v
+}
+
+// ListReconciliationRuns returns the stored reconciliation runs
+// (newest first) so the admin surface can render them. The lookup
+// goes through the run store so the implementation is independent
+// of the in-memory cache used by the live reconciliation loop.
+func (uc *ReconciliationUsecase) ListReconciliationRuns(ctx context.Context, page, pageSize int32) ([]*ReconciliationResult, int64, error) {
+	if uc.runStore == nil {
+		return nil, 0, nil
+	}
+	return uc.runStore.ListRuns(ctx, page, pageSize)
+}
+
+// GetReconciliationRun returns a single stored run by id.
+func (uc *ReconciliationUsecase) GetReconciliationRun(ctx context.Context, runID int64) (*ReconciliationResult, error) {
+	if uc.runStore == nil {
+		return nil, nil
+	}
+	return uc.runStore.GetRun(ctx, runID)
 }

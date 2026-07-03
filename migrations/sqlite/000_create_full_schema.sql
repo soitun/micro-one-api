@@ -261,12 +261,20 @@ CREATE TABLE IF NOT EXISTS billing_reservations (
   created_at INTEGER DEFAULT 0,
   updated_at INTEGER DEFAULT 0,
   expired_at INTEGER DEFAULT 0,
-  subscription_account_id TEXT DEFAULT '0'
+  subscription_account_id TEXT DEFAULT '0',
+  subscription_id INTEGER NOT NULL DEFAULT 0,
+  subscription_amount_usd REAL NOT NULL DEFAULT 0,
+  subscription_daily_window_start INTEGER NOT NULL DEFAULT 0,
+  subscription_weekly_window_start INTEGER NOT NULL DEFAULT 0,
+  subscription_monthly_window_start INTEGER NOT NULL DEFAULT 0,
+  balance_amount_quota INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_billing_reservations_user_id       ON billing_reservations(user_id);
 CREATE INDEX IF NOT EXISTS idx_billing_reservations_request_id     ON billing_reservations(request_id);
 CREATE INDEX IF NOT EXISTS idx_billing_reservations_status_expired ON billing_reservations(status, expired_at);
+CREATE INDEX IF NOT EXISTS idx_billing_reservations_user_status   ON billing_reservations(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_billing_reservations_subscription  ON billing_reservations(subscription_id, status);
 
 CREATE TABLE IF NOT EXISTS billing_ledgers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -288,7 +296,11 @@ CREATE TABLE IF NOT EXISTS billing_ledgers (
   elapsed_time INTEGER DEFAULT 0,
   is_stream INTEGER DEFAULT 0,
   endpoint TEXT DEFAULT '',
-  upstream_cost INTEGER DEFAULT 0
+  upstream_cost INTEGER DEFAULT 0,
+  cost_source TEXT NOT NULL DEFAULT 'balance',
+  subscription_cost INTEGER NOT NULL DEFAULT 0,
+  balance_cost INTEGER NOT NULL DEFAULT 0,
+  ledger_dedupe_key TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_billing_ledgers_user_id           ON billing_ledgers(user_id);
@@ -303,6 +315,8 @@ CREATE INDEX IF NOT EXISTS idx_billing_ledgers_upstream_cost_created
   ON billing_ledgers(upstream_cost, created_at);
 CREATE INDEX IF NOT EXISTS idx_billing_ledgers_subscription_account_created
   ON billing_ledgers(subscription_account_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_billing_ledgers_cost_source_created ON billing_ledgers(cost_source, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_dedupe_key ON billing_ledgers(ledger_dedupe_key);
 
 CREATE TABLE IF NOT EXISTS billing_redeem_codes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -504,3 +518,25 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   version TEXT NOT NULL PRIMARY KEY,
   applied_at INTEGER NOT NULL DEFAULT 0
 );
+
+-- Subscription priority deduction: account_receivables is the append-only
+-- mirror of wallet overdraft events produced by the dual-track commit
+-- pipeline. Dedupe key is reservation_id (one receivable per reservation).
+
+CREATE TABLE IF NOT EXISTS account_receivables (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  reservation_id TEXT NOT NULL,
+  overdue_quota INTEGER NOT NULL,
+  overdue_usd REAL NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER DEFAULT 0,
+  updated_at INTEGER DEFAULT 0,
+  settled_at INTEGER DEFAULT 0,
+  settled_quota INTEGER NOT NULL DEFAULT 0,
+  remark TEXT DEFAULT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_account_receivable_reservation ON account_receivables(reservation_id);
+CREATE INDEX IF NOT EXISTS idx_account_receivable_user ON account_receivables(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_account_receivable_status_created ON account_receivables(status, created_at);

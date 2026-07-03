@@ -66,6 +66,8 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	if len(pricing.GroupRatios) == 0 {
 		pricing.GroupRatios = biz.DefaultGroupRatios()
 	}
+	subscriptionRepo := subscriptiondata.NewRepository(d.DB(), d.Redis())
+	subscriptionUc := subscriptionbiz.NewSubscriptionUsecase(subscriptionRepo, subscriptionRepo)
 	uc := biz.NewBillingUsecaseWithPricing(
 		d.AccountRepo(),
 		d.ReservationRepo(),
@@ -73,6 +75,8 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 		d.RedeemRepo(),
 		pricing,
 	)
+	uc.SetSubscriptionPrimatives(subscriptionUc)
+	uc.SetReceivableRepo(d.ReceivableRepo())
 	var asyncBilling *biz.AsyncBillingUsecase
 	if cfg.Billing.Async.Enabled {
 		asyncBilling = biz.NewAsyncBillingUsecase(
@@ -91,8 +95,6 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	)
 	paymentProvider := biz.NewConfiguredPaymentProvider(cfg.Payment)
 	paymentAssetIssuer := biz.NewPaymentAssetIssuer(uc)
-	subscriptionRepo := subscriptiondata.NewRepository(d.DB(), d.Redis())
-	subscriptionUc := subscriptionbiz.NewSubscriptionUsecase(subscriptionRepo, subscriptionRepo)
 	paymentSubscriptionAssigner := biz.NewPaymentSubscriptionAssigner(subscriptionUc, subscriptionRepo)
 	paymentUc := biz.NewPaymentUsecaseWithAssigner(d.PaymentRepo(), paymentProvider, paymentAssetIssuer, paymentSubscriptionAssigner)
 	alipayVerifier := biz.NewAlipayPaymentProvider(cfg.Payment.Alipay)

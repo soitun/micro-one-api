@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Check, ChevronRight, CreditCard, Loader2, ShieldCheck, WalletCards } from 'lucide-react';
 import { toast } from 'sonner';
+import { PurchasablePlansSection } from '@/components/PurchasablePlansSection';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api';
 import { unwrapApiData } from '@/lib/api-response';
@@ -231,6 +232,10 @@ export function RechargePage() {
             <div className="mt-3 text-lg font-black text-slate-950 dark:text-white">1 CNY = {RATE} USD</div>
           </div>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-card">
+        <PurchasablePlansSection />
       </section>
 
       <div className="fixed inset-x-4 bottom-4 z-10 md:left-[19rem] md:right-8 xl:right-10">

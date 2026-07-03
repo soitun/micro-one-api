@@ -126,3 +126,44 @@ var RelayCodexQuotaUsedPercent = prometheus.NewGaugeVec(
 	},
 	[]string{"window"},
 )
+
+// SubscriptionPriorityReservationsTotal counts dual-track pre-deduction
+// outcomes by result ("absorbed", "partial", "wallet_only",
+// "rejected"). The four counters are intended to power a Grafana
+// panel that confirms the new flow is doing what it claims: most
+// requests should be in the "absorbed" bucket, "wallet_only" should
+// match the post-cap tail, and "rejected" should stay near zero.
+var SubscriptionPriorityReservationsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "micro_one_api",
+		Subsystem: "subscription",
+		Name:      "priority_reservations_total",
+		Help:      "Total dual-track pre-deduction reservations by outcome",
+	},
+	[]string{"result"},
+)
+
+// NegativeBalanceTotal counts requests where CommitBalanceInTx
+// drove the wallet negative. Useful for alerting on a sudden
+// surge in overdrafts that might indicate a misconfigured group
+// limit.
+var NegativeBalanceTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Namespace: "micro_one_api",
+		Subsystem: "billing",
+		Name:      "negative_balance_total",
+		Help:      "Total number of commits that pushed the wallet into a negative balance",
+	},
+)
+
+// OverdueReceivablesTotal is a gauge of currently pending (un-settled)
+// receivables. A growing value over time indicates a flow of
+// overdrafts that is not being settled by recharges.
+var OverdueReceivablesTotal = prometheus.NewGauge(
+	prometheus.GaugeOpts{
+		Namespace: "micro_one_api",
+		Subsystem: "billing",
+		Name:      "overdue_receivables_quota",
+		Help:      "Current total pending receivables quota (negative-balance mirror)",
+	},
+)

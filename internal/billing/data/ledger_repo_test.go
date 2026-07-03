@@ -38,6 +38,10 @@ func setupLedgerTestDB(t *testing.T) *gorm.DB {
 			elapsed_time INTEGER DEFAULT 0,
 			is_stream INTEGER DEFAULT 0,
 			endpoint TEXT DEFAULT '',
+			cost_source TEXT NOT NULL DEFAULT 'balance',
+			subscription_cost INTEGER NOT NULL DEFAULT 0,
+			balance_cost INTEGER NOT NULL DEFAULT 0,
+			ledger_dedupe_key TEXT NOT NULL DEFAULT '',
 			created_at DATETIME
 		)
 	`).Error

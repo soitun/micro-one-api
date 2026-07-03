@@ -2,11 +2,13 @@ package biz
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // 保留原有的 mock 实现
@@ -47,6 +49,32 @@ func (m *mockAccountRepo) UpdateUsage(ctx context.Context, userID string, usedAm
 func (m *mockAccountRepo) UpdateFrozenAmount(ctx context.Context, userID string, delta int64) error {
 	m.account.FrozenAmount += delta
 	return nil
+}
+
+func (m *mockAccountRepo) ReserveBalanceInTx(ctx context.Context, tx *gorm.DB, userID string, amount int64, allowOverdraft bool) (int64, int64, int64, error) {
+	if amount < 0 {
+		return 0, 0, 0, errors.New("negative amount")
+	}
+	if m.account.Balance-amount < 0 && !allowOverdraft {
+		return m.account.Balance, m.account.Balance, m.account.FrozenAmount, ErrInsufficientQuota
+	}
+	oldBalance := m.account.Balance
+	m.account.Balance -= amount
+	m.account.FrozenAmount += amount
+	return oldBalance, m.account.Balance, m.account.FrozenAmount, nil
+}
+
+func (m *mockAccountRepo) CommitBalanceInTx(ctx context.Context, tx *gorm.DB, userID string, reserved, actual int64, allowOverdraft bool) (int64, int64, error) {
+	oldBalance := m.account.Balance
+	m.account.FrozenAmount -= reserved
+	m.account.Balance += reserved - actual
+	return oldBalance, m.account.Balance, nil
+}
+
+func (m *mockAccountRepo) ReleaseBalanceInTx(ctx context.Context, tx *gorm.DB, userID string, reserved int64) (int64, error) {
+	m.account.FrozenAmount -= reserved
+	m.account.Balance += reserved
+	return m.account.Balance, nil
 }
 
 type mockReservationRepo struct {
@@ -92,6 +120,57 @@ func (m *mockReservationRepo) GetExpiredReservations(ctx context.Context) ([]*Re
 	return expired, nil
 }
 
+func (m *mockReservationRepo) CreateReservationInTx(ctx context.Context, tx *gorm.DB, reservation *Reservation) error {
+	return m.CreateReservation(ctx, reservation)
+}
+
+func (m *mockReservationRepo) GetReservationInTx(ctx context.Context, tx *gorm.DB, reservationID string) (*Reservation, error) {
+	return m.GetReservation(ctx, reservationID)
+}
+
+func (m *mockReservationRepo) CASReservationStatus(ctx context.Context, tx *gorm.DB, reservationID, from, to string) (bool, error) {
+	res, ok := m.reservations[reservationID]
+	if !ok {
+		return false, ErrReservationNotFound
+	}
+	if res.Status != from {
+		return false, nil
+	}
+	res.Status = to
+	return true, nil
+}
+
+func (m *mockReservationRepo) LockSubscriptionRow(ctx context.Context, tx *gorm.DB, subscriptionID int64) error {
+	return nil
+}
+
+func (m *mockReservationRepo) SumActiveFrozenInTx(ctx context.Context, tx *gorm.DB, userID string, subscriptionID, dailyStart, weeklyStart, monthlyStart int64) (float64, float64, float64, int64, error) {
+	var daily, weekly, monthly float64
+	var count int64
+	for _, res := range m.reservations {
+		if res.UserID != userID || res.SubscriptionID != subscriptionID || res.Status != ReservationStatusReserved {
+			continue
+		}
+		matched := false
+		if res.SubscriptionDailyWindowStart == dailyStart {
+			daily += res.SubscriptionAmountUSD
+			matched = true
+		}
+		if res.SubscriptionWeeklyWindowStart == weeklyStart {
+			weekly += res.SubscriptionAmountUSD
+			matched = true
+		}
+		if res.SubscriptionMonthlyWindowStart == monthlyStart {
+			monthly += res.SubscriptionAmountUSD
+			matched = true
+		}
+		if matched {
+			count++
+		}
+	}
+	return daily, weekly, monthly, count, nil
+}
+
 type mockLedgerRepo struct {
 	ledgers []*Ledger
 }
@@ -123,6 +202,23 @@ func (m *mockLedgerRepo) ListLedgersBySubscriptionAccount(ctx context.Context, s
 
 func (m *mockLedgerRepo) AggregateUsage(ctx context.Context, filter UsageFilter) ([]*UsageBucket, *UsageTotals, error) {
 	return nil, &UsageTotals{}, nil
+}
+
+func (m *mockLedgerRepo) CreateLedgerInTx(ctx context.Context, tx *gorm.DB, ledger *Ledger) error {
+	return m.CreateLedger(ctx, ledger)
+}
+
+func (m *mockLedgerRepo) FindByDedupeKey(ctx context.Context, tx *gorm.DB, key string) (*Ledger, error) {
+	for _, ledger := range m.ledgers {
+		if ledger.LedgerDedupeKey == key {
+			return ledger, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockLedgerRepo) SumSubscriptionCostByReservation(ctx context.Context, reservationIDs []string) (int64, error) {
+	return 0, nil
 }
 
 type mockPricingStore struct {
@@ -357,10 +453,14 @@ func TestCommitQuota_AlreadyCommitted(t *testing.T) {
 
 	uc := NewBillingUsecase(accountRepo, reservationRepo, ledgerRepo, redeemRepo, nil)
 
-	_, _, err := uc.CommitQuota(context.Background(), "res1", 80, true)
+	// Idempotent re-entry: the reservation was already committed
+	// during a previous call, so the retried commit returns the
+	// stored Amount (100) as the committed cost with no refund.
+	amount, refund, err := uc.CommitQuota(context.Background(), "res1", 80, true)
 
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrReservationCommitted)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), amount)
+	assert.Equal(t, int64(0), refund)
 }
 
 // 测试释放预扣

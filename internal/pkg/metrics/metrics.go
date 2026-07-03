@@ -245,6 +245,9 @@ func init() {
 	prometheus.MustRegister(
 		SubscriptionQuotaChecksTotal,
 		SubscriptionUsageRecordsTotal,
+		SubscriptionPriorityReservationsTotal,
+		NegativeBalanceTotal,
+		OverdueReceivablesTotal,
 		RelaySubscriptionAdaptorRequestsTotal,
 		RelaySubscriptionFailoverTotal,
 		RelaySubscriptionStickyTotal,

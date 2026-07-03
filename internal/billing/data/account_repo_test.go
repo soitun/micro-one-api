@@ -42,6 +42,13 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			status TEXT,
 			model TEXT,
 			channel_id TEXT,
+			subscription_account_id TEXT DEFAULT '0',
+			subscription_id INTEGER NOT NULL DEFAULT 0,
+			subscription_amount_usd REAL NOT NULL DEFAULT 0,
+			subscription_daily_window_start INTEGER NOT NULL DEFAULT 0,
+			subscription_weekly_window_start INTEGER NOT NULL DEFAULT 0,
+			subscription_monthly_window_start INTEGER NOT NULL DEFAULT 0,
+			balance_amount_quota INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME,
 			updated_at DATETIME,
 			expired_at DATETIME
@@ -65,9 +72,15 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			completion_tokens INTEGER DEFAULT 0,
 			cache_read_tokens INTEGER DEFAULT 0,
 			channel_id INTEGER DEFAULT 0,
+			subscription_account_id INTEGER NOT NULL DEFAULT 0,
 			elapsed_time INTEGER DEFAULT 0,
 			is_stream INTEGER DEFAULT 0,
 			endpoint TEXT DEFAULT '',
+			upstream_cost INTEGER DEFAULT 0,
+			cost_source TEXT NOT NULL DEFAULT 'balance',
+			subscription_cost INTEGER NOT NULL DEFAULT 0,
+			balance_cost INTEGER NOT NULL DEFAULT 0,
+			ledger_dedupe_key TEXT NOT NULL DEFAULT '',
 			created_at DATETIME
 		)
 	`).Error
@@ -96,6 +109,23 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			balance_before INTEGER,
 			balance_after INTEGER,
 			created_at DATETIME
+		)
+	`).Error
+	require.NoError(t, err)
+
+	err = db.Exec(`
+		CREATE TABLE account_receivables (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id TEXT,
+			reservation_id TEXT UNIQUE,
+			overdue_quota INTEGER NOT NULL DEFAULT 0,
+			overdue_usd REAL NOT NULL DEFAULT 0,
+			status TEXT NOT NULL DEFAULT 'pending',
+			created_at DATETIME,
+			updated_at DATETIME,
+			settled_at DATETIME,
+			settled_quota INTEGER NOT NULL DEFAULT 0,
+			remark TEXT
 		)
 	`).Error
 	require.NoError(t, err)
@@ -317,4 +347,74 @@ func TestAccountRepo_Transaction_Rollback(t *testing.T) {
 	err = db.Raw("SELECT balance FROM users WHERE id = 1").Scan(&account).Error
 	require.NoError(t, err)
 	assert.Equal(t, int64(1000), account.Balance) // 配额应该保持不变
+}
+
+func TestAccountRepo_CommitBalanceInTx_NetReservedMinusActual(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	}()
+
+	err := db.Exec(`
+		INSERT INTO users (id, username, display_name, "group", balance, used_amount, request_count, frozen_amount, status)
+		VALUES (1, 'testuser', 'Test User', 'default', 800, 100, 10, 200, 1)
+	`).Error
+	require.NoError(t, err)
+
+	data := &Data{db: db}
+	repo := NewAccountRepo(data)
+	tx := db.Begin()
+	oldBalance, newBalance, err := repo.CommitBalanceInTx(context.Background(), tx, "1", 200, 150, true)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit().Error)
+
+	assert.Equal(t, int64(800), oldBalance)
+	assert.Equal(t, int64(850), newBalance)
+
+	var account struct {
+		Balance      int64 `gorm:"column:balance"`
+		FrozenAmount int64 `gorm:"column:frozen_amount"`
+	}
+	err = db.Raw("SELECT balance, frozen_amount FROM users WHERE id = 1").Scan(&account).Error
+	require.NoError(t, err)
+	assert.Equal(t, int64(850), account.Balance)
+	assert.Equal(t, int64(0), account.FrozenAmount)
+}
+
+func TestReceivableRepo_SettleOldestForUserInTx_PartialKeepsPending(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	}()
+
+	err := db.Exec(`
+		INSERT INTO account_receivables (user_id, reservation_id, overdue_quota, overdue_usd, status, settled_quota)
+		VALUES ('1', 'res-1', 100, 0.0002, 'pending', 0)
+	`).Error
+	require.NoError(t, err)
+
+	data := &Data{db: db}
+	repo := NewReceivableRepo(data)
+	tx := db.Begin()
+	settled, err := repo.SettleOldestForUserInTx(context.Background(), tx, "1", 80)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit().Error)
+	assert.Equal(t, int64(80), settled)
+
+	var row struct {
+		OverdueQuota int64  `gorm:"column:overdue_quota"`
+		SettledQuota int64  `gorm:"column:settled_quota"`
+		Status       string `gorm:"column:status"`
+	}
+	err = db.Raw("SELECT overdue_quota, settled_quota, status FROM account_receivables WHERE reservation_id = 'res-1'").Scan(&row).Error
+	require.NoError(t, err)
+	assert.Equal(t, int64(100), row.OverdueQuota)
+	assert.Equal(t, int64(80), row.SettledQuota)
+	assert.Equal(t, biz.ReceivableStatusPending, row.Status)
+
+	pending, err := repo.SumOverduePendingByUser(context.Background(), "1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(20), pending)
 }

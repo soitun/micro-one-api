@@ -1,6 +1,10 @@
 package biz
 
-import "context"
+import (
+	"context"
+
+	"gorm.io/gorm"
+)
 
 type SubscriptionRepository interface {
 	CreateSubscription(ctx context.Context, subscription *UserSubscription) error
@@ -18,6 +22,19 @@ type SubscriptionRepository interface {
 	// must perform the read-roll-increment as a single atomic unit so concurrent
 	// callers cannot lose each other's increments.
 	AddUsage(ctx context.Context, userID int64, costUSD float64, now int64) error
+	// AddUsageByIDInTx is the row-locked variant used by the dual-track commit
+	// pipeline. It performs the read-roll-increment against the subscription
+	// identified by id (NOT userID) inside the caller's transaction so the
+	// commit and the subscription write either both succeed or both fail.
+	// Implementations must take a row lock on the subscription so the cost
+	// is appended to the same window the dual-track pre-deduction reserved
+	// against.
+	AddUsageByIDInTx(ctx context.Context, tx *gorm.DB, subscriptionID int64, costUSD float64, now int64) error
+	// GetByIDInTx is a row-locked read of the subscription inside the
+	// caller's transaction. Used by the dual-track commit pipeline so the
+	// committed cost is applied to the same subscription snapshot the
+	// pre-deduction locked.
+	GetByIDInTx(ctx context.Context, tx *gorm.DB, subscriptionID int64) (*UserSubscription, error)
 }
 
 type GroupRepository interface {

@@ -65,6 +65,18 @@ func (m *mockReconRepo) ListReservationsByStatus(ctx context.Context, status str
 	return result, nil
 }
 
+func (m *mockReconRepo) ListActiveSubscriptions(ctx context.Context) ([]*SubscriptionUsageSnapshot, error) {
+	return nil, nil
+}
+
+func (m *mockReconRepo) SumPendingReceivables(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockReconRepo) SumOverdraftBalances(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
 func TestRunReconciliation_ExpiredReservations(t *testing.T) {
 	account := &Account{UserID: "user1", Balance: 900, FrozenAmount: 100, Group: "default"}
 	expiredRes := &Reservation{

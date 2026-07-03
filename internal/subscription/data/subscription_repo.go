@@ -99,6 +99,69 @@ func (r *Repository) AddUsage(ctx context.Context, userID int64, costUSD float64
 	return r.addUsageMemory(ctx, userID, costUSD, now)
 }
 
+func (r *Repository) AddUsageByIDInTx(ctx context.Context, tx *gorm.DB, subscriptionID int64, costUSD float64, now int64) error {
+	if tx == nil {
+		return errors.New("nil transaction")
+	}
+	return r.addUsageByIDInTxDB(ctx, tx, subscriptionID, costUSD, now)
+}
+
+func (r *Repository) GetByIDInTx(ctx context.Context, tx *gorm.DB, subscriptionID int64) (*biz.UserSubscription, error) {
+	if tx == nil {
+		return nil, errors.New("nil transaction")
+	}
+	return r.getByIDInTxDB(ctx, tx, subscriptionID)
+}
+
+// addUsageByIDInTxDB performs the same read-roll-increment as
+// addUsageDB, but operates on an explicit subscription id (not the
+// user's active subscription) and inside the caller's transaction. The
+// row lock is taken on the subscription id so concurrent commits to
+// the same reservation cannot double-bill the subscription's quota.
+func (r *Repository) addUsageByIDInTxDB(ctx context.Context, tx *gorm.DB, subscriptionID int64, costUSD float64, now int64) error {
+	var model subscriptionModel
+	q := tx.WithContext(ctx).Where("id = ?", subscriptionID)
+	if dialectorName(tx) != "sqlite3" {
+		q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := q.First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return biz.ErrSubscriptionNotFound
+		}
+		return err
+	}
+	sub := subscriptionFromModel(&model)
+	rolled := biz.RollUsageWindows(&sub, now)
+	rolled.DailyUsageUSD += costUSD
+	rolled.WeeklyUsageUSD += costUSD
+	rolled.MonthlyUsageUSD += costUSD
+	return tx.Model(&subscriptionModel{}).Where("id = ?", subscriptionID).Updates(map[string]any{
+		"daily_usage_usd":      rolled.DailyUsageUSD,
+		"weekly_usage_usd":     rolled.WeeklyUsageUSD,
+		"monthly_usage_usd":    rolled.MonthlyUsageUSD,
+		"daily_window_start":   rolled.DailyWindowStart,
+		"weekly_window_start":  rolled.WeeklyWindowStart,
+		"monthly_window_start": rolled.MonthlyWindowStart,
+		"updated_at":           now,
+	}).Error
+}
+
+func (r *Repository) getByIDInTxDB(ctx context.Context, tx *gorm.DB, subscriptionID int64) (*biz.UserSubscription, error) {
+	var model subscriptionModel
+	q := tx.WithContext(ctx).Where("id = ?", subscriptionID)
+	if dialectorName(tx) != "sqlite3" {
+		q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := q.First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, biz.ErrSubscriptionNotFound
+		}
+		return nil, err
+	}
+	sub := subscriptionFromModel(&model)
+	return &sub, nil
+}
+
 // addUsageDB performs the read-roll-increment as a single transaction and takes
 // a row lock (SELECT ... FOR UPDATE) on engines that support it, so concurrent
 // callers serialize instead of losing each other's increments. Only the usage

@@ -47,6 +47,13 @@ func (j *CleanupJob) Stop() {
 	close(j.stopChan)
 }
 
+// cleanupExpiredReservations releases every reservation whose
+// expired_at has passed. The release goes through the unified
+// releaseReservation path so the wallet refund, the ledger entry,
+// and the status transition are all in one transaction; expired
+// reservations get the `expired` final status instead of `released`
+// so reconciliation can distinguish "user gave up" from "system
+// cleanup".
 func (j *CleanupJob) cleanupExpiredReservations(ctx context.Context) error {
 	reservations, err := j.uc.reservationRepo.GetExpiredReservations(ctx)
 	if err != nil {
@@ -54,15 +61,11 @@ func (j *CleanupJob) cleanupExpiredReservations(ctx context.Context) error {
 	}
 
 	for _, reservation := range reservations {
-		if err := j.uc.ReleaseQuota(ctx, reservation.ReservationID, "reservation expired"); err != nil {
+		if err := j.uc.releaseReservation(ctx, reservation.ReservationID, "reservation expired", ReservationStatusExpired); err != nil {
 			applogger.Log.Warn("failed to release expired reservation", zap.String("reservation_id", reservation.ReservationID), zap.Error(err))
-		} else {
-			applogger.Log.Info("released expired reservation", zap.String("reservation_id", reservation.ReservationID))
+			continue
 		}
-
-		if err := j.uc.reservationRepo.UpdateReservationStatus(ctx, reservation.ReservationID, ReservationStatusExpired); err != nil {
-			applogger.Log.Warn("failed to update reservation status to expired", zap.String("reservation_id", reservation.ReservationID), zap.Error(err))
-		}
+		applogger.Log.Info("released expired reservation", zap.String("reservation_id", reservation.ReservationID))
 	}
 
 	return nil
