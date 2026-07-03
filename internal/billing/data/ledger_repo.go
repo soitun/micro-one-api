@@ -180,8 +180,19 @@ func (r *ledgerRepo) AggregateLedgerByDate(ctx context.Context, userID string, l
 		ledgerType = biz.LedgerTypeConsume
 	}
 
+	// Build dialect-specific date expression
+	var dateExpr string
+	switch r.data.db.Dialector.Name() {
+	case "postgres":
+		dateExpr = `TO_CHAR(created_at, 'YYYY-MM-DD')`
+	case "mysql":
+		dateExpr = `DATE_FORMAT(created_at, '%Y-%m-%d')`
+	default: // sqlite
+		dateExpr = `strftime('%Y-%m-%d', created_at)`
+	}
+
 	dailyQuery := r.data.db.WithContext(ctx).Model(&ledgerModel{}).
-		Select(`strftime('%Y-%m-%d', created_at) as date,
+		Select(dateExpr+` as date,
 			COALESCE(SUM(ABS(amount)), 0) as quota,
 			COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
 			COALESCE(SUM(completion_tokens), 0) as completion_tokens,
@@ -189,17 +200,6 @@ func (r *ledgerRepo) AggregateLedgerByDate(ctx context.Context, userID string, l
 			COUNT(*) as count,
 			COALESCE(SUM(elapsed_time), 0) as elapsed_time`).
 		Where("type = ?", ledgerType)
-	if r.data.db.Dialector.Name() == "postgres" {
-		dailyQuery = r.data.db.WithContext(ctx).Model(&ledgerModel{}).
-			Select(`TO_CHAR(created_at, 'YYYY-MM-DD') as date,
-				COALESCE(SUM(ABS(amount)), 0) as quota,
-				COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
-				COALESCE(SUM(completion_tokens), 0) as completion_tokens,
-				COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
-				COUNT(*) as count,
-				COALESCE(SUM(elapsed_time), 0) as elapsed_time`).
-			Where("type = ?", ledgerType)
-	}
 	if userID != "" {
 		dailyQuery = dailyQuery.Where("user_id = ?", userID)
 	}
@@ -393,9 +393,11 @@ func usageQueryParts(groupBy []string) (groupCols, selectCols, joinSQL string) {
 		case biz.UsageDimType:
 			cols = append(cols, "type")
 		case biz.UsageDimDay:
-			cols = append(cols, "strftime('%Y-%m-%d', created_at) as day")
+			// Use DATE_FORMAT for MySQL, strftime for SQLite
+			cols = append(cols, "DATE_FORMAT(created_at, '%Y-%m-%d') as day")
 		case biz.UsageDimHour:
-			cols = append(cols, "strftime('%Y-%m-%d %H', created_at) as hour")
+			// Use DATE_FORMAT for MySQL, strftime for SQLite
+			cols = append(cols, "DATE_FORMAT(created_at, '%Y-%m-%d %H') as hour")
 		case biz.UsageDimSubscriptionAccount:
 			cols = append(cols, "subscription_account_id")
 		}
