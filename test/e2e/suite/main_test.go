@@ -345,7 +345,7 @@ func stepAccountSnapshot(t *testing.T, ctx context.Context, state *e2eState) {
 	if resp.Snapshot == nil {
 		t.Fatal("nil snapshot")
 	}
-	t.Logf("account snapshot: quota=%d", resp.Snapshot.Quota)
+	t.Logf("account snapshot: balance=%d", resp.Snapshot.Balance)
 }
 
 func stepVerifyQuotaDeducted(t *testing.T, ctx context.Context, state *e2eState) {

@@ -24,10 +24,10 @@ func (r *accountRepo) GetAccountSnapshot(ctx context.Context, userID string) (*b
 		Username     string `gorm:"column:username"`
 		DisplayName  string `gorm:"column:display_name"`
 		Group        string `gorm:"column:group"`
-		Quota        int64  `gorm:"column:quota"`
-		UsedQuota    int64  `gorm:"column:used_quota"`
+		Balance      int64  `gorm:"column:balance"`
+		UsedAmount   int64  `gorm:"column:used_amount"`
 		RequestCount int64  `gorm:"column:request_count"`
-		FrozenQuota  int64  `gorm:"column:frozen_quota"`
+		FrozenAmount int64  `gorm:"column:frozen_amount"`
 		Status       int32  `gorm:"column:status"`
 	}
 
@@ -43,17 +43,17 @@ func (r *accountRepo) GetAccountSnapshot(ctx context.Context, userID string) (*b
 		Username:     user.Username,
 		DisplayName:  user.DisplayName,
 		Group:        user.Group,
-		Quota:        user.Quota,
-		UsedQuota:    user.UsedQuota,
+		Balance:      user.Balance,
+		UsedAmount:   user.UsedAmount,
 		RequestCount: user.RequestCount,
-		FrozenQuota:  user.FrozenQuota,
+		FrozenAmount: user.FrozenAmount,
 		Status:       user.Status,
 	}, nil
 }
 
-func (r *accountRepo) UpdateQuota(ctx context.Context, userID string, delta int64, operationType string) (int64, error) {
+func (r *accountRepo) UpdateBalance(ctx context.Context, userID string, delta int64, operationType string) (int64, error) {
 	var account struct {
-		Quota int64 `gorm:"column:quota"`
+		Balance int64 `gorm:"column:balance"`
 	}
 
 	tx := r.data.db.WithContext(ctx).Begin()
@@ -71,13 +71,13 @@ func (r *accountRepo) UpdateQuota(ctx context.Context, userID string, delta int6
 		return 0, err
 	}
 
-	newQuota := account.Quota + delta
-	if newQuota < 0 {
+	newBalance := account.Balance + delta
+	if newBalance < 0 {
 		tx.Rollback()
 		return 0, biz.ErrInsufficientQuota
 	}
 
-	if err := tx.Table("users").Where("id = ?", userID).Update("quota", newQuota).Error; err != nil {
+	if err := tx.Table("users").Where("id = ?", userID).Update("balance", newBalance).Error; err != nil {
 		tx.Rollback()
 		return 0, err
 	}
@@ -86,30 +86,28 @@ func (r *accountRepo) UpdateQuota(ctx context.Context, userID string, delta int6
 		return 0, err
 	}
 
-	return newQuota, nil
+	return newBalance, nil
 }
 
-func (r *accountRepo) UpdateUsage(ctx context.Context, userID string, usedQuotaDelta, requestCountDelta int64) error {
+func (r *accountRepo) UpdateUsage(ctx context.Context, userID string, usedAmountDelta, requestCountDelta int64) error {
 	return r.data.db.WithContext(ctx).Table("users").
 		Where("id = ?", userID).
 		Updates(map[string]interface{}{
-			"used_quota":    gorm.Expr("used_quota + ?", usedQuotaDelta),
+			"used_amount":   gorm.Expr("used_amount + ?", usedAmountDelta),
 			"request_count": gorm.Expr("request_count + ?", requestCountDelta),
 		}).Error
 }
 
-func (r *accountRepo) UpdateFrozenQuota(ctx context.Context, userID string, delta int64) error {
-	// 先查询当前值
+func (r *accountRepo) UpdateFrozenAmount(ctx context.Context, userID string, delta int64) error {
 	var account struct {
-		FrozenQuota int64 `gorm:"column:frozen_quota"`
+		FrozenAmount int64 `gorm:"column:frozen_amount"`
 	}
 	if err := r.data.db.WithContext(ctx).Table("users").Where("id = ?", userID).First(&account).Error; err != nil {
 		return err
 	}
 
-	// 计算新值
-	newFrozenQuota := account.FrozenQuota + delta
-	return r.data.db.WithContext(ctx).Table("users").Where("id = ?", userID).Update("frozen_quota", newFrozenQuota).Error
+	newFrozenAmount := account.FrozenAmount + delta
+	return r.data.db.WithContext(ctx).Table("users").Where("id = ?", userID).Update("frozen_amount", newFrozenAmount).Error
 }
 
 func (r *accountRepo) BatchGetAccountSnapshots(ctx context.Context, userIDs []string) (map[string]*biz.Account, error) {
@@ -122,10 +120,10 @@ func (r *accountRepo) BatchGetAccountSnapshots(ctx context.Context, userIDs []st
 		Username     string `gorm:"column:username"`
 		DisplayName  string `gorm:"column:display_name"`
 		Group        string `gorm:"column:group"`
-		Quota        int64  `gorm:"column:quota"`
-		UsedQuota    int64  `gorm:"column:used_quota"`
+		Balance      int64  `gorm:"column:balance"`
+		UsedAmount   int64  `gorm:"column:used_amount"`
 		RequestCount int64  `gorm:"column:request_count"`
-		FrozenQuota  int64  `gorm:"column:frozen_quota"`
+		FrozenAmount int64  `gorm:"column:frozen_amount"`
 		Status       int32  `gorm:"column:status"`
 	}
 
@@ -141,10 +139,10 @@ func (r *accountRepo) BatchGetAccountSnapshots(ctx context.Context, userIDs []st
 			Username:     user.Username,
 			DisplayName:  user.DisplayName,
 			Group:        user.Group,
-			Quota:        user.Quota,
-			UsedQuota:    user.UsedQuota,
+			Balance:      user.Balance,
+			UsedAmount:   user.UsedAmount,
 			RequestCount: user.RequestCount,
-			FrozenQuota:  user.FrozenQuota,
+			FrozenAmount: user.FrozenAmount,
 			Status:       user.Status,
 		}
 	}

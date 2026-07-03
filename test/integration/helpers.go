@@ -301,12 +301,12 @@ func (m *testIdentityRepo) DeleteUser(ctx context.Context, userID int64) error {
 	return nil
 }
 
-func (m *testIdentityRepo) IncreaseUserQuota(ctx context.Context, userID int64, amount int64) error {
+func (m *testIdentityRepo) IncreaseUserBalance(ctx context.Context, userID int64, amount int64) error {
 	user, ok := m.users[userID]
 	if !ok {
 		return identitybiz.ErrUserNotFound
 	}
-	user.Quota += amount
+	user.Balance += amount
 	return nil
 }
 

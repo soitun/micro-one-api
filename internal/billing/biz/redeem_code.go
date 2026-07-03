@@ -28,11 +28,11 @@ func (r *RedeemCode) IsAvailable() bool {
 }
 
 type RedeemRecord struct {
-	ID          uint
-	UserID      string
-	Code        string
-	Amount      int64
-	QuotaBefore int64
-	QuotaAfter  int64
-	CreatedAt   time.Time
+	ID            uint
+	UserID        string
+	Code          string
+	Amount        int64
+	BalanceBefore int64
+	BalanceAfter  int64
+	CreatedAt     time.Time
 }

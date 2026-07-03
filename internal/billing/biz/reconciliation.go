@@ -165,10 +165,9 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 			if err := uc.reservationRepo.UpdateReservationStatus(ctx, res.ReservationID, ReservationStatusExpired); err != nil {
 				continue
 			}
-			// Unfreeze the quota
-			_ = uc.accountRepo.UpdateFrozenQuota(ctx, res.UserID, -res.Amount)
-			// Return the quota
-			_, _ = uc.accountRepo.UpdateQuota(ctx, res.UserID, res.Amount, LedgerTypeRefund)
+			// Unfreeze and return the reserved wallet amount.
+			_ = uc.accountRepo.UpdateFrozenAmount(ctx, res.UserID, -res.Amount)
+			_, _ = uc.accountRepo.UpdateBalance(ctx, res.UserID, res.Amount, LedgerTypeRefund)
 			result.ExpiredCleaned++
 		}
 	}
@@ -186,9 +185,9 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 			continue
 		}
 
-		// The account's quota should roughly match the ledger net amount
+		// The account's balance should roughly match the ledger net amount
 		// Allow a tolerance of 100 units for rounding
-		diff := account.Quota - ledgerNet
+		diff := account.Balance - ledgerNet
 		if diff < 0 {
 			diff = -diff
 		}
@@ -196,9 +195,9 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 			result.AccountInconsistencies = append(result.AccountInconsistencies, AccountInconsistency{
 				UserID:          account.UserID,
 				ExpectedQuota:   ledgerNet,
-				ActualQuota:     account.Quota,
+				ActualQuota:     account.Balance,
 				LedgerNetAmount: ledgerNet,
-				FrozenQuota:     account.FrozenQuota,
+				FrozenQuota:     account.FrozenAmount,
 			})
 		}
 	}

@@ -102,7 +102,7 @@ func (uc *BillingUsecase) ReserveQuota(ctx context.Context, userID, requestID st
 		cost = 1
 	}
 
-	if account.AvailableQuota() < cost {
+	if account.AvailableBalance() < cost {
 		return nil, ErrInsufficientQuota
 	}
 
@@ -128,12 +128,12 @@ func (uc *BillingUsecase) ReserveQuota(ctx context.Context, userID, requestID st
 		return nil, fmt.Errorf("create reservation: %w", err)
 	}
 
-	if _, err := uc.accountRepo.UpdateQuota(ctx, userID, -cost, LedgerTypeConsume); err != nil {
-		return nil, fmt.Errorf("update quota: %w", err)
+	if _, err := uc.accountRepo.UpdateBalance(ctx, userID, -cost, LedgerTypeConsume); err != nil {
+		return nil, fmt.Errorf("update balance: %w", err)
 	}
 
-	if err := uc.accountRepo.UpdateFrozenQuota(ctx, userID, cost); err != nil {
-		return nil, fmt.Errorf("update frozen quota: %w", err)
+	if err := uc.accountRepo.UpdateFrozenAmount(ctx, userID, cost); err != nil {
+		return nil, fmt.Errorf("update frozen amount: %w", err)
 	}
 
 	return reservation, nil
@@ -178,24 +178,24 @@ func (uc *BillingUsecase) CommitQuotaWithUsage(ctx context.Context, reservationI
 
 	if success {
 		diff := reservation.Amount - actualCost
-		balanceAfter := account.Quota
+		balanceAfter := account.Balance
 
-		if err := uc.accountRepo.UpdateFrozenQuota(ctx, reservation.UserID, -reservation.Amount); err != nil {
-			return 0, 0, fmt.Errorf("release frozen quota: %w", err)
+		if err := uc.accountRepo.UpdateFrozenAmount(ctx, reservation.UserID, -reservation.Amount); err != nil {
+			return 0, 0, fmt.Errorf("release frozen amount: %w", err)
 		}
 
 		if diff > 0 {
-			newQuota, err := uc.accountRepo.UpdateQuota(ctx, reservation.UserID, diff, LedgerTypeRefund)
+			newBalance, err := uc.accountRepo.UpdateBalance(ctx, reservation.UserID, diff, LedgerTypeRefund)
 			if err != nil {
-				return 0, 0, fmt.Errorf("refund quota: %w", err)
+				return 0, 0, fmt.Errorf("refund balance: %w", err)
 			}
-			balanceAfter = newQuota
+			balanceAfter = newBalance
 		} else if diff < 0 {
-			newQuota, err := uc.accountRepo.UpdateQuota(ctx, reservation.UserID, diff, LedgerTypeConsume)
+			newBalance, err := uc.accountRepo.UpdateBalance(ctx, reservation.UserID, diff, LedgerTypeConsume)
 			if err != nil {
-				return 0, 0, fmt.Errorf("charge additional quota: %w", err)
+				return 0, 0, fmt.Errorf("charge additional balance: %w", err)
 			}
-			balanceAfter = newQuota
+			balanceAfter = newBalance
 		}
 
 		if err := uc.reservationRepo.UpdateReservationStatus(ctx, reservationID, ReservationStatusCommitted); err != nil {
@@ -241,16 +241,16 @@ func (uc *BillingUsecase) CommitQuotaWithUsage(ctx context.Context, reservationI
 			return 0, 0, fmt.Errorf("update reservation status: %w", err)
 		}
 
-		if err := uc.accountRepo.UpdateFrozenQuota(ctx, reservation.UserID, -reservation.Amount); err != nil {
-			return 0, 0, fmt.Errorf("release frozen quota: %w", err)
+		if err := uc.accountRepo.UpdateFrozenAmount(ctx, reservation.UserID, -reservation.Amount); err != nil {
+			return 0, 0, fmt.Errorf("release frozen amount: %w", err)
 		}
 
-		newQuota, err := uc.accountRepo.UpdateQuota(ctx, reservation.UserID, reservation.Amount, LedgerTypeRefund)
+		newBalance, err := uc.accountRepo.UpdateBalance(ctx, reservation.UserID, reservation.Amount, LedgerTypeRefund)
 		if err != nil {
-			return 0, 0, fmt.Errorf("update quota: %w", err)
+			return 0, 0, fmt.Errorf("update balance: %w", err)
 		}
 
-		balanceAfter := newQuota
+		balanceAfter := newBalance
 		ledger := &Ledger{
 			UserID:       reservation.UserID,
 			Amount:       reservation.Amount,
@@ -282,16 +282,16 @@ func (uc *BillingUsecase) ReleaseQuota(ctx context.Context, reservationID, reaso
 		return fmt.Errorf("update reservation status: %w", err)
 	}
 
-	if err := uc.accountRepo.UpdateFrozenQuota(ctx, reservation.UserID, -reservation.Amount); err != nil {
-		return fmt.Errorf("release frozen quota: %w", err)
+	if err := uc.accountRepo.UpdateFrozenAmount(ctx, reservation.UserID, -reservation.Amount); err != nil {
+		return fmt.Errorf("release frozen amount: %w", err)
 	}
 
-	newQuota, err := uc.accountRepo.UpdateQuota(ctx, reservation.UserID, reservation.Amount, LedgerTypeRefund)
+	newBalance, err := uc.accountRepo.UpdateBalance(ctx, reservation.UserID, reservation.Amount, LedgerTypeRefund)
 	if err != nil {
-		return fmt.Errorf("update quota: %w", err)
+		return fmt.Errorf("update balance: %w", err)
 	}
 
-	balanceAfter := newQuota
+	balanceAfter := newBalance
 	ledger := &Ledger{
 		UserID:       reservation.UserID,
 		Amount:       reservation.Amount,
@@ -322,12 +322,12 @@ func (uc *BillingUsecase) TopUpQuota(ctx context.Context, userID, operatorID str
 		return 0, fmt.Errorf("get account snapshot: %w", err)
 	}
 
-	newQuota, err := uc.accountRepo.UpdateQuota(ctx, userID, amount, LedgerTypeRecharge)
+	newBalance, err := uc.accountRepo.UpdateBalance(ctx, userID, amount, LedgerTypeRecharge)
 	if err != nil {
-		return 0, fmt.Errorf("update quota: %w", err)
+		return 0, fmt.Errorf("update balance: %w", err)
 	}
 
-	balanceAfter := newQuota
+	balanceAfter := newBalance
 	ledger := &Ledger{
 		UserID:       userID,
 		Amount:       amount,
@@ -340,11 +340,11 @@ func (uc *BillingUsecase) TopUpQuota(ctx context.Context, userID, operatorID str
 		return 0, fmt.Errorf("create ledger: %w", err)
 	}
 
-	return newQuota, nil
+	return newBalance, nil
 }
 
 // PurchaseSubscription atomically deducts priceQuota from the user's wallet and
-// records a "subscription" ledger entry. UpdateQuota rejects the operation with
+// records a "subscription" ledger entry. UpdateBalance rejects the operation with
 // ErrInsufficientQuota when the balance would go negative, so callers never need
 // a separate balance pre-check. The subscription row itself is created by the
 // caller (admin-api); on failure there it compensates via TopUpQuota.
@@ -356,7 +356,7 @@ func (uc *BillingUsecase) PurchaseSubscription(ctx context.Context, userID strin
 		return 0, fmt.Errorf("get account snapshot: %w", err)
 	}
 
-	newQuota, err := uc.accountRepo.UpdateQuota(ctx, userID, -priceQuota, LedgerTypeSubscription)
+	newBalance, err := uc.accountRepo.UpdateBalance(ctx, userID, -priceQuota, LedgerTypeSubscription)
 	if err != nil {
 		return 0, err
 	}
@@ -364,7 +364,7 @@ func (uc *BillingUsecase) PurchaseSubscription(ctx context.Context, userID strin
 	ledger := &Ledger{
 		UserID:       userID,
 		Amount:       -priceQuota,
-		BalanceAfter: newQuota,
+		BalanceAfter: newBalance,
 		Type:         LedgerTypeSubscription,
 		ReferenceID:  strconv.FormatInt(groupID, 10),
 		Remark:       remark,
@@ -373,7 +373,7 @@ func (uc *BillingUsecase) PurchaseSubscription(ctx context.Context, userID strin
 		return 0, fmt.Errorf("create ledger: %w", err)
 	}
 
-	return newQuota, nil
+	return newBalance, nil
 }
 
 func (uc *BillingUsecase) CreateRedeemCode(ctx context.Context, code, name string, amount int64, count int32, operatorID string) error {
@@ -490,18 +490,18 @@ func (uc *BillingUsecase) RedeemCode(ctx context.Context, userID, code string) (
 		return 0, 0, fmt.Errorf("get account snapshot: %w", err)
 	}
 
-	quotaBefore := account.Quota
+	balanceBefore := account.Balance
 
 	if err := uc.redeemRepo.UpdateRedeemCodeCount(ctx, code, 1); err != nil {
 		return 0, 0, fmt.Errorf("update redeem code count: %w", err)
 	}
 
-	newQuota, err := uc.accountRepo.UpdateQuota(ctx, userID, redeemCode.Amount, LedgerTypeRedeem)
+	newBalance, err := uc.accountRepo.UpdateBalance(ctx, userID, redeemCode.Amount, LedgerTypeRedeem)
 	if err != nil {
-		return 0, 0, fmt.Errorf("update quota: %w", err)
+		return 0, 0, fmt.Errorf("update balance: %w", err)
 	}
 
-	balanceAfter := newQuota
+	balanceAfter := newBalance
 	ledger := &Ledger{
 		UserID:       userID,
 		Amount:       redeemCode.Amount,
@@ -516,18 +516,18 @@ func (uc *BillingUsecase) RedeemCode(ctx context.Context, userID, code string) (
 	}
 
 	record := &RedeemRecord{
-		UserID:      userID,
-		Code:        code,
-		Amount:      redeemCode.Amount,
-		QuotaBefore: quotaBefore,
-		QuotaAfter:  newQuota,
+		UserID:        userID,
+		Code:          code,
+		Amount:        redeemCode.Amount,
+		BalanceBefore: balanceBefore,
+		BalanceAfter:  newBalance,
 	}
 
 	if err := uc.redeemRepo.CreateRedeemRecord(ctx, record); err != nil {
 		return 0, 0, fmt.Errorf("create redeem record: %w", err)
 	}
 
-	return redeemCode.Amount, newQuota, nil
+	return redeemCode.Amount, newBalance, nil
 }
 
 func (uc *BillingUsecase) ListLedgers(ctx context.Context, userID string, page, pageSize int32) ([]*Ledger, int64, error) {

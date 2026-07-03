@@ -29,10 +29,10 @@ func (r *reconciliationRepo) ListAllAccounts(ctx context.Context) ([]*biz.Accoun
 			Username:     m.Username,
 			DisplayName:  m.DisplayName,
 			Group:        m.Group,
-			Quota:        m.Quota,
-			UsedQuota:    m.UsedQuota,
+			Balance:      m.Balance,
+			UsedAmount:   m.UsedAmount,
 			RequestCount: m.RequestCount,
-			FrozenQuota:  m.FrozenQuota,
+			FrozenAmount: m.FrozenAmount,
 			Status:       m.Status,
 		}
 	}

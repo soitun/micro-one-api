@@ -23,10 +23,10 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			username TEXT,
 			display_name TEXT,
 			"group" TEXT,
-			quota INTEGER DEFAULT 0,
-			used_quota INTEGER DEFAULT 0,
+			balance INTEGER DEFAULT 0,
+			used_amount INTEGER DEFAULT 0,
 			request_count INTEGER DEFAULT 0,
-			frozen_quota INTEGER DEFAULT 0,
+			frozen_amount INTEGER DEFAULT 0,
 			status INTEGER DEFAULT 0
 		)
 	`).Error
@@ -93,8 +93,8 @@ func setupTestDB(t *testing.T) *gorm.DB {
 			user_id TEXT,
 			code TEXT,
 			amount INTEGER,
-			quota_before INTEGER,
-			quota_after INTEGER,
+			balance_before INTEGER,
+			balance_after INTEGER,
 			created_at DATETIME
 		)
 	`).Error
@@ -112,7 +112,7 @@ func TestAccountRepo_GetAccountSnapshot(t *testing.T) {
 
 	// 插入测试数据
 	err := db.Exec(`
-		INSERT INTO users (id, username, display_name, "group", quota, used_quota, request_count, frozen_quota, status)
+		INSERT INTO users (id, username, display_name, "group", balance, used_amount, request_count, frozen_amount, status)
 		VALUES (1, 'testuser', 'Test User', 'default', 1000, 100, 10, 50, 1)
 	`).Error
 	require.NoError(t, err)
@@ -129,10 +129,10 @@ func TestAccountRepo_GetAccountSnapshot(t *testing.T) {
 	assert.Equal(t, "testuser", account.Username)
 	assert.Equal(t, "Test User", account.DisplayName)
 	assert.Equal(t, "default", account.Group)
-	assert.Equal(t, int64(1000), account.Quota)
-	assert.Equal(t, int64(100), account.UsedQuota)
+	assert.Equal(t, int64(1000), account.Balance)
+	assert.Equal(t, int64(100), account.UsedAmount)
 	assert.Equal(t, int64(10), account.RequestCount)
-	assert.Equal(t, int64(50), account.FrozenQuota)
+	assert.Equal(t, int64(50), account.FrozenAmount)
 	assert.Equal(t, int32(1), account.Status)
 }
 
@@ -153,7 +153,7 @@ func TestAccountRepo_GetAccountSnapshot_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, biz.ErrAccountNotFound)
 }
 
-func TestAccountRepo_UpdateQuota_Success(t *testing.T) {
+func TestAccountRepo_UpdateBalance_Success(t *testing.T) {
 	db := setupTestDB(t)
 	defer func() {
 		sqlDB, _ := db.DB()
@@ -162,7 +162,7 @@ func TestAccountRepo_UpdateQuota_Success(t *testing.T) {
 
 	// 插入测试数据
 	err := db.Exec(`
-		INSERT INTO users (id, username, display_name, "group", quota, used_quota, request_count, frozen_quota, status)
+		INSERT INTO users (id, username, display_name, "group", balance, used_amount, request_count, frozen_amount, status)
 		VALUES (1, 'testuser', 'Test User', 'default', 1000, 100, 10, 50, 1)
 	`).Error
 	require.NoError(t, err)
@@ -171,21 +171,21 @@ func TestAccountRepo_UpdateQuota_Success(t *testing.T) {
 	repo := NewAccountRepo(data)
 
 	ctx := context.Background()
-	newQuota, err := repo.UpdateQuota(ctx, "1", 500, "recharge")
+	newBalance, err := repo.UpdateBalance(ctx, "1", 500, "recharge")
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(1500), newQuota)
+	assert.Equal(t, int64(1500), newBalance)
 
 	// 验证数据库中的值
 	var account struct {
-		Quota int64 `gorm:"column:quota"`
+		Balance int64 `gorm:"column:balance"`
 	}
-	err = db.Raw("SELECT quota FROM users WHERE id = 1").Scan(&account).Error
+	err = db.Raw("SELECT balance FROM users WHERE id = 1").Scan(&account).Error
 	require.NoError(t, err)
-	assert.Equal(t, int64(1500), account.Quota)
+	assert.Equal(t, int64(1500), account.Balance)
 }
 
-func TestAccountRepo_UpdateQuota_NotFound(t *testing.T) {
+func TestAccountRepo_UpdateBalance_NotFound(t *testing.T) {
 	db := setupTestDB(t)
 	defer func() {
 		sqlDB, _ := db.DB()
@@ -196,13 +196,13 @@ func TestAccountRepo_UpdateQuota_NotFound(t *testing.T) {
 	repo := NewAccountRepo(data)
 
 	ctx := context.Background()
-	_, err := repo.UpdateQuota(ctx, "999", 500, "recharge")
+	_, err := repo.UpdateBalance(ctx, "999", 500, "recharge")
 
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, biz.ErrAccountNotFound)
 }
 
-func TestAccountRepo_UpdateQuota_InsufficientQuota(t *testing.T) {
+func TestAccountRepo_UpdateBalance_InsufficientQuota(t *testing.T) {
 	db := setupTestDB(t)
 	defer func() {
 		sqlDB, _ := db.DB()
@@ -211,7 +211,7 @@ func TestAccountRepo_UpdateQuota_InsufficientQuota(t *testing.T) {
 
 	// 插入测试数据
 	err := db.Exec(`
-		INSERT INTO users (id, username, display_name, "group", quota, used_quota, request_count, frozen_quota, status)
+		INSERT INTO users (id, username, display_name, "group", balance, used_amount, request_count, frozen_amount, status)
 		VALUES (1, 'testuser', 'Test User', 'default', 100, 100, 10, 50, 1)
 	`).Error
 	require.NoError(t, err)
@@ -220,7 +220,7 @@ func TestAccountRepo_UpdateQuota_InsufficientQuota(t *testing.T) {
 	repo := NewAccountRepo(data)
 
 	ctx := context.Background()
-	_, err = repo.UpdateQuota(ctx, "1", -200, "consume")
+	_, err = repo.UpdateBalance(ctx, "1", -200, "consume")
 
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, biz.ErrInsufficientQuota)
@@ -234,7 +234,7 @@ func TestAccountRepo_UpdateUsage_Success(t *testing.T) {
 	}()
 
 	err := db.Exec(`
-		INSERT INTO users (id, username, display_name, "group", quota, used_quota, request_count, frozen_quota, status)
+		INSERT INTO users (id, username, display_name, "group", balance, used_amount, request_count, frozen_amount, status)
 		VALUES (1, 'testuser', 'Test User', 'default', 1000, 100, 10, 50, 1)
 	`).Error
 	require.NoError(t, err)
@@ -246,16 +246,16 @@ func TestAccountRepo_UpdateUsage_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	var account struct {
-		UsedQuota    int64 `gorm:"column:used_quota"`
+		UsedAmount   int64 `gorm:"column:used_amount"`
 		RequestCount int64 `gorm:"column:request_count"`
 	}
-	err = db.Raw("SELECT used_quota, request_count FROM users WHERE id = 1").Scan(&account).Error
+	err = db.Raw("SELECT used_amount, request_count FROM users WHERE id = 1").Scan(&account).Error
 	require.NoError(t, err)
-	assert.Equal(t, int64(125), account.UsedQuota)
+	assert.Equal(t, int64(125), account.UsedAmount)
 	assert.Equal(t, int64(11), account.RequestCount)
 }
 
-func TestAccountRepo_UpdateFrozenQuota_Success(t *testing.T) {
+func TestAccountRepo_UpdateFrozenAmount_Success(t *testing.T) {
 	db := setupTestDB(t)
 	defer func() {
 		sqlDB, _ := db.DB()
@@ -264,7 +264,7 @@ func TestAccountRepo_UpdateFrozenQuota_Success(t *testing.T) {
 
 	// 插入测试数据
 	err := db.Exec(`
-		INSERT INTO users (id, username, display_name, "group", quota, used_quota, request_count, frozen_quota, status)
+		INSERT INTO users (id, username, display_name, "group", balance, used_amount, request_count, frozen_amount, status)
 		VALUES (1, 'testuser', 'Test User', 'default', 1000, 100, 10, 50, 1)
 	`).Error
 	require.NoError(t, err)
@@ -273,17 +273,17 @@ func TestAccountRepo_UpdateFrozenQuota_Success(t *testing.T) {
 	repo := NewAccountRepo(data)
 
 	ctx := context.Background()
-	err = repo.UpdateFrozenQuota(ctx, "1", 100)
+	err = repo.UpdateFrozenAmount(ctx, "1", 100)
 
 	require.NoError(t, err)
 
 	// 验证数据库中的值
 	var account struct {
-		FrozenQuota int64 `gorm:"column:frozen_quota"`
+		FrozenAmount int64 `gorm:"column:frozen_amount"`
 	}
-	err = db.Raw("SELECT frozen_quota FROM users WHERE id = 1").Scan(&account).Error
+	err = db.Raw("SELECT frozen_amount FROM users WHERE id = 1").Scan(&account).Error
 	require.NoError(t, err)
-	assert.Equal(t, int64(150), account.FrozenQuota)
+	assert.Equal(t, int64(150), account.FrozenAmount)
 }
 
 func TestAccountRepo_Transaction_Rollback(t *testing.T) {
@@ -295,7 +295,7 @@ func TestAccountRepo_Transaction_Rollback(t *testing.T) {
 
 	// 插入测试数据
 	err := db.Exec(`
-		INSERT INTO users (id, username, display_name, "group", quota, used_quota, request_count, frozen_quota, status)
+		INSERT INTO users (id, username, display_name, "group", balance, used_amount, request_count, frozen_amount, status)
 		VALUES (1, 'testuser', 'Test User', 'default', 1000, 100, 10, 50, 1)
 	`).Error
 	require.NoError(t, err)
@@ -305,16 +305,16 @@ func TestAccountRepo_Transaction_Rollback(t *testing.T) {
 
 	ctx := context.Background()
 	// 尝试扣减超过配额的金额，应该回滚
-	_, err = repo.UpdateQuota(ctx, "1", -2000, "consume")
+	_, err = repo.UpdateBalance(ctx, "1", -2000, "consume")
 
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, biz.ErrInsufficientQuota)
 
 	// 验证配额没有被修改
 	var account struct {
-		Quota int64 `gorm:"column:quota"`
+		Balance int64 `gorm:"column:balance"`
 	}
-	err = db.Raw("SELECT quota FROM users WHERE id = 1").Scan(&account).Error
+	err = db.Raw("SELECT balance FROM users WHERE id = 1").Scan(&account).Error
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000), account.Quota) // 配额应该保持不变
+	assert.Equal(t, int64(1000), account.Balance) // 配额应该保持不变
 }

@@ -28,24 +28,24 @@ func (m *mockAccountRepo) BatchGetAccountSnapshots(ctx context.Context, userIDs 
 	return result, nil
 }
 
-func (m *mockAccountRepo) UpdateQuota(ctx context.Context, userID string, delta int64, operationType string) (int64, error) {
-	if delta < 0 && m.account.Quota+delta < 0 {
+func (m *mockAccountRepo) UpdateBalance(ctx context.Context, userID string, delta int64, operationType string) (int64, error) {
+	if delta < 0 && m.account.Balance+delta < 0 {
 		return 0, ErrInsufficientQuota
 	}
-	m.account.Quota += delta
+	m.account.Balance += delta
 	m.updateQuota = delta
-	return m.account.Quota, nil
+	return m.account.Balance, nil
 }
 
-func (m *mockAccountRepo) UpdateUsage(ctx context.Context, userID string, usedQuotaDelta, requestCountDelta int64) error {
-	m.account.UsedQuota += usedQuotaDelta
+func (m *mockAccountRepo) UpdateUsage(ctx context.Context, userID string, usedAmountDelta, requestCountDelta int64) error {
+	m.account.UsedAmount += usedAmountDelta
 	m.account.RequestCount += requestCountDelta
 	m.updateUsageCalls++
 	return nil
 }
 
-func (m *mockAccountRepo) UpdateFrozenQuota(ctx context.Context, userID string, delta int64) error {
-	m.account.FrozenQuota += delta
+func (m *mockAccountRepo) UpdateFrozenAmount(ctx context.Context, userID string, delta int64) error {
+	m.account.FrozenAmount += delta
 	return nil
 }
 
@@ -216,10 +216,10 @@ func (m *mockRedeemRepo) CreateRedeemRecord(ctx context.Context, record *RedeemR
 // 正确的预扣测试 - 从 1000 开始，预扣 100，最终应该是 900
 func TestReserveQuota_CorrectLogic(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       1000,
-		FrozenQuota: 0,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      1000,
+		FrozenAmount: 0,
+		Group:        "default",
 	}
 
 	accountRepo := &mockAccountRepo{account: account}
@@ -237,17 +237,17 @@ func TestReserveQuota_CorrectLogic(t *testing.T) {
 	assert.Equal(t, "req1", reservation.RequestID)
 	assert.Equal(t, int64(100), reservation.Amount)
 	assert.Equal(t, ReservationStatusReserved, reservation.Status)
-	assert.Equal(t, int64(100), account.FrozenQuota) // 预扣后冻结配额应该是 100
-	assert.Equal(t, int64(900), account.Quota)       // 预扣后可用配额应该减少到 900
+	assert.Equal(t, int64(100), account.FrozenAmount) // 预扣后冻结配额应该是 100
+	assert.Equal(t, int64(900), account.Balance)      // 预扣后可用配额应该减少到 900
 }
 
 // 正确的提交流程测试 - 从 1000 开始，预扣 100，提交 80
 func TestCommitQuota_Success_CorrectLogic(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       900, // 预扣后的状态
-		FrozenQuota: 100,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      900, // 预扣后的状态
+		FrozenAmount: 100,
+		Group:        "default",
 	}
 
 	reservation := &Reservation{
@@ -270,19 +270,19 @@ func TestCommitQuota_Success_CorrectLogic(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(80), committed)
-	assert.Equal(t, int64(20), refund)             // 100 - 80 = 20 退还
-	assert.Equal(t, int64(0), account.FrozenQuota) // 冻结配额应该被释放
-	assert.Equal(t, int64(920), account.Quota)     // 预扣 100 后退还 20，实际净消费 80
-	assert.Len(t, ledgerRepo.ledgers, 1)           // 只记录真实消费，预扣恢复不写流水
+	assert.Equal(t, int64(20), refund)              // 100 - 80 = 20 退还
+	assert.Equal(t, int64(0), account.FrozenAmount) // 冻结配额应该被释放
+	assert.Equal(t, int64(920), account.Balance)    // 预扣 100 后退还 20，实际净消费 80
+	assert.Len(t, ledgerRepo.ledgers, 1)            // 只记录真实消费，预扣恢复不写流水
 }
 
 // 正确的失败提交流程测试 - 从 1000 开始，预扣 100，请求失败
 func TestCommitQuota_Failed_CorrectLogic(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       900, // 预扣后的状态
-		FrozenQuota: 100,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      900, // 预扣后的状态
+		FrozenAmount: 100,
+		Group:        "default",
 	}
 
 	reservation := &Reservation{
@@ -303,21 +303,21 @@ func TestCommitQuota_Failed_CorrectLogic(t *testing.T) {
 	committed, refund, err := uc.CommitQuota(context.Background(), "res1", 0, false)
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(0), committed)           // 没有实际消费
-	assert.Equal(t, int64(100), refund)            // 全部退还
-	assert.Equal(t, int64(0), account.FrozenQuota) // 冻结配额应该被释放
-	// 注意：ReleaseQuota 中会调用 UpdateQuota 增加 100，但由于 mock 的实现，Quota 会从 900 增加到 1000
-	assert.Equal(t, int64(1000), account.Quota)
+	assert.Equal(t, int64(0), committed)            // 没有实际消费
+	assert.Equal(t, int64(100), refund)             // 全部退还
+	assert.Equal(t, int64(0), account.FrozenAmount) // 冻结配额应该被释放
+	// 注意：ReleaseQuota 中会调用 UpdateBalance 增加 100，但由于 mock 的实现，Quota 会从 900 增加到 1000
+	assert.Equal(t, int64(1000), account.Balance)
 	assert.Len(t, ledgerRepo.ledgers, 1) // 应该只有 1 个 ledger: 退还
 }
 
 // 测试配额不足的情况
 func TestReserveQuota_InsufficientQuota(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       50,
-		FrozenQuota: 0,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      50,
+		FrozenAmount: 0,
+		Group:        "default",
 	}
 
 	accountRepo := &mockAccountRepo{account: account}
@@ -336,10 +336,10 @@ func TestReserveQuota_InsufficientQuota(t *testing.T) {
 // 测试提交已提交的预扣
 func TestCommitQuota_AlreadyCommitted(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       900,
-		FrozenQuota: 100,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      900,
+		FrozenAmount: 100,
+		Group:        "default",
 	}
 
 	reservation := &Reservation{
@@ -366,10 +366,10 @@ func TestCommitQuota_AlreadyCommitted(t *testing.T) {
 // 测试释放预扣
 func TestReleaseQuota_Success(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       900,
-		FrozenQuota: 100,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      900,
+		FrozenAmount: 100,
+		Group:        "default",
 	}
 
 	reservation := &Reservation{
@@ -391,8 +391,8 @@ func TestReleaseQuota_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, ReservationStatusReleased, reservation.Status)
-	assert.Equal(t, int64(0), account.FrozenQuota)
-	assert.Equal(t, int64(1000), account.Quota)
+	assert.Equal(t, int64(0), account.FrozenAmount)
+	assert.Equal(t, int64(1000), account.Balance)
 	assert.Len(t, ledgerRepo.ledgers, 1)
 	assert.Equal(t, LedgerTypeRefund, ledgerRepo.ledgers[0].Type)
 }
@@ -415,10 +415,10 @@ func TestReleaseQuota_NotFound(t *testing.T) {
 // 测试获取账户快照
 func TestGetAccountSnapshot_Success(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       1000,
-		FrozenQuota: 100,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      1000,
+		FrozenAmount: 100,
+		Group:        "default",
 	}
 
 	accountRepo := &mockAccountRepo{account: account}
@@ -433,17 +433,17 @@ func TestGetAccountSnapshot_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, snapshot)
 	assert.Equal(t, "user1", snapshot.UserID)
-	assert.Equal(t, int64(1000), snapshot.Quota)
-	assert.Equal(t, int64(100), snapshot.FrozenQuota)
+	assert.Equal(t, int64(1000), snapshot.Balance)
+	assert.Equal(t, int64(100), snapshot.FrozenAmount)
 }
 
 // 测试充值
 func TestTopUpQuota_Success(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       1000,
-		FrozenQuota: 0,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      1000,
+		FrozenAmount: 0,
+		Group:        "default",
 	}
 
 	accountRepo := &mockAccountRepo{account: account}
@@ -457,7 +457,7 @@ func TestTopUpQuota_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(1500), newQuota)
-	assert.Equal(t, int64(1500), account.Quota)
+	assert.Equal(t, int64(1500), account.Balance)
 	assert.Len(t, ledgerRepo.ledgers, 1)
 	assert.Equal(t, LedgerTypeRecharge, ledgerRepo.ledgers[0].Type)
 	assert.Equal(t, int64(500), ledgerRepo.ledgers[0].Amount)
@@ -490,10 +490,10 @@ func TestCreateRedeemCode_Success(t *testing.T) {
 // 测试使用兑换码
 func TestRedeemCode_Success(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       1000,
-		FrozenQuota: 0,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      1000,
+		FrozenAmount: 0,
+		Group:        "default",
 	}
 
 	redeemCode := &RedeemCode{
@@ -519,7 +519,7 @@ func TestRedeemCode_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(500), amount)
 	assert.Equal(t, int64(1500), newQuota)
-	assert.Equal(t, int64(1500), account.Quota)
+	assert.Equal(t, int64(1500), account.Balance)
 	assert.Equal(t, int32(9), redeemCode.Count)
 	assert.Len(t, ledgerRepo.ledgers, 1)
 	assert.Equal(t, LedgerTypeRedeem, ledgerRepo.ledgers[0].Type)
@@ -544,10 +544,10 @@ func TestRedeemCode_NotFound(t *testing.T) {
 // 测试使用已用完的兑换码
 func TestRedeemCode_UsedUp(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       1000,
-		FrozenQuota: 0,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      1000,
+		FrozenAmount: 0,
+		Group:        "default",
 	}
 
 	redeemCode := &RedeemCode{
@@ -574,10 +574,10 @@ func TestRedeemCode_UsedUp(t *testing.T) {
 // 测试使用已禁用的兑换码
 func TestRedeemCode_Disabled(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       1000,
-		FrozenQuota: 0,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      1000,
+		FrozenAmount: 0,
+		Group:        "default",
 	}
 
 	redeemCode := &RedeemCode{
@@ -626,10 +626,10 @@ func TestListLedgers_Success(t *testing.T) {
 func TestCommitQuotaWithUsage_UpdatesUsageCounters(t *testing.T) {
 	account := &Account{
 		UserID:       "user1",
-		Quota:        1000,
-		UsedQuota:    20,
+		Balance:      1000,
+		UsedAmount:   20,
 		RequestCount: 2,
-		FrozenQuota:  100,
+		FrozenAmount: 100,
 		Group:        "default",
 	}
 	reservation := &Reservation{
@@ -660,7 +660,7 @@ func TestCommitQuotaWithUsage_UpdatesUsageCounters(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(80), committed)
 	assert.Equal(t, int64(20), refund)
-	assert.Equal(t, int64(100), account.UsedQuota)
+	assert.Equal(t, int64(100), account.UsedAmount)
 	assert.Equal(t, int64(3), account.RequestCount)
 	assert.Equal(t, 1, accountRepo.updateUsageCalls)
 	require.Len(t, ledgerRepo.ledgers, 1)
@@ -673,10 +673,10 @@ func TestCommitQuotaWithUsage_UpdatesUsageCounters(t *testing.T) {
 // 测试分组倍率影响
 func TestReserveQuota_WithGroupRatio(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       1000,
-		FrozenQuota: 0,
-		Group:       "vip",
+		UserID:       "user1",
+		Balance:      1000,
+		FrozenAmount: 0,
+		Group:        "vip",
 	}
 
 	accountRepo := &mockAccountRepo{account: account}
@@ -695,7 +695,7 @@ func TestReserveQuota_WithGroupRatio(t *testing.T) {
 }
 
 func TestCommitQuota_UsesModelAndCompletionRatios(t *testing.T) {
-	account := &Account{UserID: "user1", Quota: 1000, Group: "default"}
+	account := &Account{UserID: "user1", Balance: 1000, Group: "default"}
 	accountRepo := &mockAccountRepo{account: account}
 	reservationRepo := &mockReservationRepo{reservations: make(map[string]*Reservation)}
 	ledgerRepo := &mockLedgerRepo{}
@@ -716,14 +716,14 @@ func TestCommitQuota_UsesModelAndCompletionRatios(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(140), committed)
 	assert.Equal(t, int64(60), refund)
-	assert.Equal(t, int64(860), account.Quota)
+	assert.Equal(t, int64(860), account.Balance)
 	require.Len(t, ledgerRepo.ledgers, 1)
 	assert.Equal(t, int64(-140), ledgerRepo.ledgers[0].Amount)
 	assert.Equal(t, int64(860), ledgerRepo.ledgers[0].BalanceAfter)
 }
 
 func TestCommitQuota_UsesModelPrices(t *testing.T) {
-	account := &Account{UserID: "user1", Quota: 1000, Group: "default"}
+	account := &Account{UserID: "user1", Balance: 1000, Group: "default"}
 	accountRepo := &mockAccountRepo{account: account}
 	reservationRepo := &mockReservationRepo{reservations: make(map[string]*Reservation)}
 	ledgerRepo := &mockLedgerRepo{}
@@ -751,11 +751,11 @@ func TestCommitQuota_UsesModelPrices(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), committed)
 	assert.Equal(t, int64(0), refund)
-	assert.Equal(t, int64(999), account.Quota)
+	assert.Equal(t, int64(999), account.Balance)
 }
 
 func TestReserveQuota_UsesDynamicPricingStore(t *testing.T) {
-	account := &Account{UserID: "user1", Quota: 1000, Group: "vip"}
+	account := &Account{UserID: "user1", Balance: 1000, Group: "vip"}
 	accountRepo := &mockAccountRepo{account: account}
 	reservationRepo := &mockReservationRepo{reservations: make(map[string]*Reservation)}
 	ledgerRepo := &mockLedgerRepo{}
@@ -777,10 +777,10 @@ func TestReserveQuota_UsesDynamicPricingStore(t *testing.T) {
 // 测试零成本请求
 func TestReserveQuota_ZeroCost(t *testing.T) {
 	account := &Account{
-		UserID:      "user1",
-		Quota:       1000,
-		FrozenQuota: 0,
-		Group:       "default",
+		UserID:       "user1",
+		Balance:      1000,
+		FrozenAmount: 0,
+		Group:        "default",
 	}
 
 	accountRepo := &mockAccountRepo{account: account}

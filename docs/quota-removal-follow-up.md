@@ -15,19 +15,19 @@ Status after the wallet API/frontend rename:
   payment assets continue to use `subscription`.
 - Done: the frontend amount formatter lives in `web/src/lib/amount.ts`, and
   user-facing wallet pages/types no longer depend on `web/src/lib/quota.ts`.
+- Done: database/model wallet fields now use `balance`, `used_amount`,
+  `frozen_amount`, `balance_before`, and `balance_after` instead of wallet quota
+  names.
 - Preserved: relay/OpenAI-compatible quota endpoints, channel usage fields,
   log/usage aggregate fields, reconciliation quota fields, subscription quota
   windows, `QuotaPerUnit`, and invitation quota config names.
-- Still pending: the underlying database/model rename for wallet balance fields
-  such as `users.quota`, `users.used_quota`, `users.frozen_quota`, and related
-  repository method names.
 
 Follow-up items:
 
 1. [x] Rename wallet API fields and responses that still expose `quota` for money,
    including user dashboard/account snapshots, redeem/top-up compatibility
    responses, payment order asset type labels, and admin user balance payloads.
-2. [ ] Rename database/model fields that represent wallet money but are still named
+2. [x] Rename database/model fields that represent wallet money but are still named
    `quota`, such as account balance snapshots, ledger amount columns, and payment
    order asset fields. No migration was added in this branch because the project
    is not live yet.

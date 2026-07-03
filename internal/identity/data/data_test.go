@@ -240,23 +240,23 @@ func TestDeleteUser_NotFound(t *testing.T) {
 	}
 }
 
-// ========== IncreaseUserQuota Tests ==========
+// ========== IncreaseUserBalance Tests ==========
 
-func TestIncreaseUserQuota_Success(t *testing.T) {
+func TestIncreaseUserBalance_Success(t *testing.T) {
 	repo := newTestRepo()
 	repo.usersByID[1] = &biz.User{ID: 1, Username: "alice"}
 
-	if err := repo.IncreaseUserQuota(context.Background(), 1, 250); err != nil {
-		t.Fatalf("IncreaseUserQuota() error = %v", err)
+	if err := repo.IncreaseUserBalance(context.Background(), 1, 250); err != nil {
+		t.Fatalf("IncreaseUserBalance() error = %v", err)
 	}
-	if repo.usersByID[1].Quota != 250 {
-		t.Fatalf("quota = %d, want 250", repo.usersByID[1].Quota)
+	if repo.usersByID[1].Balance != 250 {
+		t.Fatalf("quota = %d, want 250", repo.usersByID[1].Balance)
 	}
 }
 
-func TestIncreaseUserQuota_NotFound(t *testing.T) {
+func TestIncreaseUserBalance_NotFound(t *testing.T) {
 	repo := newTestRepo()
-	err := repo.IncreaseUserQuota(context.Background(), 999, 250)
+	err := repo.IncreaseUserBalance(context.Background(), 999, 250)
 	if err != biz.ErrUserNotFound {
 		t.Fatalf("expected ErrUserNotFound, got: %v", err)
 	}

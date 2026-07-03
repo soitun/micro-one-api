@@ -92,12 +92,12 @@ func (s *BillingService) GetAccountSnapshot(ctx context.Context, req *billingv1.
 	return &billingv1.GetAccountSnapshotResponse{
 		Snapshot: &commonv1.AccountSnapshot{
 			UserId:       account.UserID,
-			Balance:      account.Quota,
-			UsedAmount:   account.UsedQuota,
+			Balance:      account.Balance,
+			UsedAmount:   account.UsedAmount,
 			RequestCount: account.RequestCount,
 			Group:        account.Group,
 			GroupRatio:   account.GroupRatio(),
-			FrozenAmount: account.FrozenQuota,
+			FrozenAmount: account.FrozenAmount,
 		},
 	}, nil
 }
@@ -112,12 +112,12 @@ func (s *BillingService) BatchGetAccountSnapshots(ctx context.Context, req *bill
 	for userID, account := range accounts {
 		snapshots[userID] = &commonv1.AccountSnapshot{
 			UserId:       account.UserID,
-			Balance:      account.Quota,
-			UsedAmount:   account.UsedQuota,
+			Balance:      account.Balance,
+			UsedAmount:   account.UsedAmount,
 			RequestCount: account.RequestCount,
 			Group:        account.Group,
 			GroupRatio:   account.GroupRatio(),
-			FrozenAmount: account.FrozenQuota,
+			FrozenAmount: account.FrozenAmount,
 		}
 	}
 

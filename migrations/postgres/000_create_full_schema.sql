@@ -39,10 +39,10 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT DEFAULT '',
   oauth_provider TEXT DEFAULT '',
   oauth_id TEXT DEFAULT '',
-  quota BIGINT DEFAULT 0,
-  used_quota BIGINT DEFAULT 0,
+  balance BIGINT DEFAULT 0,
+  used_amount BIGINT DEFAULT 0,
   request_count BIGINT DEFAULT 0,
-  frozen_quota BIGINT DEFAULT 0,
+  frozen_amount BIGINT DEFAULT 0,
   aff_code TEXT DEFAULT '',
   inviter_id BIGINT DEFAULT 0,
   role INTEGER NOT NULL DEFAULT 1
@@ -338,8 +338,8 @@ CREATE TABLE IF NOT EXISTS billing_redeem_records (
   user_id TEXT NOT NULL,
   code TEXT NOT NULL,
   amount BIGINT NOT NULL,
-  quota_before BIGINT NOT NULL,
-  quota_after BIGINT NOT NULL,
+  balance_before BIGINT NOT NULL,
+  balance_after BIGINT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

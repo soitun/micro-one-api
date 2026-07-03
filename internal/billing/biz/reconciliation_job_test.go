@@ -40,7 +40,7 @@ func (r *recordingNotifier) CreateNotification(_ context.Context, notifyType, re
 func newJobHarness(t *testing.T, repo *mockReconRepo, notifier Notifier, recipients []string, notifyType string) *ReconciliationJob {
 	t.Helper()
 	uc := NewReconciliationUsecase(
-		&mockAccountRepo{account: &Account{UserID: "user1", Quota: 1000, Group: "default"}},
+		&mockAccountRepo{account: &Account{UserID: "user1", Balance: 1000, Group: "default"}},
 		&mockReservationRepo{reservations: map[string]*Reservation{}},
 		repo,
 		nil,
@@ -60,7 +60,7 @@ func newJobHarness(t *testing.T, repo *mockReconRepo, notifier Notifier, recipie
 
 func TestReconciliationJob_NoDiscrepanciesNoNotify(t *testing.T) {
 	repo := &mockReconRepo{
-		accounts:   []*Account{{UserID: "user1", Quota: 1000, Group: "default"}},
+		accounts:   []*Account{{UserID: "user1", Balance: 1000, Group: "default"}},
 		ledgerSums: map[string]int64{"user1": 1000},
 	}
 	n := &recordingNotifier{}
@@ -73,7 +73,7 @@ func TestReconciliationJob_NoDiscrepanciesNoNotify(t *testing.T) {
 
 func TestReconciliationJob_NilNotifierStillWorks(t *testing.T) {
 	repo := &mockReconRepo{
-		accounts:   []*Account{{UserID: "user1", Quota: 1000, Group: "default"}},
+		accounts:   []*Account{{UserID: "user1", Balance: 1000, Group: "default"}},
 		ledgerSums: map[string]int64{"user1": 500}, // diff=500 > 100
 	}
 	job := newJobHarness(t, repo, nil, nil, "")
@@ -84,7 +84,7 @@ func TestReconciliationJob_NilNotifierStillWorks(t *testing.T) {
 
 func TestReconciliationJob_DiscrepancyTriggersNotify(t *testing.T) {
 	repo := &mockReconRepo{
-		accounts:   []*Account{{UserID: "user1", Quota: 1000, Group: "default"}},
+		accounts:   []*Account{{UserID: "user1", Balance: 1000, Group: "default"}},
 		ledgerSums: map[string]int64{"user1": 500},
 		channels: []*ChannelUsageSnapshot{
 			{ChannelID: 10, UsedQuota: 200},
@@ -115,7 +115,7 @@ func TestReconciliationJob_DiscrepancyTriggersNotify(t *testing.T) {
 
 func TestReconciliationJob_NotifierErrorDoesNotPanic(t *testing.T) {
 	repo := &mockReconRepo{
-		accounts:   []*Account{{UserID: "user1", Quota: 1000, Group: "default"}},
+		accounts:   []*Account{{UserID: "user1", Balance: 1000, Group: "default"}},
 		ledgerSums: map[string]int64{"user1": 500},
 	}
 	n := &recordingNotifier{err: errors.New("downstream boom")}
@@ -128,7 +128,7 @@ func TestReconciliationJob_NotifierErrorDoesNotPanic(t *testing.T) {
 
 func TestReconciliationJob_DefaultRecipientsWhenNoneConfigured(t *testing.T) {
 	repo := &mockReconRepo{
-		accounts:   []*Account{{UserID: "user1", Quota: 1000, Group: "default"}},
+		accounts:   []*Account{{UserID: "user1", Balance: 1000, Group: "default"}},
 		ledgerSums: map[string]int64{"user1": 500},
 	}
 	n := &recordingNotifier{}
@@ -144,7 +144,7 @@ func TestReconciliationJob_DefaultRecipientsWhenNoneConfigured(t *testing.T) {
 
 func TestReconciliationJob_WebhookFallbackRecipient(t *testing.T) {
 	repo := &mockReconRepo{
-		accounts:   []*Account{{UserID: "user1", Quota: 1000, Group: "default"}},
+		accounts:   []*Account{{UserID: "user1", Balance: 1000, Group: "default"}},
 		ledgerSums: map[string]int64{"user1": 500},
 	}
 	n := &recordingNotifier{}
@@ -160,7 +160,7 @@ func TestReconciliationJob_WebhookFallbackRecipient(t *testing.T) {
 
 func TestReconciliationJob_RecordsMetrics(t *testing.T) {
 	repo := &mockReconRepo{
-		accounts:   []*Account{{UserID: "user1", Quota: 1000, Group: "default"}},
+		accounts:   []*Account{{UserID: "user1", Balance: 1000, Group: "default"}},
 		ledgerSums: map[string]int64{"user1": 1000},
 	}
 	job := newJobHarness(t, repo, nil, nil, "")
