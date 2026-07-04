@@ -533,7 +533,13 @@ func (s *ChannelService) RecordSubscriptionAccountQuotaUsage(ctx context.Context
 	if req.GetOccurredAt() > 0 {
 		occurredAt = time.Unix(req.GetOccurredAt(), 0)
 	}
-	if err := s.uc.RecordSubscriptionAccountQuotaUsage(ctx, req.GetAccountId(), req.GetCostUsd(), occurredAt); err != nil {
+	if err := s.uc.RecordSubscriptionAccountQuotaUsage(ctx, biz.SubscriptionAccountQuotaUsage{
+		AccountID:     req.GetAccountId(),
+		ReservationID: req.GetReservationId(),
+		CostSource:    req.GetCostSource(),
+		CostUSD:       req.GetCostUsd(),
+		OccurredAt:    occurredAt,
+	}); err != nil {
 		return &channelv1.RecordSubscriptionAccountQuotaUsageResponse{Success: false, Message: err.Error()}, nil
 	}
 	return &channelv1.RecordSubscriptionAccountQuotaUsageResponse{Success: true, Message: "ok"}, nil

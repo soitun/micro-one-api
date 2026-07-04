@@ -106,10 +106,10 @@ func (r *channelServiceRepo) GetAccountQuotaSnapshot(ctx context.Context, accoun
 	return &biz.AccountQuotaSnapshot{AccountID: accountID}, nil
 }
 
-func (r *channelServiceRepo) RecordSubscriptionAccountQuotaUsage(ctx context.Context, accountID int64, costUSD float64, occurredAt time.Time) error {
-	if r.account != nil && r.account.ID == accountID {
-		r.account.QuotaUsedUSD += costUSD * r.account.EffectiveRateMultiplier()
-		r.account.LastUsedAt = occurredAt.Unix()
+func (r *channelServiceRepo) RecordSubscriptionAccountQuotaUsage(ctx context.Context, usage biz.SubscriptionAccountQuotaUsage) error {
+	if r.account != nil && r.account.ID == usage.AccountID {
+		r.account.QuotaUsedUSD += usage.CostUSD * r.account.EffectiveRateMultiplier()
+		r.account.LastUsedAt = usage.OccurredAt.Unix()
 	}
 	return nil
 }

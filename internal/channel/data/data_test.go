@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +22,9 @@ func setupChannelTestDB(t *testing.T) *Repository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 
 	require.NoError(t, db.Exec(`
 		CREATE TABLE channels (
@@ -112,6 +116,24 @@ func setupChannelTestDB(t *testing.T) *Repository {
 			enabled INTEGER DEFAULT 1,
 			priority INTEGER DEFAULT 0
 		)
+	`).Error)
+
+	require.NoError(t, db.Exec(`
+		CREATE TABLE subscription_account_quota_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			reservation_id TEXT NOT NULL,
+			subscription_account_id INTEGER NOT NULL,
+			cost_source TEXT NOT NULL DEFAULT 'billing_commit',
+			cost_usd REAL NOT NULL DEFAULT 0,
+			charged_usd REAL NOT NULL DEFAULT 0,
+			rate_multiplier REAL NOT NULL DEFAULT 1,
+			occurred_at INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL DEFAULT 0
+		)
+	`).Error)
+	require.NoError(t, db.Exec(`
+		CREATE UNIQUE INDEX idx_subscription_account_quota_events_dedupe
+		ON subscription_account_quota_events(reservation_id, subscription_account_id, cost_source)
 	`).Error)
 
 	return &Repository{db: db}
@@ -364,7 +386,11 @@ func TestSubscriptionAccountQuotaUsage_RecordAndReset(t *testing.T) {
 	}
 	require.NoError(t, repo.CreateSubscriptionAccount(ctx, account))
 
-	require.NoError(t, repo.RecordSubscriptionAccountQuotaUsage(ctx, account.ID, 0.5, time.Unix(1100, 0)))
+	require.NoError(t, repo.RecordSubscriptionAccountQuotaUsage(ctx, biz.SubscriptionAccountQuotaUsage{
+		AccountID:  account.ID,
+		CostUSD:    0.5,
+		OccurredAt: time.Unix(1100, 0),
+	}))
 	stored, err := repo.FindSubscriptionAccountByID(ctx, account.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 1.0, stored.QuotaUsedUSD, 0.000001)
@@ -372,7 +398,11 @@ func TestSubscriptionAccountQuotaUsage_RecordAndReset(t *testing.T) {
 	assert.EqualValues(t, 1000, stored.QuotaDailyWindowStart)
 	assert.InDelta(t, 1.0, stored.QuotaWeeklyUsedUSD, 0.000001)
 
-	require.NoError(t, repo.RecordSubscriptionAccountQuotaUsage(ctx, account.ID, 0.25, time.Unix(1000+25*60*60, 0)))
+	require.NoError(t, repo.RecordSubscriptionAccountQuotaUsage(ctx, biz.SubscriptionAccountQuotaUsage{
+		AccountID:  account.ID,
+		CostUSD:    0.25,
+		OccurredAt: time.Unix(1000+25*60*60, 0),
+	}))
 	stored, err = repo.FindSubscriptionAccountByID(ctx, account.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 1.5, stored.QuotaUsedUSD, 0.000001)
@@ -385,6 +415,89 @@ func TestSubscriptionAccountQuotaUsage_RecordAndReset(t *testing.T) {
 	assert.InDelta(t, 1.5, stored.QuotaUsedUSD, 0.000001)
 	assert.Zero(t, stored.QuotaDailyUsedUSD)
 	assert.Zero(t, stored.QuotaDailyWindowStart)
+}
+
+func TestSubscriptionAccountQuotaUsage_IdempotentByReservation(t *testing.T) {
+	repo := setupChannelTestDB(t)
+	ctx := context.Background()
+	account := &biz.SubscriptionAccount{
+		Name:           "quota-event",
+		Platform:       "codex",
+		Status:         biz.ChannelStatusEnabled,
+		Group:          "default",
+		Models:         []string{"gpt-5"},
+		AccountID:      "acc_1",
+		RateMultiplier: 2,
+	}
+	require.NoError(t, repo.CreateSubscriptionAccount(ctx, account))
+
+	usage := biz.SubscriptionAccountQuotaUsage{
+		AccountID:     account.ID,
+		ReservationID: "reservation-1",
+		CostSource:    "billing_commit",
+		CostUSD:       0.5,
+		OccurredAt:    time.Unix(1100, 0),
+	}
+	require.NoError(t, repo.RecordSubscriptionAccountQuotaUsage(ctx, usage))
+	require.NoError(t, repo.RecordSubscriptionAccountQuotaUsage(ctx, usage))
+
+	stored, err := repo.FindSubscriptionAccountByID(ctx, account.ID)
+	require.NoError(t, err)
+	assert.InDelta(t, 1.0, stored.QuotaUsedUSD, 0.000001)
+
+	var events []subscriptionAccountQuotaEventModel
+	require.NoError(t, repo.db.Order("id").Find(&events).Error)
+	require.Len(t, events, 1)
+	assert.Equal(t, "reservation-1", events[0].ReservationID)
+	assert.Equal(t, "billing_commit", events[0].CostSource)
+	assert.InDelta(t, 0.5, events[0].CostUSD, 0.000001)
+	assert.InDelta(t, 1.0, events[0].ChargedUSD, 0.000001)
+	assert.InDelta(t, 2.0, events[0].RateMultiplier, 0.000001)
+}
+
+func TestSubscriptionAccountQuotaUsage_ConcurrentReplayOnlyRecordsOnce(t *testing.T) {
+	repo := setupChannelTestDB(t)
+	ctx := context.Background()
+	account := &biz.SubscriptionAccount{
+		Name:           "quota-event-concurrent",
+		Platform:       "codex",
+		Status:         biz.ChannelStatusEnabled,
+		Group:          "default",
+		Models:         []string{"gpt-5"},
+		AccountID:      "acc_1",
+		RateMultiplier: 2,
+	}
+	require.NoError(t, repo.CreateSubscriptionAccount(ctx, account))
+
+	usage := biz.SubscriptionAccountQuotaUsage{
+		AccountID:     account.ID,
+		ReservationID: "reservation-1",
+		CostSource:    "billing_commit",
+		CostUSD:       0.5,
+		OccurredAt:    time.Unix(1100, 0),
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- repo.RecordSubscriptionAccountQuotaUsage(ctx, usage)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	stored, err := repo.FindSubscriptionAccountByID(ctx, account.ID)
+	require.NoError(t, err)
+	assert.InDelta(t, 1.0, stored.QuotaUsedUSD, 0.000001)
+
+	var count int64
+	require.NoError(t, repo.db.Model(&subscriptionAccountQuotaEventModel{}).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
 }
 
 func TestRecordHealth_OpensAndResetsCircuit(t *testing.T) {

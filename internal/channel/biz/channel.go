@@ -194,7 +194,7 @@ type ChannelRepo interface {
 	ClearTempUnschedulable(ctx context.Context, accountID int64) error
 	RecordAccountQuotaSnapshot(ctx context.Context, snapshot *AccountQuotaSnapshot) error
 	GetAccountQuotaSnapshot(ctx context.Context, accountID int64) (*AccountQuotaSnapshot, error)
-	RecordSubscriptionAccountQuotaUsage(ctx context.Context, accountID int64, costUSD float64, occurredAt time.Time) error
+	RecordSubscriptionAccountQuotaUsage(ctx context.Context, usage SubscriptionAccountQuotaUsage) error
 	ResetSubscriptionAccountQuota(ctx context.Context, accountID int64, scope string) error
 	AutoPauseAccount(ctx context.Context, accountID int64, reason string) error
 	ListAvailableModels(ctx context.Context, group string) ([]string, error)
@@ -205,6 +205,14 @@ type ChannelRepo interface {
 	RecordHealth(ctx context.Context, event ChannelHealthEvent, threshold int32, cooldown time.Duration) (*Channel, error)
 	DeleteChannel(ctx context.Context, channelID int64) error
 	ChangeStatus(ctx context.Context, channelID int64, status int32) error
+}
+
+type SubscriptionAccountQuotaUsage struct {
+	AccountID     int64
+	ReservationID string
+	CostSource    string
+	CostUSD       float64
+	OccurredAt    time.Time
 }
 
 type ChannelUsecase struct {
@@ -385,17 +393,22 @@ func (uc *ChannelUsecase) GetAccountQuotaSnapshot(ctx context.Context, accountID
 	return uc.repo.GetAccountQuotaSnapshot(ctx, accountID)
 }
 
-func (uc *ChannelUsecase) RecordSubscriptionAccountQuotaUsage(ctx context.Context, accountID int64, costUSD float64, occurredAt time.Time) error {
-	if accountID <= 0 {
+func (uc *ChannelUsecase) RecordSubscriptionAccountQuotaUsage(ctx context.Context, usage SubscriptionAccountQuotaUsage) error {
+	if usage.AccountID <= 0 {
 		return ErrSubscriptionAccountNotFound
 	}
-	if costUSD <= 0 {
+	if usage.CostUSD <= 0 {
 		return nil
 	}
-	if occurredAt.IsZero() {
-		occurredAt = uc.now()
+	usage.ReservationID = strings.TrimSpace(usage.ReservationID)
+	usage.CostSource = strings.TrimSpace(usage.CostSource)
+	if usage.CostSource == "" {
+		usage.CostSource = "billing_commit"
 	}
-	return uc.repo.RecordSubscriptionAccountQuotaUsage(ctx, accountID, costUSD, occurredAt)
+	if usage.OccurredAt.IsZero() {
+		usage.OccurredAt = uc.now()
+	}
+	return uc.repo.RecordSubscriptionAccountQuotaUsage(ctx, usage)
 }
 
 func (uc *ChannelUsecase) ResetSubscriptionAccountQuota(ctx context.Context, accountID int64, scope string) error {

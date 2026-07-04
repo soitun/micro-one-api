@@ -450,7 +450,7 @@ func (m *testChannelRepo) GetAccountQuotaSnapshot(ctx context.Context, accountID
 	return nil, channelbiz.ErrSubscriptionAccountNotFound
 }
 
-func (m *testChannelRepo) RecordSubscriptionAccountQuotaUsage(ctx context.Context, accountID int64, costUSD float64, occurredAt time.Time) error {
+func (m *testChannelRepo) RecordSubscriptionAccountQuotaUsage(ctx context.Context, usage channelbiz.SubscriptionAccountQuotaUsage) error {
 	return channelbiz.ErrSubscriptionAccountNotFound
 }
 

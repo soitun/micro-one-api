@@ -1955,7 +1955,7 @@ func (s *HTTPServer) commitQuotaWithResponse(ctx context.Context, reservationID 
 	if len(details) > 0 {
 		detail := details[0]
 		s.recordChannelUsage(ctx, detail.ChannelID, actualTokens)
-		s.recordSubscriptionAccountQuotaUsage(ctx, detail.SubscriptionAccountID, quotaToUSD(resp.GetCommittedAmount()))
+		s.recordSubscriptionAccountQuotaUsage(ctx, detail.SubscriptionAccountID, reservationID, quotaToUSD(resp.GetCommittedAmount()))
 		// recordSubscriptionUsage is a no-op on the dual-track
 		// path: the billing layer's CommitQuotaWithUsage already
 		// wrote the subscription usage via the row-locked
@@ -1967,15 +1967,17 @@ func (s *HTTPServer) commitQuotaWithResponse(ctx context.Context, reservationID 
 	return resp, nil
 }
 
-func (s *HTTPServer) recordSubscriptionAccountQuotaUsage(ctx context.Context, accountID int64, costUSD float64) {
+func (s *HTTPServer) recordSubscriptionAccountQuotaUsage(ctx context.Context, accountID int64, reservationID string, costUSD float64) {
 	if s == nil || s.channelClient == nil || accountID <= 0 || costUSD <= 0 {
 		return
 	}
 	channelCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
 	resp, err := s.channelClient.RecordSubscriptionAccountQuotaUsage(channelCtx, &channelv1.RecordSubscriptionAccountQuotaUsageRequest{
-		AccountId: accountID,
-		CostUsd:   costUSD,
+		AccountId:     accountID,
+		CostUsd:       costUSD,
+		ReservationId: reservationID,
+		CostSource:    "billing_commit",
 	})
 	if err != nil {
 		if applogger.Log != nil {

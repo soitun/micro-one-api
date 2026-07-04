@@ -261,6 +261,8 @@ message RecordSubscriptionAccountQuotaUsageRequest {
   int64 account_id = 1;
   double cost_usd = 2;
   int64 occurred_at = 3; // unix seconds; 0 means channel-service receive time
+  string reservation_id = 4;
+  string cost_source = 5;
 }
 
 message RecordSubscriptionAccountQuotaUsageResponse {

@@ -179,16 +179,16 @@ func (m *mockChannelRepo) GetAccountQuotaSnapshot(ctx context.Context, accountID
 	return &AccountQuotaSnapshot{AccountID: accountID, PrimaryUsedPercent: &used}, nil
 }
 
-func (m *mockChannelRepo) RecordSubscriptionAccountQuotaUsage(ctx context.Context, accountID int64, costUSD float64, occurredAt time.Time) error {
+func (m *mockChannelRepo) RecordSubscriptionAccountQuotaUsage(ctx context.Context, usage SubscriptionAccountQuotaUsage) error {
 	if m.accounts == nil {
 		return ErrSubscriptionAccountNotFound
 	}
-	acc, ok := m.accounts[accountID]
+	acc, ok := m.accounts[usage.AccountID]
 	if !ok {
 		return ErrSubscriptionAccountNotFound
 	}
-	acc.QuotaUsedUSD += costUSD * acc.EffectiveRateMultiplier()
-	acc.LastUsedAt = occurredAt.Unix()
+	acc.QuotaUsedUSD += usage.CostUSD * acc.EffectiveRateMultiplier()
+	acc.LastUsedAt = usage.OccurredAt.Unix()
 	return nil
 }
 

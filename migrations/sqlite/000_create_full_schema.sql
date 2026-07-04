@@ -461,6 +461,23 @@ CREATE INDEX IF NOT EXISTS idx_subscription_account_abilities_account_id
 CREATE INDEX IF NOT EXISTS idx_subscription_account_abilities_model_group_platform
   ON subscription_account_abilities(model, "group", platform);
 
+CREATE TABLE IF NOT EXISTS subscription_account_quota_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reservation_id TEXT NOT NULL,
+  subscription_account_id INTEGER NOT NULL,
+  cost_source TEXT NOT NULL DEFAULT 'billing_commit',
+  cost_usd REAL NOT NULL DEFAULT 0,
+  charged_usd REAL NOT NULL DEFAULT 0,
+  rate_multiplier REAL NOT NULL DEFAULT 1,
+  occurred_at INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_account_quota_events_dedupe
+  ON subscription_account_quota_events(reservation_id, subscription_account_id, cost_source);
+CREATE INDEX IF NOT EXISTS idx_subscription_account_quota_events_account_time
+  ON subscription_account_quota_events(subscription_account_id, occurred_at);
+
 -- ============================================================
 -- User subscriptions / groups
 -- ============================================================

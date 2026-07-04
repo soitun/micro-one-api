@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ type Repository struct {
 	redis       *redis.Client
 	channels    map[int64]*biz.Channel
 	subAccounts map[int64]*biz.SubscriptionAccount
+	quotaEvents map[string]struct{}
 	lock        sync.RWMutex
 	encKey      []byte // AES key for encrypting API keys at rest (nil = no encryption)
 }
@@ -137,6 +139,22 @@ type accountQuotaSnapshotModel struct {
 
 func (accountQuotaSnapshotModel) TableName() string { return "account_quota_snapshots" }
 
+type subscriptionAccountQuotaEventModel struct {
+	ID                    int64   `gorm:"column:id"`
+	ReservationID         string  `gorm:"column:reservation_id"`
+	SubscriptionAccountID int64   `gorm:"column:subscription_account_id"`
+	CostSource            string  `gorm:"column:cost_source"`
+	CostUSD               float64 `gorm:"column:cost_usd"`
+	ChargedUSD            float64 `gorm:"column:charged_usd"`
+	RateMultiplier        float64 `gorm:"column:rate_multiplier"`
+	OccurredAt            int64   `gorm:"column:occurred_at"`
+	CreatedAt             int64   `gorm:"column:created_at"`
+}
+
+func (subscriptionAccountQuotaEventModel) TableName() string {
+	return "subscription_account_quota_events"
+}
+
 func NewRepositoryFromEnv(driver string, dsn ...string) (*Repository, error) {
 	var dbDSN string
 	if len(dsn) > 0 && dsn[0] != "" {
@@ -174,6 +192,7 @@ func newMemoryRepository() *Repository {
 	return &Repository{
 		channels:    make(map[int64]*biz.Channel),
 		subAccounts: make(map[int64]*biz.SubscriptionAccount),
+		quotaEvents: make(map[string]struct{}),
 	}
 }
 
@@ -439,26 +458,41 @@ func (r *Repository) GetAccountQuotaSnapshot(ctx context.Context, accountID int6
 	}, nil
 }
 
-func (r *Repository) RecordSubscriptionAccountQuotaUsage(ctx context.Context, accountID int64, costUSD float64, occurredAt time.Time) error {
-	if accountID <= 0 {
+func (r *Repository) RecordSubscriptionAccountQuotaUsage(ctx context.Context, usage biz.SubscriptionAccountQuotaUsage) error {
+	if usage.AccountID <= 0 {
 		return biz.ErrSubscriptionAccountNotFound
 	}
-	if costUSD <= 0 {
+	if usage.CostUSD <= 0 {
 		return nil
 	}
-	if occurredAt.IsZero() {
-		occurredAt = time.Now()
+	usage.ReservationID = strings.TrimSpace(usage.ReservationID)
+	usage.CostSource = strings.TrimSpace(usage.CostSource)
+	if usage.CostSource == "" {
+		usage.CostSource = "billing_commit"
+	}
+	if usage.OccurredAt.IsZero() {
+		usage.OccurredAt = time.Now()
 	}
 	if r.db != nil {
-		return r.recordSubscriptionAccountQuotaUsageDB(ctx, accountID, costUSD, occurredAt)
+		return r.recordSubscriptionAccountQuotaUsageDB(ctx, usage)
 	}
 	r.lock.Lock()
 	defer r.lock.Unlock()
-	account, ok := r.subAccounts[accountID]
+	account, ok := r.subAccounts[usage.AccountID]
 	if !ok {
 		return biz.ErrSubscriptionAccountNotFound
 	}
-	applySubscriptionAccountQuotaUsage(account, costUSD, occurredAt)
+	if usage.ReservationID != "" {
+		key := subscriptionAccountQuotaEventKey(usage.ReservationID, usage.AccountID, usage.CostSource)
+		if _, ok := r.quotaEvents[key]; ok {
+			return nil
+		}
+		if r.quotaEvents == nil {
+			r.quotaEvents = make(map[string]struct{})
+		}
+		r.quotaEvents[key] = struct{}{}
+	}
+	applySubscriptionAccountQuotaUsage(account, usage.CostUSD, usage.OccurredAt)
 	return nil
 }
 
@@ -860,24 +894,47 @@ func (r *Repository) getAccountQuotaSnapshotDB(ctx context.Context, accountID in
 	return accountQuotaSnapshotModelToBiz(&model), nil
 }
 
-func (r *Repository) recordSubscriptionAccountQuotaUsageDB(ctx context.Context, accountID int64, costUSD float64, occurredAt time.Time) error {
+func (r *Repository) recordSubscriptionAccountQuotaUsageDB(ctx context.Context, usage biz.SubscriptionAccountQuotaUsage) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var model subscriptionAccountModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", accountID).First(&model).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", usage.AccountID).First(&model).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return biz.ErrSubscriptionAccountNotFound
 			}
 			return err
 		}
 		account := r.subscriptionAccountModelToBiz(&model)
-		applySubscriptionAccountQuotaUsage(account, costUSD, occurredAt)
-		return tx.Model(&subscriptionAccountModel{}).Where("id = ?", accountID).Updates(map[string]interface{}{
+		chargedUSD := usage.CostUSD * account.EffectiveRateMultiplier()
+		if usage.ReservationID != "" {
+			event := subscriptionAccountQuotaEventModel{
+				ReservationID:         usage.ReservationID,
+				SubscriptionAccountID: usage.AccountID,
+				CostSource:            usage.CostSource,
+				CostUSD:               usage.CostUSD,
+				ChargedUSD:            chargedUSD,
+				RateMultiplier:        account.EffectiveRateMultiplier(),
+				OccurredAt:            usage.OccurredAt.Unix(),
+				CreatedAt:             time.Now().Unix(),
+			}
+			result := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "reservation_id"}, {Name: "subscription_account_id"}, {Name: "cost_source"}},
+				DoNothing: true,
+			}).Create(&event)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return nil
+			}
+		}
+		applySubscriptionAccountQuotaUsage(account, usage.CostUSD, usage.OccurredAt)
+		return tx.Model(&subscriptionAccountModel{}).Where("id = ?", usage.AccountID).Updates(map[string]interface{}{
 			"quota_used_usd":            account.QuotaUsedUSD,
 			"quota_daily_used_usd":      account.QuotaDailyUsedUSD,
 			"quota_daily_window_start":  account.QuotaDailyWindowStart,
 			"quota_weekly_used_usd":     account.QuotaWeeklyUsedUSD,
 			"quota_weekly_window_start": account.QuotaWeeklyWindowStart,
-			"last_used_at":              occurredAt.Unix(),
+			"last_used_at":              usage.OccurredAt.Unix(),
 			"updated_at":                time.Now().Unix(),
 		}).Error
 	})
@@ -1491,6 +1548,10 @@ func resetSubscriptionAccountQuota(account *biz.SubscriptionAccount, scope strin
 		account.QuotaWeeklyWindowStart = 0
 	}
 	account.UpdatedAt = time.Now().Unix()
+}
+
+func subscriptionAccountQuotaEventKey(reservationID string, accountID int64, costSource string) string {
+	return reservationID + "\x00" + strconv.FormatInt(accountID, 10) + "\x00" + costSource
 }
 
 func subscriptionAccountQuotaResetUpdates(scope string) map[string]interface{} {
