@@ -377,6 +377,10 @@ func (s *BillingService) ListLedger(ctx context.Context, req *billingv1.ListLedg
 			ElapsedTime:           ledger.ElapsedTime,
 			IsStream:              ledger.IsStream,
 			Endpoint:              ledger.Endpoint,
+			CostSource:            ledger.CostSource,
+			SubscriptionCost:      ledger.SubscriptionCost,
+			BalanceCost:           ledger.BalanceCost,
+			LedgerDedupeKey:       ledger.LedgerDedupeKey,
 		}
 	}
 

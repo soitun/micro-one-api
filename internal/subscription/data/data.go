@@ -32,6 +32,9 @@ func NewRepositoryFromEnv(driver string, dsn ...string) (*Repository, error) {
 		if dbDSN == "" {
 			dbDSN = os.Getenv("SQL_DSN")
 		}
+		if dbDSN == "" {
+			dbDSN = os.Getenv("DATABASE_DSN")
+		}
 	}
 	if dbDSN == "" {
 		return newMemoryRepository(), nil

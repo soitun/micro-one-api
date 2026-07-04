@@ -46,6 +46,10 @@ func (m *mockAccountRepo) UpdateUsage(ctx context.Context, userID string, usedAm
 	return nil
 }
 
+func (m *mockAccountRepo) UpdateUsageInTx(ctx context.Context, tx *gorm.DB, userID string, usedAmountDelta, requestCountDelta int64) error {
+	return m.UpdateUsage(ctx, userID, usedAmountDelta, requestCountDelta)
+}
+
 func (m *mockAccountRepo) UpdateFrozenAmount(ctx context.Context, userID string, delta int64) error {
 	m.account.FrozenAmount += delta
 	return nil

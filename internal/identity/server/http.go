@@ -649,6 +649,10 @@ func ledgerEntryToMap(entry *commonv1.LedgerEntry) map[string]interface{} {
 		"elapsed_time":      entry.GetElapsedTime(),
 		"is_stream":         entry.GetIsStream(),
 		"endpoint":          entry.GetEndpoint(),
+		"cost_source":       entry.GetCostSource(),
+		"subscription_cost": entry.GetSubscriptionCost(),
+		"balance_cost":      entry.GetBalanceCost(),
+		"ledger_dedupe_key": entry.GetLedgerDedupeKey(),
 	}
 }
 

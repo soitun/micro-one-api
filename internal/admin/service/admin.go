@@ -1917,6 +1917,10 @@ func (s *AdminService) ListLedgerEntries(ctx context.Context, req *adminv1.ListL
 			"elapsedTime":           entry.GetElapsedTime(),
 			"isStream":              entry.GetIsStream(),
 			"endpoint":              entry.GetEndpoint(),
+			"costSource":            entry.GetCostSource(),
+			"subscriptionCost":      entry.GetSubscriptionCost(),
+			"balanceCost":           entry.GetBalanceCost(),
+			"ledgerDedupeKey":       entry.GetLedgerDedupeKey(),
 		})
 	}
 

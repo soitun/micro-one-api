@@ -33,10 +33,9 @@ type ModelPrice struct {
 	CacheReadPrice *float64 `json:"cache_read_price,omitempty"`
 }
 
-// QuotaPerUSD is the conversion factor used to translate between quota
-// (integer) and USD (floating). The default of 500000 matches the relay
-// gateway's PAYMENT_QUOTA_PER_UNIT default.
-var QuotaPerUSD = int64(500000)
+// QuotaPerUSD is the conversion factor used to translate between the integer
+// amount ledger columns and the USD amounts shown in the UI.
+var QuotaPerUSD = int64(AmountScale)
 
 // BillingOptions wires the optional dependencies the dual-track
 // "subscription priority" flow needs. The default zero value disables
@@ -236,7 +235,7 @@ func (uc *BillingUsecase) quotaPerUSD() int64 {
 	if QuotaPerUSD > 0 {
 		return QuotaPerUSD
 	}
-	return 500000
+	return AmountScale
 }
 
 func (uc *BillingUsecase) ReserveQuota(ctx context.Context, userID, requestID string, estimatedTokens int64, model, channelID string, subscriptionAccountID int64) (*Reservation, error) {
@@ -903,7 +902,7 @@ func (uc *BillingUsecase) commitQuotaDualTrack(ctx context.Context, reservationI
 	if !won {
 		return 0, 0, errors.Join(ErrReservationCommitted, ErrReservationReleased)
 	}
-	if err := uc.accountRepo.UpdateUsage(ctx, reservation.UserID, actualCost, 1); err != nil {
+	if err := uc.accountRepo.UpdateUsageInTx(ctx, tx, reservation.UserID, actualCost, 1); err != nil {
 		return 0, 0, fmt.Errorf("update usage: %w", err)
 	}
 	if err := tx.Commit().Error; err != nil {

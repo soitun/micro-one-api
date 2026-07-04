@@ -908,6 +908,41 @@ func TestAdminHTTPPageUsesExternalWebRoot(t *testing.T) {
 	}
 }
 
+func TestAdminHTTPPageDisablesShellCache(t *testing.T) {
+	webRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(webRoot, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webRoot, "index.html"), []byte(`<!doctype html><div id="root">external</div>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webRoot, "assets", "app.js"), []byte(`console.log("external asset")`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewHTTPServer(":0", nil, "", webRoot)
+
+	for _, path := range []string{"/", "/subscriptions"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200, body=%s", path, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "no-cache, no-store, must-revalidate" {
+			t.Fatalf("GET %s Cache-Control = %q", path, got)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Cache-Control"); got != "" {
+		t.Fatalf("asset Cache-Control = %q, want empty", got)
+	}
+}
+
 func TestAdminHTTPPageFallsBackToEmbedWhenExternalWebRootInvalid(t *testing.T) {
 	webRoot := t.TempDir()
 	srv := NewHTTPServer(":0", nil, "", webRoot)

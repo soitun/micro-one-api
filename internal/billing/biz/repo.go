@@ -12,6 +12,7 @@ type AccountRepo interface {
 	BatchGetAccountSnapshots(ctx context.Context, userIDs []string) (map[string]*Account, error)
 	UpdateBalance(ctx context.Context, userID string, delta int64, operationType string) (int64, error)
 	UpdateUsage(ctx context.Context, userID string, usedAmountDelta, requestCountDelta int64) error
+	UpdateUsageInTx(ctx context.Context, tx *gorm.DB, userID string, usedAmountDelta, requestCountDelta int64) error
 	UpdateFrozenAmount(ctx context.Context, userID string, delta int64) error
 	// ReserveBalanceInTx atomically pre-deducts amount from the user's wallet
 	// inside the caller's transaction. It performs the read-check-update of

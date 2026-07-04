@@ -33,6 +33,18 @@ func (r *ledgerRepo) CreateLedgerInTx(ctx context.Context, tx *gorm.DB, ledger *
 	if tx == nil {
 		tx = r.data.db.WithContext(ctx)
 	}
+	costSource := ledger.CostSource
+	if costSource == "" {
+		costSource = biz.CostSourceBalance
+	}
+	balanceCost := ledger.BalanceCost
+	if costSource == biz.CostSourceBalance && ledger.Type == biz.LedgerTypeConsume && ledger.SubscriptionCost == 0 && balanceCost == 0 {
+		balanceCost = absLedgerAmount(ledger.Amount)
+	}
+	dedupeKey := ledger.LedgerDedupeKey
+	if dedupeKey == "" {
+		dedupeKey = legacyLedgerDedupeKey(ledger)
+	}
 	model := &ledgerModel{
 		UserID:                ledger.UserID,
 		Amount:                ledger.Amount,
@@ -52,12 +64,29 @@ func (r *ledgerRepo) CreateLedgerInTx(ctx context.Context, tx *gorm.DB, ledger *
 		ElapsedTime:           ledger.ElapsedTime,
 		IsStream:              ledger.IsStream,
 		Endpoint:              ledger.Endpoint,
-		CostSource:            ledger.CostSource,
+		CostSource:            costSource,
 		SubscriptionCost:      ledger.SubscriptionCost,
-		BalanceCost:           ledger.BalanceCost,
-		LedgerDedupeKey:       ledger.LedgerDedupeKey,
+		BalanceCost:           balanceCost,
+		LedgerDedupeKey:       dedupeKey,
 	}
 	return tx.Create(model).Error
+}
+
+func legacyLedgerDedupeKey(ledger *biz.Ledger) string {
+	if ledger == nil {
+		return fmt.Sprintf("legacy:unknown:%d", time.Now().UnixNano())
+	}
+	if ledger.ReferenceID != "" {
+		return fmt.Sprintf("%s:%s:legacy", ledger.ReferenceID, ledger.Type)
+	}
+	return fmt.Sprintf("legacy:%s:%s:%d", ledger.UserID, ledger.Type, time.Now().UnixNano())
+}
+
+func absLedgerAmount(amount int64) int64 {
+	if amount < 0 {
+		return -amount
+	}
+	return amount
 }
 
 func (r *ledgerRepo) ListLedgers(ctx context.Context, userID string, page, pageSize int32) ([]*biz.Ledger, int64, error) {

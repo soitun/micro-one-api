@@ -19,6 +19,13 @@ func NewReservationRepo(data *Data) biz.ReservationRepo {
 	return &reservationRepo{data: data}
 }
 
+func (r *reservationRepo) DB() *gorm.DB {
+	if r == nil || r.data == nil {
+		return nil
+	}
+	return r.data.db
+}
+
 func (r *reservationRepo) CreateReservation(ctx context.Context, reservation *biz.Reservation) error {
 	return r.CreateReservationInTx(ctx, r.data.db.WithContext(ctx), reservation)
 }
@@ -126,6 +133,9 @@ func (r *reservationRepo) LockSubscriptionRow(ctx context.Context, tx *gorm.DB, 
 	if tx == nil {
 		tx = r.data.db.WithContext(ctx)
 	}
+	var row struct {
+		ID int64 `gorm:"column:id"`
+	}
 	if dialectorName(tx) == "sqlite3" {
 		// SQLite uses BEGIN..COMMIT which already serialises writers.
 		// We still issue the SELECT so the function is observably a
@@ -134,13 +144,13 @@ func (r *reservationRepo) LockSubscriptionRow(ctx context.Context, tx *gorm.DB, 
 		return tx.WithContext(ctx).
 			Table("user_subscriptions").
 			Where("id = ?", subscriptionID).
-			Take(nil).Error
+			Take(&row).Error
 	}
 	return tx.WithContext(ctx).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Table("user_subscriptions").
 		Where("id = ?", subscriptionID).
-		Take(nil).Error
+		Take(&row).Error
 }
 
 // SumActiveFrozenInTx aggregates the subscription-side pre-deduction USD

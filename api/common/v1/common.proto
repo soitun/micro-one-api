@@ -215,6 +215,10 @@ message LedgerEntry {
   string endpoint = 17;
   int64 cache_read_tokens = 18;
   int64 subscription_account_id = 19;  // 订阅账号 ID（0 = 非订阅账号请求）
+  string cost_source = 20;             // subscription / balance / mixed
+  int64 subscription_cost = 21;         // 订阅额度承担的 quota
+  int64 balance_cost = 22;              // 余额承担的 quota
+  string ledger_dedupe_key = 23;        // 幂等写入键
 }
 
 // ========== 流水信息（管理端视图）==========

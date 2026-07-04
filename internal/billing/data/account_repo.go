@@ -90,7 +90,14 @@ func (r *accountRepo) UpdateBalance(ctx context.Context, userID string, delta in
 }
 
 func (r *accountRepo) UpdateUsage(ctx context.Context, userID string, usedAmountDelta, requestCountDelta int64) error {
-	return r.data.db.WithContext(ctx).Table("users").
+	return r.UpdateUsageInTx(ctx, r.data.db.WithContext(ctx), userID, usedAmountDelta, requestCountDelta)
+}
+
+func (r *accountRepo) UpdateUsageInTx(ctx context.Context, tx *gorm.DB, userID string, usedAmountDelta, requestCountDelta int64) error {
+	if tx == nil {
+		tx = r.data.db.WithContext(ctx)
+	}
+	return tx.WithContext(ctx).Table("users").
 		Where("id = ?", userID).
 		Updates(map[string]interface{}{
 			"used_amount":   gorm.Expr("used_amount + ?", usedQuotaExpr(usedAmountDelta)),

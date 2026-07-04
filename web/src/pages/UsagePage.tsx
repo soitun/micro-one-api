@@ -34,6 +34,9 @@ interface UsageLog {
   cache_read_tokens?: number;
   elapsed_time?: number;
   is_stream?: boolean;
+  cost_source?: string;
+  subscription_cost?: number;
+  balance_cost?: number;
 }
 
 interface UsageLogData {
@@ -90,6 +93,28 @@ function compactToken(value?: number) {
   if (safeValue >= 1000000) return `${(safeValue / 1000000).toFixed(2)}M`;
   if (safeValue >= 1000) return `${(safeValue / 1000).toFixed(1)}K`;
   return safeValue.toLocaleString();
+}
+
+function CostCell({ log }: { log: UsageLog }) {
+  const subscriptionCost = Math.abs(log.subscription_cost || 0);
+  const balanceCost = Math.abs(log.balance_cost || 0);
+  const total = Math.abs(log.amount ?? 0);
+
+  if (subscriptionCost > 0 || balanceCost > 0) {
+    return (
+      <div className="space-y-1">
+        <div className="font-semibold text-slate-900 dark:text-white">{formatQuota(total)}</div>
+        {subscriptionCost > 0 ? (
+          <div className="text-xs font-semibold text-sky-600 dark:text-sky-300">订阅额度 {formatQuota(subscriptionCost)}</div>
+        ) : null}
+        {balanceCost > 0 ? (
+          <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-300">余额 {formatQuota(balanceCost)}</div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return <span className="font-semibold text-emerald-600">{formatQuota(total)}</span>;
 }
 
 interface TooltipState {
@@ -308,7 +333,9 @@ export function UsagePage() {
                     <TableCell>
                       <TokenUsageCell log={log} />
                     </TableCell>
-                    <TableCell className="font-semibold text-emerald-600">{formatQuota(Math.abs(log.amount ?? 0))}</TableCell>
+                    <TableCell>
+                      <CostCell log={log} />
+                    </TableCell>
                     <TableCell>{formatDuration(log.elapsed_time)}</TableCell>
                     <TableCell>{formatDate(log.created_at)}</TableCell>
                   </TableRow>

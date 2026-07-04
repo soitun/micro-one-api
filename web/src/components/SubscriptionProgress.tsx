@@ -24,7 +24,13 @@ export interface SubscriptionProgressData {
 }
 
 function formatUsd(value: number) {
-  return `$${value.toFixed(2)}`;
+  const safeValue = Number.isFinite(value) ? value : 0;
+  const digits = Math.abs(safeValue) > 0 && Math.abs(safeValue) < 1 ? 8 : 2;
+  const fixed = safeValue.toFixed(digits);
+  const [whole, fraction = ''] = fixed.split('.');
+  const trimmed = fraction.replace(/0+$/, '');
+  if (trimmed.length <= 2) return `$${whole}.${fraction.slice(0, 2)}`;
+  return `$${whole}.${trimmed}`;
 }
 
 function usageRatio(used: number, limit: number | null) {
@@ -61,7 +67,7 @@ function QuotaBar({ label, dimension }: { label: string; dimension: QuotaDimensi
               style={{ width: `${Math.round(ratio * 100)}%` }}
             />
           </div>
-          <span className="w-28 shrink-0 text-right text-xs text-muted-foreground">
+          <span className="w-36 shrink-0 whitespace-nowrap text-right text-xs text-muted-foreground">
             {formatUsd(dimension.used)} / {formatUsd(dimension.limit ?? 0)}
           </span>
         </>

@@ -42,6 +42,34 @@ describe('SubscriptionsPage', () => {
     expect(screen.getByText('剩余 3 天')).toBeInTheDocument();
   });
 
+  it('renders tiny subscription usage without rounding it to zero', async () => {
+    server.use(
+      http.get('/api/v1/subscriptions/progress', () =>
+        HttpResponse.json({
+          success: true,
+          data: {
+            id: 7,
+            status: 'active',
+            starts_at: 1700000000,
+            expires_at: 1800000000,
+            daily_used: { used: 0.000002, limit: 50, remaining: 49.999998 },
+            weekly_used: null,
+            monthly_used: null,
+            remaining_seconds: 86400 * 3,
+          },
+        }),
+      ),
+    );
+
+    renderWithQuery(
+      <MemoryRouter>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('$0.000002 / $50.00')).toBeInTheDocument();
+  });
+
   it('shows an empty state when there is no active subscription', async () => {
     server.use(
       http.get('/api/v1/subscriptions/progress', () =>

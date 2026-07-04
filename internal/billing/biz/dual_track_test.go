@@ -183,13 +183,13 @@ func TestCommitBalanceInTx_AllCases(t *testing.T) {
 // the subscription-side USD-to-quota conversion.
 func TestUsecaseUSDToQuotaFloor(t *testing.T) {
 	uc := &BillingUsecase{}
-	QuotaPerUSD = 500000
-	// 1.5 USD * 500000 = 750000, no rounding.
-	assert.Equal(t, int64(750000), uc.usdToQuotaFloor(1.5))
-	// 1.5555 USD * 500000 = 777750, no rounding.
-	assert.Equal(t, int64(777750), uc.usdToQuotaFloor(1.5555))
-	// 0.0001 USD * 500000 = 50, no rounding.
-	assert.Equal(t, int64(50), uc.usdToQuotaFloor(0.0001))
+	QuotaPerUSD = AmountScale
+	// 1.5 USD * 10000 = 15000, no rounding.
+	assert.Equal(t, int64(15000), uc.usdToQuotaFloor(1.5))
+	// 1.5555 USD * 10000 = 15555, no rounding.
+	assert.Equal(t, int64(15555), uc.usdToQuotaFloor(1.5555))
+	// 0.0001 USD * 10000 = 1, no rounding.
+	assert.Equal(t, int64(1), uc.usdToQuotaFloor(0.0001))
 	// 0 USD -> 0
 	assert.Equal(t, int64(0), uc.usdToQuotaFloor(0))
 }

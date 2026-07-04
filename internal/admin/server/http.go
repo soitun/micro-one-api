@@ -1213,7 +1213,10 @@ func (a adminWebAssets) handlePage(w http.ResponseWriter, r *http.Request) {
 	// SPA fallback: any path without a file extension serves index.html so
 	// client-side routes (/login, /dashboard, /tokens) load the React shell.
 	path := strings.TrimPrefix(r.URL.Path, "/")
-	if path == "" || !strings.Contains(path, ".") {
+	if path == "" || path == "index.html" || !strings.Contains(path, ".") {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/"
 		http.FileServer(http.FS(a.root)).ServeHTTP(w, r2)
