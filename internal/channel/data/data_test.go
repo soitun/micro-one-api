@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -459,4 +460,22 @@ func TestRecordAccountQuotaSnapshot_PersistsAndUpdatesAccount(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, biz.ChannelStatusDisabled, stored.Status)
 	assert.Equal(t, "quota exhausted", stored.LastError)
+}
+
+func TestGetAccountQuotaSnapshotMemorySkipsOverflowResetAfter(t *testing.T) {
+	repo := &Repository{
+		subAccounts: map[int64]*biz.SubscriptionAccount{
+			1: {
+				ID:           1,
+				Status:       biz.ChannelStatusEnabled,
+				QuotaResetAt: time.Now().Unix() + int64(math.MaxInt32) + 1,
+			},
+		},
+	}
+
+	snapshot, err := repo.GetAccountQuotaSnapshot(context.Background(), 1)
+	require.NoError(t, err)
+	if snapshot.PrimaryResetAfterSeconds != nil {
+		t.Fatalf("reset after should be absent for overflow value, got %d", *snapshot.PrimaryResetAfterSeconds)
+	}
 }

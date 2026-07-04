@@ -13,11 +13,11 @@ const (
 	KindNonRetryable           Kind = "NonRetryable"
 	KindCyberBlocked           Kind = "CyberBlocked"
 	KindPassthrough            Kind = "Passthrough"
-	// KindRetryablePassthrough covers upstream 429s: we first try to fail over
+	// KindRetryableForward covers upstream 429s: we first try to fail over
 	// to another subscription account (the upstream account is rate-limited, a
 	// sibling account may still have quota), and only pass the original 429
 	// (with Retry-After) back to the client once every candidate is exhausted.
-	KindRetryablePassthrough Kind = "RetryablePassthrough"
+	KindRetryableForward Kind = "RetryablePassthrough"
 	// KindOverloaded covers upstream 529 (Anthropic "Overloaded"). Semantically
 	// distinct from a 429 rate-limit: the account is not over quota, the upstream
 	// is momentarily saturated. We fail over to a sibling account like a 429, and
@@ -46,7 +46,7 @@ func Classify(statusCode int, body []byte) UpstreamError {
 	}
 	switch {
 	case statusCode == http.StatusTooManyRequests:
-		err.Kind = KindRetryablePassthrough
+		err.Kind = KindRetryableForward
 	case statusCode == StatusOverloaded:
 		err.Kind = KindOverloaded
 	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
@@ -62,7 +62,7 @@ func Classify(statusCode int, body []byte) UpstreamError {
 }
 
 func (e UpstreamError) RetryableAcrossAccounts() bool {
-	return e.Kind == KindRetryable || e.Kind == KindRetryablePassthrough || e.Kind == KindOverloaded
+	return e.Kind == KindRetryable || e.Kind == KindRetryableForward || e.Kind == KindOverloaded
 }
 
 // RetryableOnSameAccount reports whether the error is a transient condition that
@@ -73,5 +73,5 @@ func (e UpstreamError) RetryableOnSameAccount() bool {
 }
 
 func (e UpstreamError) ShouldPassthrough() bool {
-	return e.Kind == KindPassthrough || e.Kind == KindCyberBlocked || e.Kind == KindRetryablePassthrough || e.Kind == KindOverloaded
+	return e.Kind == KindPassthrough || e.Kind == KindCyberBlocked || e.Kind == KindRetryableForward || e.Kind == KindOverloaded
 }

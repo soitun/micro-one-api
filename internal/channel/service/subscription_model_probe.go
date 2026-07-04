@@ -88,7 +88,7 @@ func (s *codexModelProbeService) SyncExistingCodexAccounts(ctx context.Context, 
 		}
 		go func(accountID int64) {
 			defer s.unmarkPending(accountID)
-			probeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			_ = s.syncCodexModels(probeCtx, accountID)
 		}(account.ID)
@@ -108,7 +108,7 @@ func (s *codexModelProbeService) HandleSubscriptionAccountEvent(ctx context.Cont
 	}
 	go func() {
 		defer s.unmarkPending(accountID)
-		probeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		_ = s.syncCodexModels(probeCtx, accountID)
 	}()

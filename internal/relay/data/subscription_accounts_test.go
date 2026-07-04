@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -168,5 +169,22 @@ func TestChannelSubscriptionAccountStoreRecordQuotaSnapshotUsesRPC(t *testing.T)
 	// Windows the upstream didn't report must stay absent, not zero-valued.
 	if client.snapshotReq.SecondaryUsedPercent != nil {
 		t.Fatal("secondary used percent should be absent")
+	}
+}
+
+func TestChannelSubscriptionAccountStoreRecordQuotaSnapshotRejectsOverflow(t *testing.T) {
+	client := &subscriptionAccountStoreClient{}
+	store := NewChannelSubscriptionAccountStore(client)
+
+	overflow := int(math.MaxInt32) + 1
+	err := store.RecordAccountQuotaSnapshot(context.Background(), 42, &relayquota.CodexSnapshot{
+		PrimaryWindowMinutes: &overflow,
+		UpdatedAt:            time.Unix(1710002000, 0),
+	})
+	if err == nil {
+		t.Fatal("expected overflow error")
+	}
+	if client.snapshotReq != nil {
+		t.Fatal("overflow snapshot must not be sent to RPC")
 	}
 }

@@ -148,7 +148,7 @@ func NewRepositoryFromEnv(driver string, dsn ...string) (*Repository, error) {
 	rdb := xdb.NewRedisClient(redisAddr, redisPassword)
 	if rdb != nil {
 		if pingErr := rdb.Ping(context.Background()).Err(); pingErr != nil {
-			rdb.Close()
+			_ = rdb.Close()
 			rdb = nil
 		}
 	}
@@ -407,8 +407,9 @@ func (r *Repository) GetAccountQuotaSnapshot(ctx context.Context, accountID int6
 	}
 	var resetAfter *int32
 	if account.QuotaResetAt > 0 {
-		value := int32(account.QuotaResetAt - time.Now().Unix())
-		resetAfter = &value
+		if value, err := safecast.Int64ToInt32(account.QuotaResetAt - time.Now().Unix()); err == nil {
+			resetAfter = &value
+		}
 	}
 	if account.PrimaryQuotaResetAfterSeconds != nil {
 		resetAfter = account.PrimaryQuotaResetAfterSeconds

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	channelv1 "micro-one-api/api/channel/v1"
+	"micro-one-api/internal/pkg/safecast"
 	relaycredential "micro-one-api/internal/relay/credential"
 	relayquota "micro-one-api/internal/relay/quota"
 )
@@ -204,22 +205,34 @@ func (s *ChannelSubscriptionAccountStore) RecordAccountQuotaSnapshot(ctx context
 		req.PrimaryUsedPercent = snapshot.PrimaryUsedPercent
 	}
 	if snapshot.PrimaryResetAfterSeconds != nil {
-		v := int32(*snapshot.PrimaryResetAfterSeconds)
+		v, err := safecast.IntToInt32(*snapshot.PrimaryResetAfterSeconds)
+		if err != nil {
+			return fmt.Errorf("primary reset after seconds: %w", err)
+		}
 		req.PrimaryResetAfterSeconds = &v
 	}
 	if snapshot.PrimaryWindowMinutes != nil {
-		v := int32(*snapshot.PrimaryWindowMinutes)
+		v, err := safecast.IntToInt32(*snapshot.PrimaryWindowMinutes)
+		if err != nil {
+			return fmt.Errorf("primary window minutes: %w", err)
+		}
 		req.PrimaryWindowMinutes = &v
 	}
 	if snapshot.SecondaryUsedPercent != nil {
 		req.SecondaryUsedPercent = snapshot.SecondaryUsedPercent
 	}
 	if snapshot.SecondaryResetAfterSeconds != nil {
-		v := int32(*snapshot.SecondaryResetAfterSeconds)
+		v, err := safecast.IntToInt32(*snapshot.SecondaryResetAfterSeconds)
+		if err != nil {
+			return fmt.Errorf("secondary reset after seconds: %w", err)
+		}
 		req.SecondaryResetAfterSeconds = &v
 	}
 	if snapshot.SecondaryWindowMinutes != nil {
-		v := int32(*snapshot.SecondaryWindowMinutes)
+		v, err := safecast.IntToInt32(*snapshot.SecondaryWindowMinutes)
+		if err != nil {
+			return fmt.Errorf("secondary window minutes: %w", err)
+		}
 		req.SecondaryWindowMinutes = &v
 	}
 	if snapshot.PrimaryOverSecondaryPercent != nil {

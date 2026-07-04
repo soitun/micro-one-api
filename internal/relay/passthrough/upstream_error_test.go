@@ -12,7 +12,7 @@ func TestClassify(t *testing.T) {
 		body   string
 		kind   Kind
 	}{
-		{name: "429 retryable passthrough", status: http.StatusTooManyRequests, kind: KindRetryablePassthrough},
+		{name: "429 retryable passthrough", status: http.StatusTooManyRequests, kind: KindRetryableForward},
 		{name: "401 passthrough", status: http.StatusUnauthorized, kind: KindPassthrough},
 		{name: "403 passthrough", status: http.StatusForbidden, kind: KindPassthrough},
 		{name: "cyber policy", status: http.StatusBadRequest, body: `{"error":"cyber_policy"}`, kind: KindCyberBlocked},
