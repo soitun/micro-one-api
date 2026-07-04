@@ -5,4 +5,3 @@ ALTER TABLE `user_subscriptions`
   MODIFY COLUMN `daily_usage_usd` DECIMAL(18,8) NOT NULL DEFAULT 0,
   MODIFY COLUMN `weekly_usage_usd` DECIMAL(18,8) NOT NULL DEFAULT 0,
   MODIFY COLUMN `monthly_usage_usd` DECIMAL(18,8) NOT NULL DEFAULT 0;
-

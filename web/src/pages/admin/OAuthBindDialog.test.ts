@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseOAuthCallbackInput } from './OAuthBindDialog';
+import { parseOAuthCallbackInput } from './oauthCallbackInput';
 
 describe('parseOAuthCallbackInput', () => {
   it('accepts a raw code', () => {
