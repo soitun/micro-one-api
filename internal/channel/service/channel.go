@@ -545,6 +545,35 @@ func (s *ChannelService) RecordSubscriptionAccountQuotaUsage(ctx context.Context
 	return &channelv1.RecordSubscriptionAccountQuotaUsageResponse{Success: true, Message: "ok"}, nil
 }
 
+func (s *ChannelService) AggregateSubscriptionAccountQuotaEvents(ctx context.Context, req *channelv1.AggregateSubscriptionAccountQuotaEventsRequest) (*channelv1.AggregateSubscriptionAccountQuotaEventsResponse, error) {
+	filter := biz.SubscriptionAccountQuotaEventFilter{
+		AccountID: req.GetAccountId(),
+		Limit:     int(req.GetLimit()),
+	}
+	if req.GetStartTime() > 0 {
+		filter.StartTime = time.Unix(req.GetStartTime(), 0)
+	}
+	if req.GetEndTime() > 0 {
+		filter.EndTime = time.Unix(req.GetEndTime(), 0)
+	}
+	items, err := s.uc.AggregateSubscriptionAccountQuotaEvents(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	resp := &channelv1.AggregateSubscriptionAccountQuotaEventsResponse{Items: make([]*channelv1.SubscriptionAccountQuotaEventAggregate, 0, len(items))}
+	for _, item := range items {
+		resp.Items = append(resp.Items, &channelv1.SubscriptionAccountQuotaEventAggregate{
+			SubscriptionAccountId: item.SubscriptionAccountID,
+			CostUsd:               item.CostUSD,
+			ChargedUsd:            item.ChargedUSD,
+			AverageRateMultiplier: item.AverageRateMultiplier,
+			Count:                 item.Count,
+			LastOccurredAt:        item.LastOccurredAt,
+		})
+	}
+	return resp, nil
+}
+
 func (s *ChannelService) ResetSubscriptionAccountQuota(ctx context.Context, req *channelv1.ResetSubscriptionAccountQuotaRequest) (*channelv1.ResetSubscriptionAccountQuotaResponse, error) {
 	if err := s.uc.ResetSubscriptionAccountQuota(ctx, req.GetAccountId(), req.GetScope()); err != nil {
 		return &channelv1.ResetSubscriptionAccountQuotaResponse{Success: false, Message: err.Error()}, nil

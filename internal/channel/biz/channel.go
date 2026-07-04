@@ -195,6 +195,7 @@ type ChannelRepo interface {
 	RecordAccountQuotaSnapshot(ctx context.Context, snapshot *AccountQuotaSnapshot) error
 	GetAccountQuotaSnapshot(ctx context.Context, accountID int64) (*AccountQuotaSnapshot, error)
 	RecordSubscriptionAccountQuotaUsage(ctx context.Context, usage SubscriptionAccountQuotaUsage) error
+	AggregateSubscriptionAccountQuotaEvents(ctx context.Context, filter SubscriptionAccountQuotaEventFilter) ([]*SubscriptionAccountQuotaEventAggregate, error)
 	ResetSubscriptionAccountQuota(ctx context.Context, accountID int64, scope string) error
 	AutoPauseAccount(ctx context.Context, accountID int64, reason string) error
 	ListAvailableModels(ctx context.Context, group string) ([]string, error)
@@ -213,6 +214,22 @@ type SubscriptionAccountQuotaUsage struct {
 	CostSource    string
 	CostUSD       float64
 	OccurredAt    time.Time
+}
+
+type SubscriptionAccountQuotaEventFilter struct {
+	AccountID int64
+	StartTime time.Time
+	EndTime   time.Time
+	Limit     int
+}
+
+type SubscriptionAccountQuotaEventAggregate struct {
+	SubscriptionAccountID int64
+	CostUSD               float64
+	ChargedUSD            float64
+	AverageRateMultiplier float64
+	Count                 int64
+	LastOccurredAt        int64
 }
 
 type ChannelUsecase struct {
@@ -409,6 +426,13 @@ func (uc *ChannelUsecase) RecordSubscriptionAccountQuotaUsage(ctx context.Contex
 		usage.OccurredAt = uc.now()
 	}
 	return uc.repo.RecordSubscriptionAccountQuotaUsage(ctx, usage)
+}
+
+func (uc *ChannelUsecase) AggregateSubscriptionAccountQuotaEvents(ctx context.Context, filter SubscriptionAccountQuotaEventFilter) ([]*SubscriptionAccountQuotaEventAggregate, error) {
+	if filter.Limit <= 0 {
+		filter.Limit = 5
+	}
+	return uc.repo.AggregateSubscriptionAccountQuotaEvents(ctx, filter)
 }
 
 func (uc *ChannelUsecase) ResetSubscriptionAccountQuota(ctx context.Context, accountID int64, scope string) error {

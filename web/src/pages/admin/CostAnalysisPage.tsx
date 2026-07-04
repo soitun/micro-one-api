@@ -66,11 +66,38 @@ interface AdminSummary {
     upstream_cost?: number;
     gross_profit?: number;
     count?: number;
+    account_event_cost_usd?: number;
+    account_event_charged_usd?: number;
+    account_event_average_rate_multiplier?: number;
+    account_event_count?: number;
+    account_event_last_occurred_at?: number;
+  }>;
+  top_subscription_account_quota_events?: Array<{
+    name?: string;
+    platform?: string;
+    status?: number;
+    account_id?: string;
+    subscription_account_id?: number;
+    cost_usd?: number;
+    charged_usd?: number;
+    average_rate_multiplier?: number;
+    count?: number;
+    last_occurred_at?: number;
+    ledger_quota?: number;
+    ledger_upstream_cost?: number;
+    ledger_gross_profit?: number;
+    ledger_count?: number;
   }>;
 }
 
 function formatMoney(q: number, digits = 4) {
   return formatUSD(q, digits);
+}
+
+function formatUSDValue(value: number | undefined, digits = 4) {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return '$0.0000';
+  return `$${parsed.toFixed(digits)}`;
 }
 
 function MetricCard({
@@ -176,6 +203,24 @@ export function CostAnalysisPage() {
       quota: amountUnitsToCurrencyUnits(a.quota),
       profit: amountUnitsToCurrencyUnits(a.gross_profit),
       count: a.count ?? 0,
+      accountEventChargedUsd: a.account_event_charged_usd ?? 0,
+      accountEventRateMultiplier: a.account_event_average_rate_multiplier ?? 0,
+      accountEventCount: a.account_event_count ?? 0,
+    }));
+  }, [summary]);
+
+  const topSubscriptionAccountQuotaEvents = useMemo(() => {
+    const events = summary?.top_subscription_account_quota_events ?? [];
+    return events.map((item) => ({
+      name: item.name || 'Unknown',
+      platform: item.platform || '',
+      chargedUsd: item.charged_usd ?? 0,
+      rawUsd: item.cost_usd ?? 0,
+      averageRateMultiplier: item.average_rate_multiplier ?? 0,
+      count: item.count ?? 0,
+      ledgerCost: amountUnitsToCurrencyUnits(item.ledger_upstream_cost),
+      ledgerQuota: amountUnitsToCurrencyUnits(item.ledger_quota),
+      ledgerCount: item.ledger_count ?? 0,
     }));
   }, [summary]);
 
@@ -204,7 +249,7 @@ export function CostAnalysisPage() {
     toast.success('成本报表导出功能开发中，敬请期待...');
   };
 
-  const hasData = costMetrics.revenue > 0 || costMetrics.upstreamCost > 0 || costMetrics.grossProfit > 0;
+  const hasData = costMetrics.revenue > 0 || costMetrics.upstreamCost > 0 || costMetrics.grossProfit > 0 || topSubscriptionAccountQuotaEvents.length > 0;
 
   return (
     <div className="space-y-6">
@@ -378,12 +423,51 @@ export function CostAnalysisPage() {
                     <div className="text-xs text-muted-foreground">
                       成本: ${item.cost.toFixed(2)} | 收入: ${item.quota.toFixed(2)} | 调用: {item.count}
                     </div>
+                    {item.accountEventCount > 0 && (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        账号本地扣减: {formatUSDValue(item.accountEventChargedUsd, 4)} | 平均倍率: ×{item.accountEventRateMultiplier.toFixed(2)}
+                      </div>
+                    )}
                   </div>
                   <div className={cn(
                     'text-sm font-medium',
                     item.profit > 0 ? 'text-green-600' : 'text-red-600'
                   )}>
                     {item.profit > 0 ? '+' : ''}${item.profit.toFixed(2)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Top Subscription Account Quota Events */}
+      {hasData && topSubscriptionAccountQuotaEvents.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl font-black">账号本地额度事件 TOP 5</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {topSubscriptionAccountQuotaEvents.slice(0, 5).map((item, index) => (
+                <div key={index} className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <div className="font-medium text-foreground">
+                      {item.name}
+                      {item.platform && (
+                        <span className="ml-2 text-xs text-muted-foreground">{item.platform}</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      事件成本: {formatUSDValue(item.chargedUsd, 4)} | 原始成本: {formatUSDValue(item.rawUsd, 4)} | 事件: {item.count}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Ledger 成本: ${item.ledgerCost.toFixed(2)} | Ledger 收入: ${item.ledgerQuota.toFixed(2)} | Ledger 调用: {item.ledgerCount}
+                    </div>
+                  </div>
+                  <div className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                    ×{item.averageRateMultiplier.toFixed(2)}
                   </div>
                 </div>
               ))}

@@ -114,6 +114,10 @@ func (r *channelServiceRepo) RecordSubscriptionAccountQuotaUsage(ctx context.Con
 	return nil
 }
 
+func (r *channelServiceRepo) AggregateSubscriptionAccountQuotaEvents(ctx context.Context, filter biz.SubscriptionAccountQuotaEventFilter) ([]*biz.SubscriptionAccountQuotaEventAggregate, error) {
+	return []*biz.SubscriptionAccountQuotaEventAggregate{}, nil
+}
+
 func (r *channelServiceRepo) ResetSubscriptionAccountQuota(ctx context.Context, accountID int64, scope string) error {
 	if r.account != nil && r.account.ID == accountID {
 		r.account.QuotaUsedUSD = 0

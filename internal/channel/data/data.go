@@ -26,7 +26,7 @@ type Repository struct {
 	redis       *redis.Client
 	channels    map[int64]*biz.Channel
 	subAccounts map[int64]*biz.SubscriptionAccount
-	quotaEvents map[string]struct{}
+	quotaEvents map[string]biz.SubscriptionAccountQuotaEventAggregate
 	lock        sync.RWMutex
 	encKey      []byte // AES key for encrypting API keys at rest (nil = no encryption)
 }
@@ -192,7 +192,7 @@ func newMemoryRepository() *Repository {
 	return &Repository{
 		channels:    make(map[int64]*biz.Channel),
 		subAccounts: make(map[int64]*biz.SubscriptionAccount),
-		quotaEvents: make(map[string]struct{}),
+		quotaEvents: make(map[string]biz.SubscriptionAccountQuotaEventAggregate),
 	}
 }
 
@@ -488,12 +488,66 @@ func (r *Repository) RecordSubscriptionAccountQuotaUsage(ctx context.Context, us
 			return nil
 		}
 		if r.quotaEvents == nil {
-			r.quotaEvents = make(map[string]struct{})
+			r.quotaEvents = make(map[string]biz.SubscriptionAccountQuotaEventAggregate)
 		}
-		r.quotaEvents[key] = struct{}{}
+		multiplier := account.EffectiveRateMultiplier()
+		r.quotaEvents[key] = biz.SubscriptionAccountQuotaEventAggregate{
+			SubscriptionAccountID: usage.AccountID,
+			CostUSD:               usage.CostUSD,
+			ChargedUSD:            usage.CostUSD * multiplier,
+			AverageRateMultiplier: multiplier,
+			Count:                 1,
+			LastOccurredAt:        usage.OccurredAt.Unix(),
+		}
 	}
 	applySubscriptionAccountQuotaUsage(account, usage.CostUSD, usage.OccurredAt)
 	return nil
+}
+
+func (r *Repository) AggregateSubscriptionAccountQuotaEvents(ctx context.Context, filter biz.SubscriptionAccountQuotaEventFilter) ([]*biz.SubscriptionAccountQuotaEventAggregate, error) {
+	if r.db != nil {
+		return r.aggregateSubscriptionAccountQuotaEventsDB(ctx, filter)
+	}
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	byAccount := map[int64]*biz.SubscriptionAccountQuotaEventAggregate{}
+	for _, event := range r.quotaEvents {
+		if filter.AccountID > 0 && event.SubscriptionAccountID != filter.AccountID {
+			continue
+		}
+		if !filter.StartTime.IsZero() && event.LastOccurredAt < filter.StartTime.Unix() {
+			continue
+		}
+		if !filter.EndTime.IsZero() && event.LastOccurredAt > filter.EndTime.Unix() {
+			continue
+		}
+		row := byAccount[event.SubscriptionAccountID]
+		if row == nil {
+			row = &biz.SubscriptionAccountQuotaEventAggregate{SubscriptionAccountID: event.SubscriptionAccountID}
+			byAccount[event.SubscriptionAccountID] = row
+		}
+		row.CostUSD += event.CostUSD
+		row.ChargedUSD += event.ChargedUSD
+		row.AverageRateMultiplier += event.AverageRateMultiplier
+		row.Count += event.Count
+		if event.LastOccurredAt > row.LastOccurredAt {
+			row.LastOccurredAt = event.LastOccurredAt
+		}
+	}
+	out := make([]*biz.SubscriptionAccountQuotaEventAggregate, 0, len(byAccount))
+	for _, row := range byAccount {
+		if row.Count > 0 {
+			row.AverageRateMultiplier = row.AverageRateMultiplier / float64(row.Count)
+		}
+		out = append(out, row)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ChargedUSD > out[j].ChargedUSD
+	})
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, nil
 }
 
 func (r *Repository) ResetSubscriptionAccountQuota(ctx context.Context, accountID int64, scope string) error {
@@ -938,6 +992,55 @@ func (r *Repository) recordSubscriptionAccountQuotaUsageDB(ctx context.Context, 
 			"updated_at":                time.Now().Unix(),
 		}).Error
 	})
+}
+
+func (r *Repository) aggregateSubscriptionAccountQuotaEventsDB(ctx context.Context, filter biz.SubscriptionAccountQuotaEventFilter) ([]*biz.SubscriptionAccountQuotaEventAggregate, error) {
+	type aggregateRow struct {
+		SubscriptionAccountID int64   `gorm:"column:subscription_account_id"`
+		CostUSD               float64 `gorm:"column:cost_usd"`
+		ChargedUSD            float64 `gorm:"column:charged_usd"`
+		AverageRateMultiplier float64 `gorm:"column:average_rate_multiplier"`
+		Count                 int64   `gorm:"column:count"`
+		LastOccurredAt        int64   `gorm:"column:last_occurred_at"`
+	}
+	q := r.db.WithContext(ctx).Model(&subscriptionAccountQuotaEventModel{}).
+		Select(`
+			subscription_account_id,
+			COALESCE(SUM(cost_usd), 0) AS cost_usd,
+			COALESCE(SUM(charged_usd), 0) AS charged_usd,
+			COALESCE(AVG(rate_multiplier), 0) AS average_rate_multiplier,
+			COUNT(*) AS count,
+			COALESCE(MAX(occurred_at), 0) AS last_occurred_at`).
+		Group("subscription_account_id").
+		Order("charged_usd DESC")
+	if filter.AccountID > 0 {
+		q = q.Where("subscription_account_id = ?", filter.AccountID)
+	}
+	if !filter.StartTime.IsZero() {
+		q = q.Where("occurred_at >= ?", filter.StartTime.Unix())
+	}
+	if !filter.EndTime.IsZero() {
+		q = q.Where("occurred_at <= ?", filter.EndTime.Unix())
+	}
+	if filter.Limit > 0 {
+		q = q.Limit(filter.Limit)
+	}
+	var rows []aggregateRow
+	if err := q.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*biz.SubscriptionAccountQuotaEventAggregate, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, &biz.SubscriptionAccountQuotaEventAggregate{
+			SubscriptionAccountID: row.SubscriptionAccountID,
+			CostUSD:               row.CostUSD,
+			ChargedUSD:            row.ChargedUSD,
+			AverageRateMultiplier: row.AverageRateMultiplier,
+			Count:                 row.Count,
+			LastOccurredAt:        row.LastOccurredAt,
+		})
+	}
+	return out, nil
 }
 
 func (r *Repository) resetSubscriptionAccountQuotaDB(ctx context.Context, accountID int64, scope string) error {

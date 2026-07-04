@@ -22,6 +22,7 @@ service ChannelService {
   rpc ChangeSubscriptionAccountStatus(ChangeSubscriptionAccountStatusRequest) returns (ChangeSubscriptionAccountStatusResponse);
   rpc RecordAccountQuotaSnapshot(RecordAccountQuotaSnapshotRequest) returns (RecordAccountQuotaSnapshotResponse);
   rpc RecordSubscriptionAccountQuotaUsage(RecordSubscriptionAccountQuotaUsageRequest) returns (RecordSubscriptionAccountQuotaUsageResponse);
+  rpc AggregateSubscriptionAccountQuotaEvents(AggregateSubscriptionAccountQuotaEventsRequest) returns (AggregateSubscriptionAccountQuotaEventsResponse);
   rpc ResetSubscriptionAccountQuota(ResetSubscriptionAccountQuotaRequest) returns (ResetSubscriptionAccountQuotaResponse);
   rpc GetChannel(GetChannelRequest) returns (GetChannelReply);
   rpc ListAvailableModels(ListAvailableModelsRequest) returns (ListAvailableModelsReply);
@@ -268,6 +269,26 @@ message RecordSubscriptionAccountQuotaUsageRequest {
 message RecordSubscriptionAccountQuotaUsageResponse {
   bool success = 1;
   string message = 2;
+}
+
+message AggregateSubscriptionAccountQuotaEventsRequest {
+  int64 account_id = 1;
+  int64 start_time = 2; // unix seconds; 0 means unbounded
+  int64 end_time = 3;   // unix seconds; 0 means unbounded
+  int32 limit = 4;
+}
+
+message SubscriptionAccountQuotaEventAggregate {
+  int64 subscription_account_id = 1;
+  double cost_usd = 2;
+  double charged_usd = 3;
+  double average_rate_multiplier = 4;
+  int64 count = 5;
+  int64 last_occurred_at = 6;
+}
+
+message AggregateSubscriptionAccountQuotaEventsResponse {
+  repeated SubscriptionAccountQuotaEventAggregate items = 1;
 }
 
 message ResetSubscriptionAccountQuotaRequest {

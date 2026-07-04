@@ -616,6 +616,10 @@ func handleAdminSummary(w http.ResponseWriter, r *http.Request, svc *service.Adm
 	if err != nil {
 		topSubscriptionAccounts = []service.UsageAggregateView{}
 	}
+	topSubscriptionAccountQuotaEvents, err := svc.AggregateSubscriptionAccountQuotaEventsTopN(r.Context(), 5)
+	if err != nil {
+		topSubscriptionAccountQuotaEvents = []service.SubscriptionAccountQuotaEventAggregateView{}
+	}
 	reconciliation, err := svc.ListReconciliationRuns(r.Context(), 1, 1)
 	if err != nil {
 		reconciliation = &service.ListReconciliationRunsResult{}
@@ -680,23 +684,24 @@ func handleAdminSummary(w http.ResponseWriter, r *http.Request, svc *service.Adm
 			"subscription_accounts":        subscriptionAccounts.GetTotal(),
 			"active_subscription_accounts": activeSubscriptionAccounts.GetTotal(),
 		},
-		"recent_users":              users.GetUsers(),
-		"channels":                  channels.GetChannels(),
-		"subscription_accounts":     subscriptionAccounts.GetAccounts(),
-		"recent_logs":               recentLogs,
-		"payment_orders":            paymentOrders.GetOrders(),
-		"usage_stats":               stats,
-		"cost_analysis":             costAnalysisSummary(quotaUsed, upstreamCost, grossProfit),
-		"top_models":                usageAggregateViewsToMaps(topModels),
-		"top_channels":              enrichChannelUsage(topChannels, channels.GetChannels()),
-		"top_users":                 usageAggregateViewsToMaps(topUsers),
-		"top_tokens":                usageAggregateViewsToMaps(topTokens),
-		"top_subscription_accounts": enrichSubscriptionAccountUsage(topSubscriptionAccounts, subscriptionAccounts.GetAccounts()),
-		"alerts":                    adminSummaryAlerts(channels.GetChannels(), topChannels, reconciliation),
-		"latest_reconciliation":     latestReconciliationRun(reconciliation),
-		"model_catalog":             oneAPIChannelModelCatalog(),
-		"pricing_options":           optionsByKey(options, "ModelRatio", "CompletionRatio", "ModelPrice", "GroupRatio", "AmountPerUnit"),
-		"payment_summary":           paymentSummaryFromOrders(paymentOrders),
+		"recent_users":                          users.GetUsers(),
+		"channels":                              channels.GetChannels(),
+		"subscription_accounts":                 subscriptionAccounts.GetAccounts(),
+		"recent_logs":                           recentLogs,
+		"payment_orders":                        paymentOrders.GetOrders(),
+		"usage_stats":                           stats,
+		"cost_analysis":                         costAnalysisSummary(quotaUsed, upstreamCost, grossProfit),
+		"top_models":                            usageAggregateViewsToMaps(topModels),
+		"top_channels":                          enrichChannelUsage(topChannels, channels.GetChannels()),
+		"top_users":                             usageAggregateViewsToMaps(topUsers),
+		"top_tokens":                            usageAggregateViewsToMaps(topTokens),
+		"top_subscription_accounts":             enrichSubscriptionAccountUsage(topSubscriptionAccounts, topSubscriptionAccountQuotaEvents, subscriptionAccounts.GetAccounts()),
+		"top_subscription_account_quota_events": enrichSubscriptionAccountQuotaEventUsage(topSubscriptionAccountQuotaEvents, topSubscriptionAccounts, subscriptionAccounts.GetAccounts()),
+		"alerts":                                adminSummaryAlerts(channels.GetChannels(), topChannels, reconciliation),
+		"latest_reconciliation":                 latestReconciliationRun(reconciliation),
+		"model_catalog":                         oneAPIChannelModelCatalog(),
+		"pricing_options":                       optionsByKey(options, "ModelRatio", "CompletionRatio", "ModelPrice", "GroupRatio", "AmountPerUnit"),
+		"payment_summary":                       paymentSummaryFromOrders(paymentOrders),
 	}))
 }
 
@@ -772,13 +777,16 @@ func enrichChannelUsage(items []service.UsageAggregateView, channels []*commonv1
 // here: otherwise the entire non-subscription usage collapses into a single
 // "subscription_account_id = 0" bucket whose cost equals the total channel
 // cost, which would make the "订阅账号成本" card wrongly display channel cost.
-func enrichSubscriptionAccountUsage(items []service.UsageAggregateView, accounts []*commonv1.SubscriptionAccountSummary) []map[string]interface{} {
+func enrichSubscriptionAccountUsage(items []service.UsageAggregateView, eventItems []service.SubscriptionAccountQuotaEventAggregateView, accounts []*commonv1.SubscriptionAccountSummary) []map[string]interface{} {
 	accountByID := map[int64]*commonv1.SubscriptionAccountSummary{}
 	for _, account := range accounts {
 		accountByID[account.GetId()] = account
 	}
-	// The summary only fetches 5 accounts (the overview list); fetch a fuller
-	// window via the same client when available to resolve more ids. We keep
+	eventByAccountID := map[int64]service.SubscriptionAccountQuotaEventAggregateView{}
+	for _, event := range eventItems {
+		eventByAccountID[event.SubscriptionAccountID] = event
+	}
+	// The summary only fetches the overview account page. Keep enrichment
 	// best-effort: unresolved ids still surface as rows with a fallback label.
 	out := make([]map[string]interface{}, 0, len(items))
 	for _, item := range items {
@@ -797,6 +805,61 @@ func enrichSubscriptionAccountUsage(items []service.UsageAggregateView, accounts
 			row["expires_at"] = account.GetExpiresAt()
 		} else {
 			row["name"] = fmt.Sprintf("订阅账号 #%d", item.SubscriptionAccountID)
+		}
+		if event, ok := eventByAccountID[item.SubscriptionAccountID]; ok {
+			row["account_event_cost_usd"] = event.CostUSD
+			row["account_event_charged_usd"] = event.ChargedUSD
+			row["account_event_average_rate_multiplier"] = event.AverageRateMultiplier
+			row["account_event_count"] = event.Count
+			row["account_event_last_occurred_at"] = event.LastOccurredAt
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func enrichSubscriptionAccountQuotaEventUsage(eventItems []service.SubscriptionAccountQuotaEventAggregateView, ledgerItems []service.UsageAggregateView, accounts []*commonv1.SubscriptionAccountSummary) []map[string]interface{} {
+	accountByID := map[int64]*commonv1.SubscriptionAccountSummary{}
+	for _, account := range accounts {
+		accountByID[account.GetId()] = account
+	}
+	ledgerByAccountID := map[int64]service.UsageAggregateView{}
+	for _, item := range ledgerItems {
+		if item.SubscriptionAccountID > 0 {
+			ledgerByAccountID[item.SubscriptionAccountID] = item
+		}
+	}
+	out := make([]map[string]interface{}, 0, len(eventItems))
+	for _, item := range eventItems {
+		if item.SubscriptionAccountID == 0 {
+			continue
+		}
+		row := map[string]interface{}{
+			"subscription_account_id": item.SubscriptionAccountID,
+			"cost_usd":                item.CostUSD,
+			"charged_usd":             item.ChargedUSD,
+			"average_rate_multiplier": item.AverageRateMultiplier,
+			"count":                   item.Count,
+			"last_occurred_at":        item.LastOccurredAt,
+			"ledger_quota":            int64(0),
+			"ledger_upstream_cost":    int64(0),
+			"ledger_gross_profit":     int64(0),
+			"ledger_count":            int64(0),
+		}
+		if account := accountByID[item.SubscriptionAccountID]; account != nil {
+			row["name"] = account.GetName()
+			row["platform"] = account.GetPlatform()
+			row["status"] = account.GetStatus()
+			row["account_id"] = account.GetAccountId()
+			row["expires_at"] = account.GetExpiresAt()
+		} else {
+			row["name"] = fmt.Sprintf("订阅账号 #%d", item.SubscriptionAccountID)
+		}
+		if ledger, ok := ledgerByAccountID[item.SubscriptionAccountID]; ok {
+			row["ledger_quota"] = ledger.Quota
+			row["ledger_upstream_cost"] = ledger.UpstreamCost
+			row["ledger_gross_profit"] = ledger.GrossProfit
+			row["ledger_count"] = ledger.Count
 		}
 		out = append(out, row)
 	}

@@ -988,6 +988,15 @@ type UsageAggregateView struct {
 	ElapsedTime           int64  `json:"elapsed_time"`
 }
 
+type SubscriptionAccountQuotaEventAggregateView struct {
+	SubscriptionAccountID int64   `json:"subscription_account_id"`
+	CostUSD               float64 `json:"cost_usd"`
+	ChargedUSD            float64 `json:"charged_usd"`
+	AverageRateMultiplier float64 `json:"average_rate_multiplier"`
+	Count                 int64   `json:"count"`
+	LastOccurredAt        int64   `json:"last_occurred_at"`
+}
+
 func (s *AdminService) ListReconciliationRuns(ctx context.Context, page, pageSize int32) (*ListReconciliationRunsResult, error) {
 	if s.billingClient == nil {
 		return &ListReconciliationRunsResult{Runs: []*ReconciliationRunView{}}, nil
@@ -1001,6 +1010,31 @@ func (s *AdminService) ListReconciliationRuns(ctx context.Context, page, pageSiz
 		out.Runs = append(out.Runs, reconciliationRunFromProto(run))
 	}
 	return out, nil
+}
+
+func (s *AdminService) AggregateSubscriptionAccountQuotaEventsTopN(ctx context.Context, limit int32) ([]SubscriptionAccountQuotaEventAggregateView, error) {
+	if s.channelClient == nil {
+		return []SubscriptionAccountQuotaEventAggregateView{}, nil
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	resp, err := s.channelClient.AggregateSubscriptionAccountQuotaEvents(ctx, &channelv1.AggregateSubscriptionAccountQuotaEventsRequest{Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]SubscriptionAccountQuotaEventAggregateView, 0, len(resp.GetItems()))
+	for _, item := range resp.GetItems() {
+		items = append(items, SubscriptionAccountQuotaEventAggregateView{
+			SubscriptionAccountID: item.GetSubscriptionAccountId(),
+			CostUSD:               item.GetCostUsd(),
+			ChargedUSD:            item.GetChargedUsd(),
+			AverageRateMultiplier: item.GetAverageRateMultiplier(),
+			Count:                 item.GetCount(),
+			LastOccurredAt:        item.GetLastOccurredAt(),
+		})
+	}
+	return items, nil
 }
 
 func (s *AdminService) AggregateUsageTopN(ctx context.Context, groupBy string, limit int32) ([]UsageAggregateView, error) {

@@ -454,6 +454,10 @@ func (m *testChannelRepo) RecordSubscriptionAccountQuotaUsage(ctx context.Contex
 	return channelbiz.ErrSubscriptionAccountNotFound
 }
 
+func (m *testChannelRepo) AggregateSubscriptionAccountQuotaEvents(ctx context.Context, filter channelbiz.SubscriptionAccountQuotaEventFilter) ([]*channelbiz.SubscriptionAccountQuotaEventAggregate, error) {
+	return []*channelbiz.SubscriptionAccountQuotaEventAggregate{}, nil
+}
+
 func (m *testChannelRepo) ResetSubscriptionAccountQuota(ctx context.Context, accountID int64, scope string) error {
 	return channelbiz.ErrSubscriptionAccountNotFound
 }

@@ -198,6 +198,21 @@ func (c *adminHTTPChannelClient) ListSubscriptionAccounts(ctx context.Context, r
 	}, nil
 }
 
+func (c *adminHTTPChannelClient) AggregateSubscriptionAccountQuotaEvents(ctx context.Context, req *channelv1.AggregateSubscriptionAccountQuotaEventsRequest, opts ...grpc.CallOption) (*channelv1.AggregateSubscriptionAccountQuotaEventsResponse, error) {
+	return &channelv1.AggregateSubscriptionAccountQuotaEventsResponse{
+		Items: []*channelv1.SubscriptionAccountQuotaEventAggregate{
+			{
+				SubscriptionAccountId: 201,
+				CostUsd:               0.5,
+				ChargedUsd:            1.0,
+				AverageRateMultiplier: 2.0,
+				Count:                 2,
+				LastOccurredAt:        1700000000,
+			},
+		},
+	}, nil
+}
+
 func (c *adminHTTPChannelClient) GetChannel(ctx context.Context, req *channelv1.GetChannelRequest, opts ...grpc.CallOption) (*channelv1.GetChannelReply, error) {
 	baseURL := c.baseURL
 	if baseURL == "" {
@@ -383,6 +398,13 @@ func (c *adminHTTPBillingClient) AggregateUsage(ctx context.Context, req *billin
 				{TokenName: "prod-key", Quota: 75, UpstreamCost: 25, GrossProfit: 50, PromptTokens: 1200, CompletionTokens: 600, CacheReadTokens: 300, Count: 3},
 			},
 			Totals: &billingv1.UsageTotals{Quota: 75, UpstreamCost: 25, GrossProfit: 50, PromptTokens: 1200, CompletionTokens: 600, CacheReadTokens: 300, Count: 3},
+		}, nil
+	case len(req.GetGroupBy()) == 1 && req.GetGroupBy()[0] == "subscription_account":
+		return &billingv1.AggregateUsageResponse{
+			Buckets: []*billingv1.UsageBucket{
+				{SubscriptionAccountId: 201, Quota: 75, UpstreamCost: 25, GrossProfit: 50, Count: 3},
+			},
+			Totals: &billingv1.UsageTotals{Quota: 75, UpstreamCost: 25, GrossProfit: 50, Count: 3},
 		}, nil
 	}
 	return &billingv1.AggregateUsageResponse{
@@ -2135,6 +2157,10 @@ func TestAdminHTTPSummaryCountsOnlyPaidPaymentOrders(t *testing.T) {
 		`"latest_reconciliation":`,
 		`"subscription_accounts":1`,
 		`"active_subscription_accounts":1`,
+		`"top_subscription_account_quota_events":`,
+		`"charged_usd":1`,
+		`"account_event_charged_usd":1`,
+		`"average_rate_multiplier":2`,
 		`"account_id":"acc_123"`,
 		`"platform":"codex"`,
 	} {

@@ -500,6 +500,65 @@ func TestSubscriptionAccountQuotaUsage_ConcurrentReplayOnlyRecordsOnce(t *testin
 	assert.EqualValues(t, 1, count)
 }
 
+func TestAggregateSubscriptionAccountQuotaEvents(t *testing.T) {
+	repo := setupChannelTestDB(t)
+	ctx := context.Background()
+	first := &biz.SubscriptionAccount{
+		Name:           "quota-event-first",
+		Platform:       "codex",
+		Status:         biz.ChannelStatusEnabled,
+		Group:          "default",
+		Models:         []string{"gpt-5"},
+		AccountID:      "acc_1",
+		RateMultiplier: 2,
+	}
+	second := &biz.SubscriptionAccount{
+		Name:           "quota-event-second",
+		Platform:       "codex",
+		Status:         biz.ChannelStatusEnabled,
+		Group:          "default",
+		Models:         []string{"gpt-5"},
+		AccountID:      "acc_2",
+		RateMultiplier: 3,
+	}
+	require.NoError(t, repo.CreateSubscriptionAccount(ctx, first))
+	require.NoError(t, repo.CreateSubscriptionAccount(ctx, second))
+
+	require.NoError(t, repo.RecordSubscriptionAccountQuotaUsage(ctx, biz.SubscriptionAccountQuotaUsage{
+		AccountID:     first.ID,
+		ReservationID: "reservation-1",
+		CostSource:    "billing_commit",
+		CostUSD:       0.5,
+		OccurredAt:    time.Unix(1100, 0),
+	}))
+	require.NoError(t, repo.RecordSubscriptionAccountQuotaUsage(ctx, biz.SubscriptionAccountQuotaUsage{
+		AccountID:     first.ID,
+		ReservationID: "reservation-2",
+		CostSource:    "billing_commit",
+		CostUSD:       0.25,
+		OccurredAt:    time.Unix(1200, 0),
+	}))
+	require.NoError(t, repo.RecordSubscriptionAccountQuotaUsage(ctx, biz.SubscriptionAccountQuotaUsage{
+		AccountID:     second.ID,
+		ReservationID: "reservation-3",
+		CostSource:    "billing_commit",
+		CostUSD:       0.2,
+		OccurredAt:    time.Unix(1300, 0),
+	}))
+
+	rows, err := repo.AggregateSubscriptionAccountQuotaEvents(ctx, biz.SubscriptionAccountQuotaEventFilter{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, first.ID, rows[0].SubscriptionAccountID)
+	assert.InDelta(t, 0.75, rows[0].CostUSD, 0.000001)
+	assert.InDelta(t, 1.5, rows[0].ChargedUSD, 0.000001)
+	assert.InDelta(t, 2.0, rows[0].AverageRateMultiplier, 0.000001)
+	assert.EqualValues(t, 2, rows[0].Count)
+	assert.EqualValues(t, 1200, rows[0].LastOccurredAt)
+	assert.Equal(t, second.ID, rows[1].SubscriptionAccountID)
+	assert.InDelta(t, 0.6, rows[1].ChargedUSD, 0.000001)
+}
+
 func TestRecordHealth_OpensAndResetsCircuit(t *testing.T) {
 	repo := setupChannelTestDB(t)
 	ctx := context.Background()

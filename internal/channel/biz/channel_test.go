@@ -192,6 +192,10 @@ func (m *mockChannelRepo) RecordSubscriptionAccountQuotaUsage(ctx context.Contex
 	return nil
 }
 
+func (m *mockChannelRepo) AggregateSubscriptionAccountQuotaEvents(ctx context.Context, filter SubscriptionAccountQuotaEventFilter) ([]*SubscriptionAccountQuotaEventAggregate, error) {
+	return []*SubscriptionAccountQuotaEventAggregate{}, nil
+}
+
 func (m *mockChannelRepo) ResetSubscriptionAccountQuota(ctx context.Context, accountID int64, scope string) error {
 	if m.accounts == nil {
 		return ErrSubscriptionAccountNotFound

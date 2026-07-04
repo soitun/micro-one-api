@@ -1,6 +1,6 @@
 # 上游账号额度后续工作说明
 
-本文档用于后续接手“上游订阅账号额度”相关工作。它不是第二阶段完成记录，而是说明当前实现边界、关键文件、数据流，以及还需要继续做什么。
+本文档用于后续接手“上游订阅账号额度”相关工作。它说明当前实现边界、关键文件、数据流，以及还需要继续做什么。
 
 ## 背景
 
@@ -23,6 +23,8 @@
 - `SelectSubscriptionAccount` 会跳过本地总额、24h、7d 任一耗尽的账号。
 - relay-gateway 在 billing commit 成功后，按 `CommitQuotaResponse.committed_amount` 折算 USD，调用 channel-service 回写账号用量。
 - channel-service 按 `cost_usd * rate_multiplier` 累计账号本地用量。
+- `subscription_account_quota_events` 记录账号额度回写事件，按 `reservation_id + subscription_account_id + cost_source` 幂等去重，并保存账号倍率快照。
+- channel-service 暴露账号额度事件聚合，admin summary / 成本分析页可以按 `subscription_account_id` 对照 ledger 消费与账号侧额度事件。
 - admin 订阅账号页面可以查看、编辑额度/倍率，并可重置本地用量。
 - 新增管理接口：`POST /v1/subscription-accounts/{account_id}/reset-quota`，`scope` 支持 `total`、`daily`、`weekly`、`all`。
 
@@ -38,10 +40,13 @@
 数据库和迁移：
 
 - `migrations/051_add_subscription_account_local_quota.sql`
+- `migrations/052_create_subscription_account_quota_events.sql`
 - `migrations/postgres/000_create_full_schema.sql`
 - `migrations/sqlite/000_create_full_schema.sql`
 - `internal/channel/data/data.go`
   - `recordSubscriptionAccountQuotaUsageDB` 使用行锁读取账号并累计用量。
+  - `subscription_account_quota_events` 在同一事务内插入，重复事件不再次累计账号用量。
+  - `AggregateSubscriptionAccountQuotaEvents` 按账号汇总 `cost_usd`、`charged_usd`、平均倍率、事件数和最近发生时间。
   - daily 窗口为滚动 24h，weekly 窗口为滚动 7d。
 
 RPC / API：
@@ -50,6 +55,7 @@ RPC / API：
   - `SubscriptionAccountInfo` / `SubscriptionAccountSummary` 暴露本地额度字段。
 - `api/channel/v1/channel.proto`
   - `RecordSubscriptionAccountQuotaUsage`
+  - `AggregateSubscriptionAccountQuotaEvents`
   - `ResetSubscriptionAccountQuota`
 - `api/admin/v1/admin.proto`
   - `ResetSubscriptionAccountQuota`
@@ -71,6 +77,9 @@ relay 回写：
   - 列表展示本地总额、24h、7d 用量。
   - 创建/编辑支持额度和倍率。
   - 单账号支持重置用量。
+- `web/src/pages/admin/CostAnalysisPage.tsx`
+  - 展示订阅账号 ledger 成本。
+  - 展示账号本地额度事件 TOP 5，并对照 ledger 成本/收入。
 
 ## 当前数据流
 
@@ -78,33 +87,37 @@ relay 回写：
 2. 请求成功后，relay-gateway 调用 billing-service `CommitQuota`。
 3. billing-service 返回 `committed_amount`、`subscription_cost`、`balance_cost`。
 4. relay-gateway 用 `committed_amount` 经 `quotaToUSD` 折算成本。
-5. relay-gateway 调用 channel-service `RecordSubscriptionAccountQuotaUsage(account_id, cost_usd)`。
-6. channel-service 在 `subscription_accounts` 上累计：
+5. relay-gateway 调用 channel-service `RecordSubscriptionAccountQuotaUsage(account_id, cost_usd, reservation_id, cost_source)`。
+6. channel-service 先按 `reservation_id + subscription_account_id + cost_source` 插入 `subscription_account_quota_events`：
+   - 新事件保存 `cost_usd`、`charged_usd`、`rate_multiplier`、`occurred_at`。
+   - 重复事件直接返回，不再次累计账号用量。
+7. channel-service 在 `subscription_accounts` 上累计：
    - 总用量：一直累加。
    - 24h 用量：窗口为空或超过 24h 时重开窗口。
    - 7d 用量：窗口为空或超过 7d 时重开窗口。
-7. 下一次选路时，channel-service 会跳过本地额度耗尽的账号。
+8. 后台成本分析通过 billing ledger 聚合和 channel 事件聚合，按 `subscription_account_id` 对照用户消费、ledger 成本和账号侧本地扣减。
+9. 下一次选路时，channel-service 会跳过本地额度耗尽的账号。
 
 ## 已知边界
 
 - 本地账号额度不是 billing 的强事务部分。billing commit 是权威计费，账号额度回写是成功后补记。
-- 当前账号额度回写没有独立幂等事件表。正常路径依赖 billing reservation 幂等，极端重试下仍可能重复回写。
+- 账号额度回写已有独立幂等事件表，但仅当请求携带 `reservation_id` 时生效；缺少 reservation 的回写仍会按普通用量累计。
 - 当前账号并发限制和 runtime blocker 是 relay 进程内状态，多副本之间不共享。
 - `rate_multiplier` 只影响上游账号本地用量累计，不改变用户侧订阅扣减或钱包扣减。
-- ledger 当前没有保存账号倍率快照。
+- billing ledger 不保存账号倍率快照；倍率快照保存在账号侧 `subscription_account_quota_events`，作为上游账号本地预算对账来源。
 
 ## 后续任务
 
-### 1. 账号额度回写幂等
+### 1. 账号额度回写幂等（已完成）
 
 目标：避免同一个 reservation 的成功 commit 被 relay 重试时重复累计账号本地用量。
 
-建议方案：
+已实现：
 
 - 新增 `subscription_account_quota_events` 表。
-- 唯一键建议使用 `reservation_id + subscription_account_id + cost_source`。
+- 唯一键使用 `reservation_id + subscription_account_id + cost_source`。
 - channel-service 在事务中先插入事件，再累计 `subscription_accounts`。
-- 事件字段建议包含：
+- 事件字段包含：
   - `reservation_id`
   - `subscription_account_id`
   - `cost_usd`
@@ -121,12 +134,12 @@ relay 回写：
 - `internal/relay/server/http.go`
 - `migrations/052_*`
 
-验证：
+已验证：
 
 - 同一个 reservation 重放两次 `RecordSubscriptionAccountQuotaUsage`，账号用量只增长一次。
 - 并发重放时只有一个事件插入成功。
 
-### 2. ledger 保存账号倍率快照
+### 2. ledger 保存账号倍率快照（已按方案 A 完成）
 
 目标：让后续对账能复原“当时按哪个账号倍率累计了上游账号成本”。
 
@@ -135,17 +148,14 @@ relay 回写：
 - billing ledger 已有 `subscription_account_id`、`subscription_cost`、`balance_cost`。
 - 但 billing-service 不知道 channel-service 的 `rate_multiplier`，也没有保存账号额度扣减快照。
 
-可选方案：
+已采用方案：
 
-- 方案 A：relay 在 commit 后回写账号额度事件，事件表作为账号侧对账来源，不改 billing ledger。
-- 方案 B：billing-service 引入 channel-service 客户端，在 commit 事务内或事务后读取账号倍率并写 ledger 快照。
-- 方案 C：relay 把账号倍率快照作为 `CommitQuotaRequest` 的扩展字段传给 billing。
+- relay 在 commit 后回写账号额度事件，事件表作为账号侧对账来源，不改 billing ledger。
+- channel-service 新增 `AggregateSubscriptionAccountQuotaEvents`，按账号聚合事件成本、倍率后成本、平均倍率、事件数和最近发生时间。
+- admin summary 新增 `top_subscription_account_quota_events`，并在 `top_subscription_accounts` 中补充同账号的事件聚合字段。
+- 成本分析页新增“账号本地额度事件 TOP 5”，用于对照账号事件与 ledger 成本/收入。
 
-建议优先级：
-
-- 先做方案 A。它对 billing 主链路侵入最小，也更符合“账号额度是上游账号侧本地预算”的边界。
-
-验证：
+已验证：
 
 - 后台成本分析能按 `subscription_account_id` 追踪用户消费、账号额度事件和 ledger 消费。
 
@@ -227,14 +237,15 @@ relay 回写：
 
 ## 推荐实施顺序
 
-1. 先做“账号额度回写幂等”，因为它修正当前闭环里最明确的可靠性缺口。
-2. 再做“ledger / 事件对账视图”，否则后续无法解释账号侧用量和账本侧消费差异。
+1. 账号额度回写幂等已完成。
+2. ledger / 事件对账视图已按方案 A 完成。
 3. 多副本部署前做 Redis 并发和 blocker。
 4. 更细窗口策略和管理端批量能力等运营需求明确后再做。
 
 ## 回归测试清单
 
 - `go test ./internal/channel/... ./internal/admin/... ./internal/relay/...`
+- `go test ./test/integration`
 - `make test-unit`
 - `npm run build`（在 `web/` 下）
 - e2e 建议：
