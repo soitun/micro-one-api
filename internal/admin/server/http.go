@@ -1990,6 +1990,14 @@ func handleSubscriptionAccountByID(w http.ResponseWriter, r *http.Request, svc *
 	path := r.URL.Path
 	rest := strings.TrimPrefix(path, "/v1/subscription-accounts/")
 	rest = strings.TrimPrefix(rest, "/api/subscription-accounts/")
+	if strings.Trim(rest, "/") == "batch-reset-quota" {
+		handleBatchResetSubscriptionAccountQuota(w, r, svc)
+		return
+	}
+	if strings.Trim(rest, "/") == "batch-quota-template" {
+		handleBatchApplySubscriptionAccountQuotaTemplate(w, r, svc)
+		return
+	}
 	if strings.HasSuffix(rest, "/reset-quota") {
 		idPart := strings.TrimSuffix(rest, "/reset-quota")
 		accountID, err := strconv.ParseInt(strings.Trim(idPart, "/"), 10, 64)
@@ -2057,6 +2065,167 @@ func handleSubscriptionAccountByID(w http.ResponseWriter, r *http.Request, svc *
 		writeServiceResponse(w, resp, err)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+type batchSubscriptionAccountQuotaResponse struct {
+	Success      bool    `json:"success"`
+	Message      string  `json:"message"`
+	UpdatedCount int     `json:"updated_count"`
+	FailedIDs    []int64 `json:"failed_ids,omitempty"`
+}
+
+type batchResetSubscriptionAccountQuotaRequest struct {
+	AccountIDs []int64 `json:"account_ids"`
+	Scope      string  `json:"scope"`
+}
+
+type subscriptionAccountQuotaTemplatePatch struct {
+	QuotaLimitUSD         *float64 `json:"quota_limit_usd"`
+	Quota5hLimitUSD       *float64 `json:"quota_5h_limit_usd"`
+	QuotaDailyLimitUSD    *float64 `json:"quota_daily_limit_usd"`
+	QuotaWeeklyLimitUSD   *float64 `json:"quota_weekly_limit_usd"`
+	RateMultiplier        *float64 `json:"rate_multiplier"`
+	RPMLimit              *int32   `json:"rpm_limit"`
+	SessionWindowLimitUSD *float64 `json:"session_window_limit_usd"`
+	QuotaResetStrategy    *string  `json:"quota_reset_strategy"`
+	QuotaTimezone         *string  `json:"quota_timezone"`
+}
+
+type batchApplySubscriptionAccountQuotaTemplateRequest struct {
+	AccountIDs []int64                               `json:"account_ids"`
+	Template   subscriptionAccountQuotaTemplatePatch `json:"template"`
+}
+
+func normalizeBatchSubscriptionAccountIDs(ids []int64) []int64 {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(ids))
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func handleBatchResetSubscriptionAccountQuota(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req batchResetSubscriptionAccountQuotaRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	accountIDs := normalizeBatchSubscriptionAccountIDs(req.AccountIDs)
+	if len(accountIDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "account_ids is required"})
+		return
+	}
+
+	resp := batchSubscriptionAccountQuotaResponse{Success: true, Message: "ok"}
+	for _, accountID := range accountIDs {
+		resetResp, err := svc.ResetSubscriptionAccountQuota(r.Context(), &adminv1.AdminResetSubscriptionAccountQuotaRequest{
+			AccountId: accountID,
+			Scope:     req.Scope,
+		})
+		if err != nil || resetResp == nil || !resetResp.GetSuccess() {
+			resp.FailedIDs = append(resp.FailedIDs, accountID)
+			continue
+		}
+		resp.UpdatedCount++
+	}
+	if len(resp.FailedIDs) > 0 {
+		resp.Success = false
+		resp.Message = "some subscription account quota resets failed"
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func handleBatchApplySubscriptionAccountQuotaTemplate(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req batchApplySubscriptionAccountQuotaTemplateRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	accountIDs := normalizeBatchSubscriptionAccountIDs(req.AccountIDs)
+	if len(accountIDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "account_ids is required"})
+		return
+	}
+	if req.Template.isEmpty() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "template is required"})
+		return
+	}
+
+	resp := batchSubscriptionAccountQuotaResponse{Success: true, Message: "ok"}
+	for _, accountID := range accountIDs {
+		updateReq := &adminv1.AdminUpdateSubscriptionAccountRequest{Id: accountID}
+		req.Template.applyTo(updateReq)
+		updateResp, err := svc.UpdateSubscriptionAccount(r.Context(), updateReq)
+		if err != nil || updateResp == nil || !updateResp.GetSuccess() {
+			resp.FailedIDs = append(resp.FailedIDs, accountID)
+			continue
+		}
+		resp.UpdatedCount++
+	}
+	if len(resp.FailedIDs) > 0 {
+		resp.Success = false
+		resp.Message = "some subscription account quota template updates failed"
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (p subscriptionAccountQuotaTemplatePatch) isEmpty() bool {
+	return p.QuotaLimitUSD == nil &&
+		p.Quota5hLimitUSD == nil &&
+		p.QuotaDailyLimitUSD == nil &&
+		p.QuotaWeeklyLimitUSD == nil &&
+		p.RateMultiplier == nil &&
+		p.RPMLimit == nil &&
+		p.SessionWindowLimitUSD == nil &&
+		p.QuotaResetStrategy == nil &&
+		p.QuotaTimezone == nil
+}
+
+func (p subscriptionAccountQuotaTemplatePatch) applyTo(req *adminv1.AdminUpdateSubscriptionAccountRequest) {
+	if p.QuotaLimitUSD != nil {
+		req.QuotaLimitUsd = p.QuotaLimitUSD
+	}
+	if p.Quota5hLimitUSD != nil {
+		req.Quota_5HLimitUsd = p.Quota5hLimitUSD
+	}
+	if p.QuotaDailyLimitUSD != nil {
+		req.QuotaDailyLimitUsd = p.QuotaDailyLimitUSD
+	}
+	if p.QuotaWeeklyLimitUSD != nil {
+		req.QuotaWeeklyLimitUsd = p.QuotaWeeklyLimitUSD
+	}
+	if p.RateMultiplier != nil {
+		req.RateMultiplier = p.RateMultiplier
+	}
+	if p.RPMLimit != nil {
+		req.RpmLimit = p.RPMLimit
+	}
+	if p.SessionWindowLimitUSD != nil {
+		req.SessionWindowLimitUsd = p.SessionWindowLimitUSD
+	}
+	if p.QuotaResetStrategy != nil {
+		req.QuotaResetStrategy = p.QuotaResetStrategy
+	}
+	if p.QuotaTimezone != nil {
+		req.QuotaTimezone = p.QuotaTimezone
 	}
 }
 

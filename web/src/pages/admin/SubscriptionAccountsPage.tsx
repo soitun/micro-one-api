@@ -212,6 +212,18 @@ interface UpdatePayload {
   quota_timezone: string;
 }
 
+interface BatchQuotaTemplateForm {
+  quotaLimitUsd: string;
+  quota5hLimitUsd: string;
+  quotaDailyLimitUsd: string;
+  quotaWeeklyLimitUsd: string;
+  rateMultiplier: string;
+  rpmLimit: string;
+  sessionWindowLimitUsd: string;
+  quotaResetStrategy: string;
+  quotaTimezone: string;
+}
+
 // Subscription account platforms supported by the hybrid relay adaptor layer
 // (internal/relay/identity + internal/relay/credential). Keep in sync with
 // PlatformCodex / PlatformClaude.
@@ -295,6 +307,13 @@ function normalizeQuotaTimezone(value?: string | null) {
   return trimmed || 'UTC';
 }
 
+function optionalNumberInput(value: string) {
+  const trimmed = value.trim();
+  if (trimmed === '') return undefined;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 function localQuotaRows(account: SubscriptionAccountSummary) {
   const quota5hUsedUsd = account.quota5hUsedUsd ?? account.quota_5h_used_usd;
   const quota5hLimitUsd = account.quota5hLimitUsd ?? account.quota_5h_limit_usd;
@@ -304,6 +323,25 @@ function localQuotaRows(account: SubscriptionAccountSummary) {
     { label: '24h', used: account.quotaDailyUsedUsd, limit: account.quotaDailyLimitUsd },
     { label: '7d', used: account.quotaWeeklyUsedUsd, limit: account.quotaWeeklyLimitUsd },
   ].filter((row) => (row.used ?? 0) > 0 || (row.limit ?? 0) > 0);
+}
+
+function localQuotaState(account: SubscriptionAccountSummary) {
+  const rows = localQuotaRows(account).filter((row) => Number(row.limit ?? 0) > 0);
+  if (rows.some((row) => Number(row.used ?? 0) >= Number(row.limit ?? 0))) {
+    return 'exhausted';
+  }
+  if (rows.some((row) => Number(row.used ?? 0) / Number(row.limit ?? 1) >= 0.8)) {
+    return 'almost';
+  }
+  if (!account.lastUsedAt && localQuotaRows(account).every((row) => Number(row.used ?? 0) <= 0)) {
+    return 'no_usage';
+  }
+  return 'ok';
+}
+
+function matchesLocalQuotaFilter(account: SubscriptionAccountSummary, filter: string) {
+  if (!filter) return true;
+  return localQuotaState(account) === filter;
 }
 
 function resetAfterFromUnix(resetAt?: number) {
@@ -465,10 +503,24 @@ export function AdminSubscriptionAccountsPage() {
     setFilter,
   } = useAdminTableState({
     storageKey: 'subscription-accounts',
-    filters: ['status', 'platform'],
+    filters: ['status', 'platform', 'quota'],
   });
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<SubscriptionAccountEditDraft | null>(null);
+  const [selectedAccountIDs, setSelectedAccountIDs] = useState<Set<number>>(() => new Set());
+  const [batchResetScope, setBatchResetScope] = useState('daily');
+  const [isBatchTemplateOpen, setIsBatchTemplateOpen] = useState(false);
+  const [batchTemplate, setBatchTemplate] = useState<BatchQuotaTemplateForm>({
+    quotaLimitUsd: '',
+    quota5hLimitUsd: '',
+    quotaDailyLimitUsd: '',
+    quotaWeeklyLimitUsd: '',
+    rateMultiplier: '',
+    rpmLimit: '',
+    sessionWindowLimitUsd: '',
+    quotaResetStrategy: '',
+    quotaTimezone: '',
+  });
   const queryClient = useQueryClient();
 
   const invalidate = () => {
@@ -481,6 +533,7 @@ export function AdminSubscriptionAccountsPage() {
   } satisfies SortState<SubscriptionAccountSummary>;
   const statusFilter = filters.status ?? '';
   const platformFilter = filters.platform ?? '';
+  const quotaFilter = filters.quota ?? '';
 
   const { data: accounts, isLoading } = useQuery({
     queryKey: ['admin-subscription-accounts', page, pageSize, search, statusFilter, platformFilter, sortKey, sortDirection],
@@ -579,6 +632,37 @@ export function AdminSubscriptionAccountsPage() {
     },
   });
 
+  const batchResetQuotaMutation = useMutation({
+    mutationFn: async ({ ids, scope }: { ids: number[]; scope: string }) => {
+      const res = await adminApiClient.post('/subscription-accounts/batch-reset-quota', {
+        account_ids: ids,
+        scope,
+      });
+      ensureApiSuccess(res.data, 'Subscription account batch quota reset failed');
+    },
+    onSuccess: () => {
+      invalidate();
+      setSelectedAccountIDs(new Set());
+      toast.success('已批量重置订阅账号用量');
+    },
+  });
+
+  const batchQuotaTemplateMutation = useMutation({
+    mutationFn: async ({ ids, template }: { ids: number[]; template: Record<string, unknown> }) => {
+      const res = await adminApiClient.post('/subscription-accounts/batch-quota-template', {
+        account_ids: ids,
+        template,
+      });
+      ensureApiSuccess(res.data, 'Subscription account batch quota template failed');
+    },
+    onSuccess: () => {
+      invalidate();
+      setSelectedAccountIDs(new Set());
+      setIsBatchTemplateOpen(false);
+      toast.success('已批量应用额度模板');
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await adminApiClient.delete(`/subscription-accounts/${id}`);
@@ -601,8 +685,79 @@ export function AdminSubscriptionAccountsPage() {
   };
 
   const visibleAccounts = useMemo(() => {
-    return sortRows(accounts ?? [], sort);
-  }, [accounts, sort]);
+    return sortRows((accounts ?? []).filter((account) => matchesLocalQuotaFilter(account, quotaFilter)), sort);
+  }, [accounts, quotaFilter, sort]);
+
+  const selectedIDs = useMemo(() => Array.from(selectedAccountIDs), [selectedAccountIDs]);
+  const visibleAccountIDs = useMemo(() => visibleAccounts.map((account) => account.id), [visibleAccounts]);
+  const allVisibleSelected = visibleAccountIDs.length > 0 && visibleAccountIDs.every((id) => selectedAccountIDs.has(id));
+
+  const toggleAccountSelected = (id: number, checked: boolean) => {
+    setSelectedAccountIDs((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleVisibleSelected = (checked: boolean) => {
+    setSelectedAccountIDs((prev) => {
+      const next = new Set(prev);
+      for (const id of visibleAccountIDs) {
+        if (checked) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+      }
+      return next;
+    });
+  };
+
+  const submitBatchTemplate = () => {
+    const template: Record<string, unknown> = {};
+    const numberFields: Array<[keyof BatchQuotaTemplateForm, string]> = [
+      ['quotaLimitUsd', 'quota_limit_usd'],
+      ['quota5hLimitUsd', 'quota_5h_limit_usd'],
+      ['quotaDailyLimitUsd', 'quota_daily_limit_usd'],
+      ['quotaWeeklyLimitUsd', 'quota_weekly_limit_usd'],
+      ['rateMultiplier', 'rate_multiplier'],
+      ['sessionWindowLimitUsd', 'session_window_limit_usd'],
+    ];
+    for (const [formKey, payloadKey] of numberFields) {
+      const value = optionalNumberInput(batchTemplate[formKey]);
+      if (value === null) {
+        toast.error('批量额度模板包含无效数字');
+        return;
+      }
+      if (value !== undefined) {
+        template[payloadKey] = value;
+      }
+    }
+    const rpmLimit = optionalNumberInput(batchTemplate.rpmLimit);
+    if (rpmLimit === null) {
+      toast.error('RPM 限制必须是非负整数');
+      return;
+    }
+    if (rpmLimit !== undefined) {
+      template.rpm_limit = Math.floor(rpmLimit);
+    }
+    if (batchTemplate.quotaResetStrategy) {
+      template.quota_reset_strategy = normalizeQuotaResetStrategy(batchTemplate.quotaResetStrategy);
+    }
+    if (batchTemplate.quotaTimezone.trim()) {
+      template.quota_timezone = normalizeQuotaTimezone(batchTemplate.quotaTimezone);
+    }
+    if (Object.keys(template).length === 0) {
+      toast.error('请至少填写一个额度模板字段');
+      return;
+    }
+    batchQuotaTemplateMutation.mutate({ ids: selectedIDs, template });
+  };
 
   return (
     <div className="space-y-4">
@@ -649,9 +804,60 @@ export function AdminSubscriptionAccountsPage() {
               <option value="1">Active</option>
               <option value="2">Disabled</option>
             </select>
+            <select
+              aria-label="按本地额度筛选"
+              value={quotaFilter}
+              onChange={(event) => setFilter('quota', event.target.value)}
+              className="h-8 rounded-md border bg-background px-2 text-sm"
+            >
+              <option value="">全部额度</option>
+              <option value="exhausted">本地额度耗尽</option>
+              <option value="almost">即将耗尽</option>
+              <option value="no_usage">最近无用量</option>
+            </select>
           </div>
         }
       />
+
+      {selectedIDs.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+          <div className="text-sm text-muted-foreground">已选择 {selectedIDs.length} 个订阅账号</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="批量重置范围"
+              value={batchResetScope}
+              onChange={(event) => setBatchResetScope(event.target.value)}
+              className="h-8 rounded-md border bg-background px-2 text-sm"
+            >
+              <option value="daily">重置 24h</option>
+              <option value="weekly">重置 7d</option>
+              <option value="5h">重置 5h</option>
+              <option value="total">重置总额</option>
+              <option value="all">重置全部</option>
+            </select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (confirm(`确认批量重置 ${selectedIDs.length} 个订阅账号的用量？`)) {
+                  batchResetQuotaMutation.mutate({ ids: selectedIDs, scope: batchResetScope });
+                }
+              }}
+              disabled={batchResetQuotaMutation.isPending}
+            >
+              <RotateCcw className="size-3.5" />
+              批量重置
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setIsBatchTemplateOpen(true)}>
+              <Save className="size-3.5" />
+              应用额度模板
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelectedAccountIDs(new Set())}>
+              取消选择
+            </Button>
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <TableSkeleton columns={['ID', '名称', '平台', '分组', '优先级', '过期时间', '状态', '操作']} />
@@ -665,6 +871,14 @@ export function AdminSubscriptionAccountsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <input
+                      aria-label="选择当前页订阅账号"
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={(event) => toggleVisibleSelected(event.target.checked)}
+                    />
+                  </TableHead>
                   <TableHead>ID</TableHead>
                   <SortableHeader<SubscriptionAccountSummary> columnKey="name" sort={sort} onSortChange={setSort}>
                     名称
@@ -691,6 +905,14 @@ export function AdminSubscriptionAccountsPage() {
               <TableBody>
                 {visibleAccounts.map((account) => (
                   <TableRow key={account.id}>
+                    <TableCell>
+                      <input
+                        aria-label={`选择订阅账号 ${account.name}`}
+                        type="checkbox"
+                        checked={selectedAccountIDs.has(account.id)}
+                        onChange={(event) => toggleAccountSelected(account.id, event.target.checked)}
+                      />
+                    </TableCell>
                     <TableCell className="font-mono text-sm">{account.id}</TableCell>
                     <TableCell className="font-medium">{account.name}</TableCell>
                     <TableCell>{platformLabel(account.platform)}</TableCell>
@@ -769,6 +991,74 @@ export function AdminSubscriptionAccountsPage() {
         pending={updateMutation.isPending}
         platform={editingAccount?.accountType ? editingAccount.accountType : 'oauth'}
       />
+
+      <Dialog open={isBatchTemplateOpen} onOpenChange={setIsBatchTemplateOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>批量应用额度模板</DialogTitle>
+            <DialogDescription>
+              空字段不会覆盖现有账号配置；填写 0 可清空对应限额。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 pt-2 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="batch-quota-limit">总额度 USD</Label>
+              <Input id="batch-quota-limit" type="number" min="0" step="0.01" value={batchTemplate.quotaLimitUsd} onChange={(e) => setBatchTemplate({ ...batchTemplate, quotaLimitUsd: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="batch-5h-limit">5h 额度 USD</Label>
+              <Input id="batch-5h-limit" type="number" min="0" step="0.01" value={batchTemplate.quota5hLimitUsd} onChange={(e) => setBatchTemplate({ ...batchTemplate, quota5hLimitUsd: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="batch-daily-limit">24h 额度 USD</Label>
+              <Input id="batch-daily-limit" type="number" min="0" step="0.01" value={batchTemplate.quotaDailyLimitUsd} onChange={(e) => setBatchTemplate({ ...batchTemplate, quotaDailyLimitUsd: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="batch-weekly-limit">7d 额度 USD</Label>
+              <Input id="batch-weekly-limit" type="number" min="0" step="0.01" value={batchTemplate.quotaWeeklyLimitUsd} onChange={(e) => setBatchTemplate({ ...batchTemplate, quotaWeeklyLimitUsd: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="batch-rate-multiplier">用量倍率</Label>
+              <Input id="batch-rate-multiplier" type="number" min="0" step="0.01" value={batchTemplate.rateMultiplier} onChange={(e) => setBatchTemplate({ ...batchTemplate, rateMultiplier: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="batch-rpm-limit">RPM 限制</Label>
+              <Input id="batch-rpm-limit" type="number" min="0" step="1" value={batchTemplate.rpmLimit} onChange={(e) => setBatchTemplate({ ...batchTemplate, rpmLimit: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="batch-session-window-limit">Session 额度 USD</Label>
+              <Input id="batch-session-window-limit" type="number" min="0" step="0.01" value={batchTemplate.sessionWindowLimitUsd} onChange={(e) => setBatchTemplate({ ...batchTemplate, sessionWindowLimitUsd: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="batch-quota-reset-strategy">重置周期</Label>
+              <select
+                id="batch-quota-reset-strategy"
+                value={batchTemplate.quotaResetStrategy}
+                onChange={(e) => setBatchTemplate({ ...batchTemplate, quotaResetStrategy: e.target.value })}
+                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
+              >
+                <option value="">不修改</option>
+                {QUOTA_RESET_STRATEGY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="batch-quota-timezone">额度时区</Label>
+              <Input id="batch-quota-timezone" value={batchTemplate.quotaTimezone} onChange={(e) => setBatchTemplate({ ...batchTemplate, quotaTimezone: e.target.value })} placeholder="留空不修改" />
+            </div>
+            <Button
+              onClick={submitBatchTemplate}
+              disabled={batchQuotaTemplateMutation.isPending || selectedIDs.length === 0}
+              className="sm:col-span-2"
+            >
+              {batchQuotaTemplateMutation.isPending ? '应用中...' : `应用到 ${selectedIDs.length} 个账号`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

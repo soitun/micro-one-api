@@ -103,6 +103,7 @@ type adminHTTPChannelClient struct {
 	updated              *channelv1.UpdateChannelRequest
 	createdAccount       *channelv1.CreateSubscriptionAccountRequest
 	updatedAccount       *channelv1.UpdateSubscriptionAccountRequest
+	updatedAccounts      []*channelv1.UpdateSubscriptionAccountRequest
 	deletedID            int64
 	deletedAccountID     int64
 	deletedIDs           []int64
@@ -110,6 +111,8 @@ type adminHTTPChannelClient struct {
 	chType               int32
 	statuses             []int32
 	accountStatuses      []int32
+	resetAccountIDs      []int64
+	resetScopes          []string
 	existingFailureCount int32
 	existingLastError    string
 	existingLastSuccess  int64
@@ -150,6 +153,7 @@ func (c *adminHTTPChannelClient) CreateSubscriptionAccount(ctx context.Context, 
 
 func (c *adminHTTPChannelClient) UpdateSubscriptionAccount(ctx context.Context, req *channelv1.UpdateSubscriptionAccountRequest, opts ...grpc.CallOption) (*channelv1.UpdateSubscriptionAccountResponse, error) {
 	c.updatedAccount = req
+	c.updatedAccounts = append(c.updatedAccounts, req)
 	return &channelv1.UpdateSubscriptionAccountResponse{Success: true, Message: "updated"}, nil
 }
 
@@ -161,6 +165,12 @@ func (c *adminHTTPChannelClient) DeleteSubscriptionAccount(ctx context.Context, 
 func (c *adminHTTPChannelClient) ChangeSubscriptionAccountStatus(ctx context.Context, req *channelv1.ChangeSubscriptionAccountStatusRequest, opts ...grpc.CallOption) (*channelv1.ChangeSubscriptionAccountStatusResponse, error) {
 	c.accountStatuses = append(c.accountStatuses, req.Status)
 	return &channelv1.ChangeSubscriptionAccountStatusResponse{Success: true, Message: "updated"}, nil
+}
+
+func (c *adminHTTPChannelClient) ResetSubscriptionAccountQuota(ctx context.Context, req *channelv1.ResetSubscriptionAccountQuotaRequest, opts ...grpc.CallOption) (*channelv1.ResetSubscriptionAccountQuotaResponse, error) {
+	c.resetAccountIDs = append(c.resetAccountIDs, req.AccountId)
+	c.resetScopes = append(c.resetScopes, req.Scope)
+	return &channelv1.ResetSubscriptionAccountQuotaResponse{Success: true, Message: "ok"}, nil
 }
 
 func (c *adminHTTPChannelClient) GetSubscriptionAccount(ctx context.Context, req *channelv1.GetSubscriptionAccountRequest, opts ...grpc.CallOption) (*channelv1.GetSubscriptionAccountReply, error) {
@@ -1513,6 +1523,42 @@ func TestAdminHTTPSubscriptionAccountRoutes(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || len(channelClient.accountStatuses) != 1 || channelClient.accountStatuses[0] != 2 {
 		t.Fatalf("status subscription account mismatch: status=%d statuses=%v body=%s", rec.Code, channelClient.accountStatuses, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/subscription-accounts/batch-reset-quota", strings.NewReader(`{"account_ids":[201,202,201],"scope":"daily"}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"updated_count":2`) {
+		t.Fatalf("batch reset subscription account mismatch: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(channelClient.resetAccountIDs) != 2 || channelClient.resetAccountIDs[0] != 201 || channelClient.resetAccountIDs[1] != 202 || channelClient.resetScopes[0] != "daily" || channelClient.resetScopes[1] != "daily" {
+		t.Fatalf("batch reset affected wrong accounts: ids=%v scopes=%v", channelClient.resetAccountIDs, channelClient.resetScopes)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/subscription-accounts/batch-quota-template", strings.NewReader(`{"account_ids":[202,203],"template":{"quota_daily_limit_usd":25,"quota_weekly_limit_usd":100,"rate_multiplier":1.5,"rpm_limit":30,"quota_reset_strategy":"fixed","quota_timezone":"Asia/Shanghai"}}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"updated_count":2`) {
+		t.Fatalf("batch quota template mismatch: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(channelClient.updatedAccounts) < 3 {
+		t.Fatalf("batch quota template did not update accounts: %+v", channelClient.updatedAccounts)
+	}
+	batchUpdates := channelClient.updatedAccounts[len(channelClient.updatedAccounts)-2:]
+	if batchUpdates[0].Id != 202 || batchUpdates[1].Id != 203 {
+		t.Fatalf("batch quota template affected wrong accounts: %+v", batchUpdates)
+	}
+	for _, update := range batchUpdates {
+		if update.QuotaDailyLimitUsd == nil || update.GetQuotaDailyLimitUsd() != 25 ||
+			update.QuotaWeeklyLimitUsd == nil || update.GetQuotaWeeklyLimitUsd() != 100 ||
+			update.RateMultiplier == nil || update.GetRateMultiplier() != 1.5 ||
+			update.RpmLimit == nil || update.GetRpmLimit() != 30 ||
+			update.QuotaResetStrategy == nil || update.GetQuotaResetStrategy() != "fixed" ||
+			update.QuotaTimezone == nil || update.GetQuotaTimezone() != "Asia/Shanghai" {
+			t.Fatalf("batch quota template fields mismatch: %+v", update)
+		}
 	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/v1/subscription-accounts/201", nil)

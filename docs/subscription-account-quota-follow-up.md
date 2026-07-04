@@ -250,19 +250,37 @@ relay 回写：
 - 同一 session 在某账号达到 session 窗口成本上限后不请求该账号、不触发 runtime cooldown，并 failover 到 sibling 账号。
 - fixed daily / weekly 会按配置时区边界重置，weekly 以周一 00:00 为周期起点。
 
-### 5. 管理端批量能力
+### 5. 管理端批量能力（已完成）
 
 目标：账号数量较多时降低运维成本。
 
-现状：
+已实现：
 
 - 单账号可以编辑额度、倍率和重置用量。
+- 管理端列表支持多选订阅账号。
+- 支持批量重置 `total`、`5h`、`daily`、`weekly`、`all` 用量。
+- 支持对选中账号批量应用额度模板：
+  - `quota_limit_usd`
+  - `quota_5h_limit_usd`
+  - `quota_daily_limit_usd`
+  - `quota_weekly_limit_usd`
+  - `rate_multiplier`
+  - `rpm_limit`
+  - `session_window_limit_usd`
+  - `quota_reset_strategy`
+  - `quota_timezone`
+- 列表支持按当前已加载账号筛选“本地额度耗尽”“即将耗尽”“最近无用量”。
+- 新增 HTTP 管理接口：
+  - `POST /v1/subscription-accounts/batch-reset-quota`
+  - `POST /v1/subscription-accounts/batch-quota-template`
+  - `/api/subscription-accounts/...` 别名同步可用。
 
-后续可做：
+涉及文件：
 
-- 按平台/分组批量设置额度模板。
-- 批量重置 daily/weekly 用量。
-- 列表筛选“本地额度耗尽”“即将耗尽”“最近无用量”。
+- `internal/admin/server/http.go`
+- `web/src/pages/admin/SubscriptionAccountsPage.tsx`
+- `internal/admin/server/http_test.go`
+- `web/src/pages/admin/SubscriptionAccountsPage.test.tsx`
 
 验证：
 

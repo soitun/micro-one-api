@@ -117,6 +117,130 @@ describe('AdminSubscriptionAccountsPage', () => {
     });
   });
 
+  it('filters loaded accounts by local quota status', async () => {
+    const exhausted = {
+      ...baseAccount,
+      id: 2,
+      name: 'codex-exhausted',
+      platform: 'codex',
+      quotaDailyLimitUsd: 10,
+      quotaDailyUsedUsd: 10,
+    };
+    const healthy = {
+      ...baseAccount,
+      id: 3,
+      name: 'claude-healthy',
+      quotaDailyLimitUsd: 10,
+      quotaDailyUsedUsd: 2,
+      lastUsedAt: 1700000000,
+    };
+
+    server.use(
+      http.get('/api/subscription-accounts', () =>
+        HttpResponse.json({ accounts: [exhausted, healthy], total: 2 }),
+      ),
+    );
+
+    renderWithQuery(
+      <MemoryRouter>
+        <AdminSubscriptionAccountsPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('codex-exhausted');
+    expect(screen.getByText('claude-healthy')).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText('按本地额度筛选'), 'exhausted');
+
+    await waitFor(() => {
+      expect(screen.getByText('codex-exhausted')).toBeInTheDocument();
+      expect(screen.queryByText('claude-healthy')).not.toBeInTheDocument();
+    });
+  });
+
+  it('batch resets only selected subscription accounts', async () => {
+    const user = userEvent.setup();
+    const resetPayloads: Array<Record<string, unknown>> = [];
+    const accounts = [
+      { ...baseAccount, id: 1, name: 'claude-pro-1' },
+      { ...baseAccount, id: 2, name: 'claude-pro-2' },
+    ];
+
+    server.use(
+      http.get('/api/subscription-accounts', () =>
+        HttpResponse.json({ accounts, total: 2 }),
+      ),
+      http.post('/api/subscription-accounts/batch-reset-quota', async ({ request }) => {
+        resetPayloads.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ success: true, message: 'ok', updated_count: 1 });
+      }),
+    );
+
+    renderWithQuery(
+      <MemoryRouter>
+        <AdminSubscriptionAccountsPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('claude-pro-1');
+    await user.click(screen.getByLabelText('选择订阅账号 claude-pro-2'));
+    await user.selectOptions(screen.getByLabelText('批量重置范围'), 'weekly');
+
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    confirmSpy.mockReturnValue(true);
+    await user.click(screen.getByRole('button', { name: '批量重置' }));
+
+    await waitFor(() => expect(resetPayloads).toHaveLength(1));
+    expect(resetPayloads[0]).toEqual({ account_ids: [2], scope: 'weekly' });
+    confirmSpy.mockRestore();
+  });
+
+  it('applies a quota template only to selected subscription accounts', async () => {
+    const user = userEvent.setup();
+    const templatePayloads: Array<Record<string, unknown>> = [];
+    const accounts = [
+      { ...baseAccount, id: 1, name: 'claude-pro-1' },
+      { ...baseAccount, id: 2, name: 'claude-pro-2' },
+    ];
+
+    server.use(
+      http.get('/api/subscription-accounts', () =>
+        HttpResponse.json({ accounts, total: 2 }),
+      ),
+      http.post('/api/subscription-accounts/batch-quota-template', async ({ request }) => {
+        templatePayloads.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ success: true, message: 'ok', updated_count: 1 });
+      }),
+    );
+
+    renderWithQuery(
+      <MemoryRouter>
+        <AdminSubscriptionAccountsPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('claude-pro-1');
+    await user.click(screen.getByLabelText('选择订阅账号 claude-pro-1'));
+    await user.click(screen.getByRole('button', { name: '应用额度模板' }));
+
+    await user.type(screen.getByLabelText('24h 额度 USD'), '25');
+    await user.type(screen.getByLabelText('7d 额度 USD'), '100');
+    await user.selectOptions(screen.getByLabelText('重置周期'), 'fixed');
+    await user.type(screen.getByLabelText('额度时区'), 'Asia/Shanghai');
+    await user.click(screen.getByRole('button', { name: /应用到 1 个账号/ }));
+
+    await waitFor(() => expect(templatePayloads).toHaveLength(1));
+    expect(templatePayloads[0]).toEqual({
+      account_ids: [1],
+      template: {
+        quota_daily_limit_usd: 25,
+        quota_weekly_limit_usd: 100,
+        quota_reset_strategy: 'fixed',
+        quota_timezone: 'Asia/Shanghai',
+      },
+    });
+  });
+
   it('creates an account with the expected payload', async () => {
     const user = userEvent.setup();
     const created: Record<string, unknown>[] = [];
