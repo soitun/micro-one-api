@@ -205,6 +205,7 @@ func (m *mockChannelRepo) ResetSubscriptionAccountQuota(ctx context.Context, acc
 		return ErrSubscriptionAccountNotFound
 	}
 	acc.QuotaUsedUSD = 0
+	acc.Quota5hUsedUSD = 0
 	acc.QuotaDailyUsedUSD = 0
 	acc.QuotaWeeklyUsedUSD = 0
 	return nil
@@ -437,6 +438,120 @@ func TestSubscriptionAccount_LocalQuotaDailyWindowExpires(t *testing.T) {
 	}
 	if !account.IsSchedulableAt(now) {
 		t.Fatal("account with expired daily window should be schedulable")
+	}
+}
+
+func TestSubscriptionAccount_LocalQuotaFixedDailyWindowExpiresAtTimezoneMidnight(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 2, 1, 0, 0, 0, loc)
+	account := &SubscriptionAccount{
+		Status:                ChannelStatusEnabled,
+		QuotaDailyLimitUSD:    1,
+		QuotaDailyUsedUSD:     1,
+		QuotaDailyWindowStart: time.Date(2026, 7, 1, 23, 0, 0, 0, loc).Unix(),
+		QuotaResetStrategy:    QuotaResetStrategyFixed,
+		QuotaTimezone:         "Asia/Shanghai",
+	}
+	if !account.IsSchedulableAt(now) {
+		t.Fatal("account with previous fixed daily window should be schedulable")
+	}
+	account.QuotaDailyWindowStart = time.Date(2026, 7, 2, 0, 0, 0, 0, loc).Unix()
+	if account.IsSchedulableAt(now) {
+		t.Fatal("account with exhausted current fixed daily window should not be schedulable")
+	}
+}
+
+func TestSubscriptionAccount_LocalQuotaFixedWeeklyWindowStartsMonday(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, loc)
+	account := &SubscriptionAccount{
+		Status:                 ChannelStatusEnabled,
+		QuotaWeeklyLimitUSD:    1,
+		QuotaWeeklyUsedUSD:     1,
+		QuotaWeeklyWindowStart: time.Date(2026, 7, 5, 23, 0, 0, 0, loc).Unix(),
+		QuotaResetStrategy:     QuotaResetStrategyFixed,
+		QuotaTimezone:          "Asia/Shanghai",
+	}
+	if !account.IsSchedulableAt(now) {
+		t.Fatal("account with previous fixed weekly window should be schedulable")
+	}
+	account.QuotaWeeklyWindowStart = time.Date(2026, 7, 6, 0, 0, 0, 0, loc).Unix()
+	if account.IsSchedulableAt(now) {
+		t.Fatal("account with exhausted current fixed weekly window should not be schedulable")
+	}
+}
+
+func TestSubscriptionAccount_InvalidQuotaTimezoneFallsBackToUTC(t *testing.T) {
+	account := &SubscriptionAccount{
+		QuotaResetStrategy: QuotaResetStrategyFixed,
+		QuotaTimezone:      "not/a-zone",
+	}
+	if got := account.EffectiveQuotaTimezone(); got != DefaultQuotaTimezone {
+		t.Fatalf("EffectiveQuotaTimezone() = %q, want %q", got, DefaultQuotaTimezone)
+	}
+	now := time.Date(2026, 7, 2, 1, 30, 0, 0, time.UTC)
+	if got, want := account.FixedQuotaWindowStart(now, "daily"), time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC).Unix(); got != want {
+		t.Fatalf("FixedQuotaWindowStart() = %d, want %d", got, want)
+	}
+}
+
+func TestChannelUsecase_SelectSubscriptionAccount_SkipsLocalQuota5hExceeded(t *testing.T) {
+	now := time.Unix(1710000000, 0)
+	repo := &mockChannelRepo{
+		accounts: map[int64]*SubscriptionAccount{
+			1: {
+				ID:                 1,
+				Name:               "spent-5h",
+				Status:             ChannelStatusEnabled,
+				Platform:           "codex",
+				Priority:           10,
+				Quota5hLimitUSD:    1,
+				Quota5hUsedUSD:     1,
+				Quota5hWindowStart: now.Add(-time.Hour).Unix(),
+			},
+			2: {
+				ID:       2,
+				Name:     "ready",
+				Status:   ChannelStatusEnabled,
+				Platform: "codex",
+				Priority: 10,
+			},
+		},
+		accAbilities: map[string][]SubscriptionAccountAbility{
+			"codex:default:gpt-5": {
+				{Group: "default", Model: "gpt-5", Platform: "codex", AccountID: 1, Enabled: true, Priority: 10},
+				{Group: "default", Model: "gpt-5", Platform: "codex", AccountID: 2, Enabled: true, Priority: 10},
+			},
+		},
+	}
+	uc := NewChannelUsecase(repo, nil)
+	uc.now = func() time.Time { return now }
+
+	account, err := uc.SelectSubscriptionAccount(context.Background(), "default", "gpt-5", "codex", false)
+	if err != nil {
+		t.Fatalf("SelectSubscriptionAccount() error = %v", err)
+	}
+	if account.ID != 2 {
+		t.Fatalf("selected account = %d, want 2", account.ID)
+	}
+}
+
+func TestSubscriptionAccount_LocalQuota5hWindowExpires(t *testing.T) {
+	now := time.Unix(1710000000, 0)
+	account := &SubscriptionAccount{
+		Status:             ChannelStatusEnabled,
+		Quota5hLimitUSD:    1,
+		Quota5hUsedUSD:     1,
+		Quota5hWindowStart: now.Add(-6 * time.Hour).Unix(),
+	}
+	if !account.IsSchedulableAt(now) {
+		t.Fatal("account with expired 5h window should be schedulable")
 	}
 }
 

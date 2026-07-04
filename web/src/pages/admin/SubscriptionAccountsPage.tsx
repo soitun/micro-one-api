@@ -62,6 +62,12 @@ interface SubscriptionAccountSummary {
   quotaSnapshotPaused?: boolean;
   quotaLimitUsd?: number;
   quotaUsedUsd?: number;
+  quota5hLimitUsd?: number;
+  quota5hUsedUsd?: number;
+  quota5hWindowStart?: number;
+  quota_5h_limit_usd?: number;
+  quota_5h_used_usd?: number;
+  quota_5h_window_start?: number;
   quotaDailyLimitUsd?: number;
   quotaDailyUsedUsd?: number;
   quotaDailyWindowStart?: number;
@@ -69,6 +75,14 @@ interface SubscriptionAccountSummary {
   quotaWeeklyUsedUsd?: number;
   quotaWeeklyWindowStart?: number;
   rateMultiplier?: number;
+  rpmLimit?: number;
+  rpm_limit?: number;
+  sessionWindowLimitUsd?: number;
+  session_window_limit_usd?: number;
+  quotaResetStrategy?: string;
+  quota_reset_strategy?: string;
+  quotaTimezone?: string;
+  quota_timezone?: string;
 }
 
 // Mirrors common.v1.SubscriptionAccountInfo JSON tags returned by
@@ -95,6 +109,9 @@ interface SubscriptionAccountInfo {
   updated_at: number;
   quota_limit_usd?: number;
   quota_used_usd?: number;
+  quota_5h_limit_usd?: number;
+  quota_5h_used_usd?: number;
+  quota_5h_window_start?: number;
   quota_daily_limit_usd?: number;
   quota_daily_used_usd?: number;
   quota_daily_window_start?: number;
@@ -102,6 +119,10 @@ interface SubscriptionAccountInfo {
   quota_weekly_used_usd?: number;
   quota_weekly_window_start?: number;
   rate_multiplier?: number;
+  rpm_limit?: number;
+  session_window_limit_usd?: number;
+  quota_reset_strategy?: string;
+  quota_timezone?: string;
 }
 
 interface SubscriptionAccountEditDraft {
@@ -120,11 +141,17 @@ interface SubscriptionAccountEditDraft {
   metadata: string;
   quotaLimitUsd: string;
   quotaUsedUsd: string;
+  quota5hLimitUsd: string;
+  quota5hUsedUsd: string;
   quotaDailyLimitUsd: string;
   quotaDailyUsedUsd: string;
   quotaWeeklyLimitUsd: string;
   quotaWeeklyUsedUsd: string;
   rateMultiplier: string;
+  rpmLimit: string;
+  sessionWindowLimitUsd: string;
+  quotaResetStrategy: string;
+  quotaTimezone: string;
 }
 
 interface CreatePayload {
@@ -143,11 +170,17 @@ interface CreatePayload {
   metadata: string;
   quota_limit_usd: number;
   quota_used_usd: number;
+  quota_5h_limit_usd: number;
+  quota_5h_used_usd: number;
   quota_daily_limit_usd: number;
   quota_daily_used_usd: number;
   quota_weekly_limit_usd: number;
   quota_weekly_used_usd: number;
   rate_multiplier: number;
+  rpm_limit: number;
+  session_window_limit_usd: number;
+  quota_reset_strategy: string;
+  quota_timezone: string;
 }
 
 interface UpdatePayload {
@@ -166,11 +199,17 @@ interface UpdatePayload {
   metadata: string;
   quota_limit_usd: number;
   quota_used_usd: number;
+  quota_5h_limit_usd: number;
+  quota_5h_used_usd: number;
   quota_daily_limit_usd: number;
   quota_daily_used_usd: number;
   quota_weekly_limit_usd: number;
   quota_weekly_used_usd: number;
   rate_multiplier: number;
+  rpm_limit: number;
+  session_window_limit_usd: number;
+  quota_reset_strategy: string;
+  quota_timezone: string;
 }
 
 // Subscription account platforms supported by the hybrid relay adaptor layer
@@ -183,6 +222,11 @@ const PLATFORM_OPTIONS: Array<{ value: string; label: string }> = [
 
 const ACCOUNT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'oauth', label: 'OAuth 订阅账号' },
+];
+
+const QUOTA_RESET_STRATEGY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'rolling', label: '滚动窗口' },
+  { value: 'fixed', label: '固定周期' },
 ];
 
 function platformLabel(platform: string) {
@@ -242,9 +286,21 @@ function parseNumberInput(value: string) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+function normalizeQuotaResetStrategy(value?: string | null) {
+  return value === 'fixed' ? 'fixed' : 'rolling';
+}
+
+function normalizeQuotaTimezone(value?: string | null) {
+  const trimmed = (value ?? '').trim();
+  return trimmed || 'UTC';
+}
+
 function localQuotaRows(account: SubscriptionAccountSummary) {
+  const quota5hUsedUsd = account.quota5hUsedUsd ?? account.quota_5h_used_usd;
+  const quota5hLimitUsd = account.quota5hLimitUsd ?? account.quota_5h_limit_usd;
   return [
     { label: '总额', used: account.quotaUsedUsd, limit: account.quotaLimitUsd },
+    { label: '5h', used: quota5hUsedUsd, limit: quota5hLimitUsd },
     { label: '24h', used: account.quotaDailyUsedUsd, limit: account.quotaDailyLimitUsd },
     { label: '7d', used: account.quotaWeeklyUsedUsd, limit: account.quotaWeeklyLimitUsd },
   ].filter((row) => (row.used ?? 0) > 0 || (row.limit ?? 0) > 0);
@@ -288,7 +344,11 @@ function quotaWindows(account: SubscriptionAccountSummary) {
 function QuotaStatusCell({ account }: { account: SubscriptionAccountSummary }) {
   const windows = quotaWindows(account);
   const localRows = localQuotaRows(account);
-  if (windows.length === 0 && localRows.length === 0) {
+  const rpmLimit = account.rpmLimit ?? account.rpm_limit ?? 0;
+  const sessionWindowLimitUsd = account.sessionWindowLimitUsd ?? account.session_window_limit_usd ?? 0;
+  const resetStrategy = normalizeQuotaResetStrategy(account.quotaResetStrategy ?? account.quota_reset_strategy);
+  const quotaTimezone = normalizeQuotaTimezone(account.quotaTimezone ?? account.quota_timezone);
+  if (windows.length === 0 && localRows.length === 0 && rpmLimit <= 0 && sessionWindowLimitUsd <= 0 && resetStrategy !== 'fixed') {
     return <span className="text-sm text-muted-foreground">—</span>;
   }
   return (
@@ -339,6 +399,21 @@ function QuotaStatusCell({ account }: { account: SubscriptionAccountSummary }) {
           已因限额暂停
         </span>
       )}
+      {rpmLimit > 0 && (
+        <span className="inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          RPM {rpmLimit}/min
+        </span>
+      )}
+      {sessionWindowLimitUsd > 0 && (
+        <span className="inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          Session {formatUSD(sessionWindowLimitUsd)}
+        </span>
+      )}
+      {resetStrategy === 'fixed' && (
+        <span className="inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          固定周期 {quotaTimezone}
+        </span>
+      )}
     </div>
   );
 }
@@ -360,11 +435,17 @@ function toDraft(account: SubscriptionAccountInfo): SubscriptionAccountEditDraft
     metadata: account.metadata ?? '',
     quotaLimitUsd: String(account.quota_limit_usd ?? 0),
     quotaUsedUsd: String(account.quota_used_usd ?? 0),
+    quota5hLimitUsd: String(account.quota_5h_limit_usd ?? 0),
+    quota5hUsedUsd: String(account.quota_5h_used_usd ?? 0),
     quotaDailyLimitUsd: String(account.quota_daily_limit_usd ?? 0),
     quotaDailyUsedUsd: String(account.quota_daily_used_usd ?? 0),
     quotaWeeklyLimitUsd: String(account.quota_weekly_limit_usd ?? 0),
     quotaWeeklyUsedUsd: String(account.quota_weekly_used_usd ?? 0),
     rateMultiplier: String(account.rate_multiplier && account.rate_multiplier > 0 ? account.rate_multiplier : 1),
+    rpmLimit: String(account.rpm_limit ?? 0),
+    sessionWindowLimitUsd: String(account.session_window_limit_usd ?? 0),
+    quotaResetStrategy: normalizeQuotaResetStrategy(account.quota_reset_strategy),
+    quotaTimezone: normalizeQuotaTimezone(account.quota_timezone),
   };
 }
 
@@ -450,11 +531,17 @@ export function AdminSubscriptionAccountsPage() {
         metadata: draft.metadata,
         quota_limit_usd: parseNumberInput(draft.quotaLimitUsd),
         quota_used_usd: parseNumberInput(draft.quotaUsedUsd),
+        quota_5h_limit_usd: parseNumberInput(draft.quota5hLimitUsd),
+        quota_5h_used_usd: parseNumberInput(draft.quota5hUsedUsd),
         quota_daily_limit_usd: parseNumberInput(draft.quotaDailyLimitUsd),
         quota_daily_used_usd: parseNumberInput(draft.quotaDailyUsedUsd),
         quota_weekly_limit_usd: parseNumberInput(draft.quotaWeeklyLimitUsd),
         quota_weekly_used_usd: parseNumberInput(draft.quotaWeeklyUsedUsd),
         rate_multiplier: parseNumberInput(draft.rateMultiplier) || 1,
+        rpm_limit: Math.max(0, parseInt(draft.rpmLimit || '0', 10) || 0),
+        session_window_limit_usd: parseNumberInput(draft.sessionWindowLimitUsd),
+        quota_reset_strategy: normalizeQuotaResetStrategy(draft.quotaResetStrategy),
+        quota_timezone: normalizeQuotaTimezone(draft.quotaTimezone),
       };
       const res = await adminApiClient.put(`/subscription-accounts/${draft.id}`, payload);
       ensureApiSuccess(res.data, 'Subscription account update failed');
@@ -709,11 +796,17 @@ const emptyCreateState = {
   metadata: '',
   quotaLimitUsd: '',
   quotaUsedUsd: '',
+  quota5hLimitUsd: '',
+  quota5hUsedUsd: '',
   quotaDailyLimitUsd: '',
   quotaDailyUsedUsd: '',
   quotaWeeklyLimitUsd: '',
   quotaWeeklyUsedUsd: '',
   rateMultiplier: '1',
+  rpmLimit: '',
+  sessionWindowLimitUsd: '',
+  quotaResetStrategy: 'rolling',
+  quotaTimezone: 'UTC',
 };
 
 function CreateAccountDialog({ open, onOpenChange, onSubmit, pending }: CreateAccountDialogProps) {
@@ -740,11 +833,17 @@ function CreateAccountDialog({ open, onOpenChange, onSubmit, pending }: CreateAc
       metadata: form.metadata,
       quota_limit_usd: parseNumberInput(form.quotaLimitUsd),
       quota_used_usd: parseNumberInput(form.quotaUsedUsd),
+      quota_5h_limit_usd: parseNumberInput(form.quota5hLimitUsd),
+      quota_5h_used_usd: parseNumberInput(form.quota5hUsedUsd),
       quota_daily_limit_usd: parseNumberInput(form.quotaDailyLimitUsd),
       quota_daily_used_usd: parseNumberInput(form.quotaDailyUsedUsd),
       quota_weekly_limit_usd: parseNumberInput(form.quotaWeeklyLimitUsd),
       quota_weekly_used_usd: parseNumberInput(form.quotaWeeklyUsedUsd),
       rate_multiplier: parseNumberInput(form.rateMultiplier) || 1,
+      rpm_limit: Math.max(0, parseInt(form.rpmLimit || '0', 10) || 0),
+      session_window_limit_usd: parseNumberInput(form.sessionWindowLimitUsd),
+      quota_reset_strategy: normalizeQuotaResetStrategy(form.quotaResetStrategy),
+      quota_timezone: normalizeQuotaTimezone(form.quotaTimezone),
     });
     setForm({ ...emptyCreateState });
   };
@@ -849,6 +948,17 @@ function CreateAccountDialog({ open, onOpenChange, onSubmit, pending }: CreateAc
             />
           </div>
           <div className="space-y-2">
+            <Label htmlFor="sub-5h-limit">5h 额度 USD</Label>
+            <Input
+              id="sub-5h-limit"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.quota5hLimitUsd}
+              onChange={(e) => setForm({ ...form, quota5hLimitUsd: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="sub-daily-limit">24h 额度 USD</Label>
             <Input
               id="sub-daily-limit"
@@ -879,6 +989,52 @@ function CreateAccountDialog({ open, onOpenChange, onSubmit, pending }: CreateAc
               step="0.01"
               value={form.rateMultiplier}
               onChange={(e) => setForm({ ...form, rateMultiplier: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="sub-rpm-limit">RPM 限制</Label>
+            <Input
+              id="sub-rpm-limit"
+              type="number"
+              min="0"
+              step="1"
+              value={form.rpmLimit}
+              onChange={(e) => setForm({ ...form, rpmLimit: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="sub-session-window-limit">Session 额度 USD</Label>
+            <Input
+              id="sub-session-window-limit"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.sessionWindowLimitUsd}
+              onChange={(e) => setForm({ ...form, sessionWindowLimitUsd: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="sub-quota-reset-strategy">重置周期</Label>
+            <select
+              id="sub-quota-reset-strategy"
+              value={form.quotaResetStrategy}
+              onChange={(e) => setForm({ ...form, quotaResetStrategy: e.target.value })}
+              className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
+            >
+              {QUOTA_RESET_STRATEGY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="sub-quota-timezone">额度时区</Label>
+            <Input
+              id="sub-quota-timezone"
+              value={form.quotaTimezone}
+              onChange={(e) => setForm({ ...form, quotaTimezone: e.target.value })}
+              placeholder="UTC"
             />
           </div>
           <div className="space-y-2 sm:col-span-2">
@@ -1072,6 +1228,28 @@ function EditAccountDialog({ draft, onDraftChange, onSubmit, pending }: EditAcco
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="edit-sub-5h-limit">5h 额度 USD</Label>
+              <Input
+                id="edit-sub-5h-limit"
+                type="number"
+                min="0"
+                step="0.01"
+                value={draft.quota5hLimitUsd}
+                onChange={(e) => onDraftChange({ ...draft, quota5hLimitUsd: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-sub-5h-used">5h 已用 USD</Label>
+              <Input
+                id="edit-sub-5h-used"
+                type="number"
+                min="0"
+                step="0.01"
+                value={draft.quota5hUsedUsd}
+                onChange={(e) => onDraftChange({ ...draft, quota5hUsedUsd: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="edit-sub-daily-limit">24h 额度 USD</Label>
               <Input
                 id="edit-sub-daily-limit"
@@ -1124,6 +1302,52 @@ function EditAccountDialog({ draft, onDraftChange, onSubmit, pending }: EditAcco
                 step="0.01"
                 value={draft.rateMultiplier}
                 onChange={(e) => onDraftChange({ ...draft, rateMultiplier: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-sub-rpm-limit">RPM 限制</Label>
+              <Input
+                id="edit-sub-rpm-limit"
+                type="number"
+                min="0"
+                step="1"
+                value={draft.rpmLimit}
+                onChange={(e) => onDraftChange({ ...draft, rpmLimit: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-sub-session-window-limit">Session 额度 USD</Label>
+              <Input
+                id="edit-sub-session-window-limit"
+                type="number"
+                min="0"
+                step="0.01"
+                value={draft.sessionWindowLimitUsd}
+                onChange={(e) => onDraftChange({ ...draft, sessionWindowLimitUsd: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-sub-quota-reset-strategy">重置周期</Label>
+              <select
+                id="edit-sub-quota-reset-strategy"
+                value={draft.quotaResetStrategy}
+                onChange={(e) => onDraftChange({ ...draft, quotaResetStrategy: e.target.value })}
+                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
+              >
+                {QUOTA_RESET_STRATEGY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-sub-quota-timezone">额度时区</Label>
+              <Input
+                id="edit-sub-quota-timezone"
+                value={draft.quotaTimezone}
+                onChange={(e) => onDraftChange({ ...draft, quotaTimezone: e.target.value })}
+                placeholder="UTC"
               />
             </div>
             <div className="space-y-2 sm:col-span-2">

@@ -127,6 +127,9 @@ func toSubscriptionAccountInfoWithSecrets(account *biz.SubscriptionAccount, incl
 		Concurrency:            account.Concurrency,
 		QuotaLimitUsd:          account.QuotaLimitUSD,
 		QuotaUsedUsd:           account.QuotaUsedUSD,
+		Quota_5HLimitUsd:       account.Quota5hLimitUSD,
+		Quota_5HUsedUsd:        account.Quota5hUsedUSD,
+		Quota_5HWindowStart:    account.Quota5hWindowStart,
 		QuotaDailyLimitUsd:     account.QuotaDailyLimitUSD,
 		QuotaDailyUsedUsd:      account.QuotaDailyUsedUSD,
 		QuotaDailyWindowStart:  account.QuotaDailyWindowStart,
@@ -134,6 +137,10 @@ func toSubscriptionAccountInfoWithSecrets(account *biz.SubscriptionAccount, incl
 		QuotaWeeklyUsedUsd:     account.QuotaWeeklyUsedUSD,
 		QuotaWeeklyWindowStart: account.QuotaWeeklyWindowStart,
 		RateMultiplier:         account.RateMultiplier,
+		RpmLimit:               account.RPMLimit,
+		SessionWindowLimitUsd:  account.SessionWindowLimitUSD,
+		QuotaResetStrategy:     account.EffectiveQuotaResetStrategy(),
+		QuotaTimezone:          account.EffectiveQuotaTimezone(),
 	}
 }
 
@@ -169,6 +176,9 @@ func toSubscriptionAccountSummary(account *biz.SubscriptionAccount) *commonv1.Su
 		QuotaSnapshotPaused:             account.QuotaSnapshotPaused,
 		QuotaLimitUsd:                   account.QuotaLimitUSD,
 		QuotaUsedUsd:                    account.QuotaUsedUSD,
+		Quota_5HLimitUsd:                account.Quota5hLimitUSD,
+		Quota_5HUsedUsd:                 account.Quota5hUsedUSD,
+		Quota_5HWindowStart:             account.Quota5hWindowStart,
 		QuotaDailyLimitUsd:              account.QuotaDailyLimitUSD,
 		QuotaDailyUsedUsd:               account.QuotaDailyUsedUSD,
 		QuotaDailyWindowStart:           account.QuotaDailyWindowStart,
@@ -176,6 +186,10 @@ func toSubscriptionAccountSummary(account *biz.SubscriptionAccount) *commonv1.Su
 		QuotaWeeklyUsedUsd:              account.QuotaWeeklyUsedUSD,
 		QuotaWeeklyWindowStart:          account.QuotaWeeklyWindowStart,
 		RateMultiplier:                  account.RateMultiplier,
+		RpmLimit:                        account.RPMLimit,
+		SessionWindowLimitUsd:           account.SessionWindowLimitUSD,
+		QuotaResetStrategy:              account.EffectiveQuotaResetStrategy(),
+		QuotaTimezone:                   account.EffectiveQuotaTimezone(),
 	}
 }
 
@@ -356,6 +370,9 @@ func (s *ChannelService) CreateSubscriptionAccount(ctx context.Context, req *cha
 		Status:                 biz.ChannelStatusEnabled,
 		QuotaLimitUSD:          req.QuotaLimitUsd,
 		QuotaUsedUSD:           req.QuotaUsedUsd,
+		Quota5hLimitUSD:        req.Quota_5HLimitUsd,
+		Quota5hUsedUSD:         req.Quota_5HUsedUsd,
+		Quota5hWindowStart:     req.Quota_5HWindowStart,
 		QuotaDailyLimitUSD:     req.QuotaDailyLimitUsd,
 		QuotaDailyUsedUSD:      req.QuotaDailyUsedUsd,
 		QuotaDailyWindowStart:  req.QuotaDailyWindowStart,
@@ -363,6 +380,10 @@ func (s *ChannelService) CreateSubscriptionAccount(ctx context.Context, req *cha
 		QuotaWeeklyUsedUSD:     req.QuotaWeeklyUsedUsd,
 		QuotaWeeklyWindowStart: req.QuotaWeeklyWindowStart,
 		RateMultiplier:         req.RateMultiplier,
+		RPMLimit:               req.RpmLimit,
+		SessionWindowLimitUSD:  req.SessionWindowLimitUsd,
+		QuotaResetStrategy:     req.QuotaResetStrategy,
+		QuotaTimezone:          req.QuotaTimezone,
 	}
 	if err := s.uc.CreateSubscriptionAccount(ctx, account); err != nil {
 		return &channelv1.CreateSubscriptionAccountResponse{
@@ -427,6 +448,15 @@ func (s *ChannelService) UpdateSubscriptionAccount(ctx context.Context, req *cha
 	if req.QuotaUsedUsd != nil {
 		account.QuotaUsedUSD = req.GetQuotaUsedUsd()
 	}
+	if req.Quota_5HLimitUsd != nil {
+		account.Quota5hLimitUSD = req.GetQuota_5HLimitUsd()
+	}
+	if req.Quota_5HUsedUsd != nil {
+		account.Quota5hUsedUSD = req.GetQuota_5HUsedUsd()
+	}
+	if req.Quota_5HWindowStart != nil {
+		account.Quota5hWindowStart = req.GetQuota_5HWindowStart()
+	}
 	if req.QuotaDailyLimitUsd != nil {
 		account.QuotaDailyLimitUSD = req.GetQuotaDailyLimitUsd()
 	}
@@ -447,6 +477,18 @@ func (s *ChannelService) UpdateSubscriptionAccount(ctx context.Context, req *cha
 	}
 	if req.RateMultiplier != nil {
 		account.RateMultiplier = req.GetRateMultiplier()
+	}
+	if req.RpmLimit != nil {
+		account.RPMLimit = req.GetRpmLimit()
+	}
+	if req.SessionWindowLimitUsd != nil {
+		account.SessionWindowLimitUSD = req.GetSessionWindowLimitUsd()
+	}
+	if req.QuotaResetStrategy != nil {
+		account.QuotaResetStrategy = req.GetQuotaResetStrategy()
+	}
+	if req.QuotaTimezone != nil {
+		account.QuotaTimezone = req.GetQuotaTimezone()
 	}
 	if err := s.uc.UpdateSubscriptionAccount(ctx, account); err != nil {
 		return &channelv1.UpdateSubscriptionAccountResponse{

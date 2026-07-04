@@ -96,13 +96,20 @@ func setupChannelTestDB(t *testing.T) *Repository {
 			concurrency INTEGER DEFAULT 1,
 			quota_limit_usd REAL DEFAULT 0,
 			quota_used_usd REAL DEFAULT 0,
+			quota_5h_limit_usd REAL DEFAULT 0,
+			quota_5h_used_usd REAL DEFAULT 0,
+			quota_5h_window_start INTEGER DEFAULT 0,
 			quota_daily_limit_usd REAL DEFAULT 0,
 			quota_daily_used_usd REAL DEFAULT 0,
 			quota_daily_window_start INTEGER DEFAULT 0,
 			quota_weekly_limit_usd REAL DEFAULT 0,
 			quota_weekly_used_usd REAL DEFAULT 0,
 			quota_weekly_window_start INTEGER DEFAULT 0,
-			rate_multiplier REAL DEFAULT 1
+			rate_multiplier REAL DEFAULT 1,
+			rpm_limit INTEGER DEFAULT 0,
+			session_window_limit_usd REAL DEFAULT 0,
+			quota_reset_strategy TEXT DEFAULT 'rolling',
+			quota_timezone TEXT DEFAULT 'UTC'
 		)
 	`).Error)
 
@@ -380,6 +387,8 @@ func TestSubscriptionAccountQuotaUsage_RecordAndReset(t *testing.T) {
 		Models:                 []string{"gpt-5"},
 		AccountID:              "acc_1",
 		RateMultiplier:         2,
+		Quota5hUsedUSD:         0.25,
+		Quota5hWindowStart:     time.Unix(1000, 0).Unix(),
 		QuotaDailyUsedUSD:      0.75,
 		QuotaDailyWindowStart:  time.Unix(1000, 0).Unix(),
 		QuotaWeeklyWindowStart: time.Unix(1000, 0).Unix(),
@@ -394,6 +403,8 @@ func TestSubscriptionAccountQuotaUsage_RecordAndReset(t *testing.T) {
 	stored, err := repo.FindSubscriptionAccountByID(ctx, account.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 1.0, stored.QuotaUsedUSD, 0.000001)
+	assert.InDelta(t, 1.25, stored.Quota5hUsedUSD, 0.000001)
+	assert.EqualValues(t, 1000, stored.Quota5hWindowStart)
 	assert.InDelta(t, 1.75, stored.QuotaDailyUsedUSD, 0.000001)
 	assert.EqualValues(t, 1000, stored.QuotaDailyWindowStart)
 	assert.InDelta(t, 1.0, stored.QuotaWeeklyUsedUSD, 0.000001)
@@ -406,6 +417,8 @@ func TestSubscriptionAccountQuotaUsage_RecordAndReset(t *testing.T) {
 	stored, err = repo.FindSubscriptionAccountByID(ctx, account.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 1.5, stored.QuotaUsedUSD, 0.000001)
+	assert.InDelta(t, 0.5, stored.Quota5hUsedUSD, 0.000001)
+	assert.EqualValues(t, 1000+25*60*60, stored.Quota5hWindowStart)
 	assert.InDelta(t, 0.5, stored.QuotaDailyUsedUSD, 0.000001)
 	assert.EqualValues(t, 1000+25*60*60, stored.QuotaDailyWindowStart)
 
@@ -413,8 +426,50 @@ func TestSubscriptionAccountQuotaUsage_RecordAndReset(t *testing.T) {
 	stored, err = repo.FindSubscriptionAccountByID(ctx, account.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 1.5, stored.QuotaUsedUSD, 0.000001)
+	assert.InDelta(t, 0.5, stored.Quota5hUsedUSD, 0.000001)
 	assert.Zero(t, stored.QuotaDailyUsedUSD)
 	assert.Zero(t, stored.QuotaDailyWindowStart)
+
+	require.NoError(t, repo.ResetSubscriptionAccountQuota(ctx, account.ID, "5h"))
+	stored, err = repo.FindSubscriptionAccountByID(ctx, account.ID)
+	require.NoError(t, err)
+	assert.Zero(t, stored.Quota5hUsedUSD)
+	assert.Zero(t, stored.Quota5hWindowStart)
+}
+
+func TestSubscriptionAccountQuotaUsage_FixedResetStrategyUsesTimezoneBoundaries(t *testing.T) {
+	repo := setupChannelTestDB(t)
+	ctx := context.Background()
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	account := &biz.SubscriptionAccount{
+		Name:                   "fixed-quota-usage",
+		Platform:               "codex",
+		Status:                 biz.ChannelStatusEnabled,
+		Group:                  "default",
+		Models:                 []string{"gpt-5"},
+		AccountID:              "acc_1",
+		QuotaDailyUsedUSD:      0.75,
+		QuotaDailyWindowStart:  time.Date(2026, 7, 7, 23, 0, 0, 0, loc).Unix(),
+		QuotaWeeklyUsedUSD:     1.25,
+		QuotaWeeklyWindowStart: time.Date(2026, 7, 6, 0, 0, 0, 0, loc).Unix(),
+		QuotaResetStrategy:     biz.QuotaResetStrategyFixed,
+		QuotaTimezone:          "Asia/Shanghai",
+	}
+	require.NoError(t, repo.CreateSubscriptionAccount(ctx, account))
+
+	occurredAt := time.Date(2026, 7, 8, 1, 0, 0, 0, loc)
+	require.NoError(t, repo.RecordSubscriptionAccountQuotaUsage(ctx, biz.SubscriptionAccountQuotaUsage{
+		AccountID:  account.ID,
+		CostUSD:    0.5,
+		OccurredAt: occurredAt,
+	}))
+	stored, err := repo.FindSubscriptionAccountByID(ctx, account.ID)
+	require.NoError(t, err)
+	assert.InDelta(t, 0.5, stored.QuotaDailyUsedUSD, 0.000001)
+	assert.EqualValues(t, time.Date(2026, 7, 8, 0, 0, 0, 0, loc).Unix(), stored.QuotaDailyWindowStart)
+	assert.InDelta(t, 1.75, stored.QuotaWeeklyUsedUSD, 0.000001)
+	assert.EqualValues(t, time.Date(2026, 7, 6, 0, 0, 0, 0, loc).Unix(), stored.QuotaWeeklyWindowStart)
 }
 
 func TestSubscriptionAccountQuotaUsage_IdempotentByReservation(t *testing.T) {

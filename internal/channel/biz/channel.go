@@ -31,6 +31,10 @@ const (
 	defaultHealthCooldown         = 5 * time.Minute
 	defaultHealthAlertNotifyType  = "event"
 	defaultHealthAlertTimeout     = 5 * time.Second
+
+	QuotaResetStrategyRolling = "rolling"
+	QuotaResetStrategyFixed   = "fixed"
+	DefaultQuotaTimezone      = "UTC"
 )
 
 var ErrChannelNotFound = errors.New("channel not found")
@@ -111,6 +115,9 @@ type SubscriptionAccount struct {
 
 	QuotaLimitUSD          float64
 	QuotaUsedUSD           float64
+	Quota5hLimitUSD        float64
+	Quota5hUsedUSD         float64
+	Quota5hWindowStart     int64
 	QuotaDailyLimitUSD     float64
 	QuotaDailyUsedUSD      float64
 	QuotaDailyWindowStart  int64
@@ -118,6 +125,10 @@ type SubscriptionAccount struct {
 	QuotaWeeklyUsedUSD     float64
 	QuotaWeeklyWindowStart int64
 	RateMultiplier         float64
+	RPMLimit               int32
+	SessionWindowLimitUSD  float64
+	QuotaResetStrategy     string
+	QuotaTimezone          string
 
 	PrimaryQuotaUsedPercent         *float64
 	PrimaryQuotaResetAfterSeconds   *int32
@@ -653,10 +664,19 @@ func (a *SubscriptionAccount) LocalQuotaExceededAt(now time.Time) bool {
 	if a.QuotaLimitUSD > 0 && a.QuotaUsedUSD >= a.QuotaLimitUSD {
 		return true
 	}
-	if a.QuotaDailyLimitUSD > 0 && effectiveWindowUsedUSD(a.QuotaDailyUsedUSD, a.QuotaDailyWindowStart, nowUnix, 24*time.Hour) >= a.QuotaDailyLimitUSD {
+	if a.Quota5hLimitUSD > 0 && effectiveWindowUsedUSD(a.Quota5hUsedUSD, a.Quota5hWindowStart, nowUnix, 5*time.Hour) >= a.Quota5hLimitUSD {
 		return true
 	}
-	if a.QuotaWeeklyLimitUSD > 0 && effectiveWindowUsedUSD(a.QuotaWeeklyUsedUSD, a.QuotaWeeklyWindowStart, nowUnix, 7*24*time.Hour) >= a.QuotaWeeklyLimitUSD {
+	dailyUsed := effectiveWindowUsedUSD(a.QuotaDailyUsedUSD, a.QuotaDailyWindowStart, nowUnix, 24*time.Hour)
+	weeklyUsed := effectiveWindowUsedUSD(a.QuotaWeeklyUsedUSD, a.QuotaWeeklyWindowStart, nowUnix, 7*24*time.Hour)
+	if a.UsesFixedQuotaReset() {
+		dailyUsed = a.EffectiveFixedQuotaWindowUsedUSD(a.QuotaDailyUsedUSD, a.QuotaDailyWindowStart, now, "daily")
+		weeklyUsed = a.EffectiveFixedQuotaWindowUsedUSD(a.QuotaWeeklyUsedUSD, a.QuotaWeeklyWindowStart, now, "weekly")
+	}
+	if a.QuotaDailyLimitUSD > 0 && dailyUsed >= a.QuotaDailyLimitUSD {
+		return true
+	}
+	if a.QuotaWeeklyLimitUSD > 0 && weeklyUsed >= a.QuotaWeeklyLimitUSD {
 		return true
 	}
 	return false
@@ -671,6 +691,61 @@ func (a *SubscriptionAccount) EffectiveRateMultiplier() float64 {
 
 func effectiveWindowUsedUSD(used float64, windowStart int64, nowUnix int64, window time.Duration) float64 {
 	if windowStart <= 0 || nowUnix-windowStart >= int64(window.Seconds()) {
+		return 0
+	}
+	return used
+}
+
+func (a *SubscriptionAccount) EffectiveQuotaResetStrategy() string {
+	if a == nil {
+		return QuotaResetStrategyRolling
+	}
+	switch strings.ToLower(strings.TrimSpace(a.QuotaResetStrategy)) {
+	case QuotaResetStrategyFixed:
+		return QuotaResetStrategyFixed
+	default:
+		return QuotaResetStrategyRolling
+	}
+}
+
+func (a *SubscriptionAccount) UsesFixedQuotaReset() bool {
+	return a.EffectiveQuotaResetStrategy() == QuotaResetStrategyFixed
+}
+
+func (a *SubscriptionAccount) EffectiveQuotaTimezone() string {
+	if a == nil {
+		return DefaultQuotaTimezone
+	}
+	tz := strings.TrimSpace(a.QuotaTimezone)
+	if tz == "" {
+		return DefaultQuotaTimezone
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return DefaultQuotaTimezone
+	}
+	return tz
+}
+
+func (a *SubscriptionAccount) FixedQuotaWindowStart(now time.Time, scope string) int64 {
+	loc, err := time.LoadLocation(a.EffectiveQuotaTimezone())
+	if err != nil {
+		loc = time.UTC
+	}
+	local := now.In(loc)
+	start := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
+	if scope == "weekly" {
+		daysSinceMonday := (int(local.Weekday()) + 6) % 7
+		start = start.AddDate(0, 0, -daysSinceMonday)
+	}
+	return start.Unix()
+}
+
+func (a *SubscriptionAccount) EffectiveFixedQuotaWindowUsedUSD(used float64, windowStart int64, now time.Time, scope string) float64 {
+	if windowStart <= 0 {
+		return 0
+	}
+	fixedStart := a.FixedQuotaWindowStart(now, scope)
+	if windowStart < fixedStart || windowStart > now.Unix() {
 		return 0
 	}
 	return used

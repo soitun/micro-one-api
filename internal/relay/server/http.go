@@ -92,6 +92,10 @@ type HTTPServer struct {
 	// accountConcurrency enforces SubscriptionAccount.Concurrency per account.
 	// Never nil after NewHTTPServer.
 	accountConcurrency relaybiz.AccountConcurrencyLimiter
+	// accountRPM enforces SubscriptionAccount.RPMLimit per account.
+	accountRPM relaybiz.AccountRPMLimiter
+	// sessionWindow tracks per-session cost windows for subscription accounts.
+	sessionWindow *subscriptionSessionWindowStore
 }
 
 func (s *HTTPServer) Plan(ctx context.Context, req relaybiz.RelayRequest) (*relaybiz.RelayPlan, error) {
@@ -180,6 +184,8 @@ func NewHTTPServer(
 		responseRoutes:     make(map[string]responseRouteEntry),
 		runtimeBlocker:     runtimeBlocker,
 		accountConcurrency: relaybiz.NewAccountConcurrencyLimiter(),
+		accountRPM:         relaybiz.NewAccountRPMLimiter(),
+		sessionWindow:      newSubscriptionSessionWindowStore(nil),
 	}
 }
 
@@ -297,6 +303,16 @@ func (s *HTTPServer) SetAccountConcurrencyLimiter(limiter relaybiz.AccountConcur
 	s.accountConcurrency = limiter
 }
 
+func (s *HTTPServer) SetAccountRPMLimiter(limiter relaybiz.AccountRPMLimiter) {
+	if s == nil {
+		return
+	}
+	if limiter == nil {
+		limiter = relaybiz.NewAccountRPMLimiter()
+	}
+	s.accountRPM = limiter
+}
+
 // isSubscriptionChannel reports whether the channel type is a subscription
 // account handled by the OAuth adaptor layer. These types are only routed
 // through the adaptor when the hybrid feature flag is enabled.
@@ -346,6 +362,7 @@ func (s *HTTPServer) SetOpenAIWSStickyStore(rdb *redis.Client) {
 		return
 	}
 	s.wsSticky = newOpenAIWSStickyStore(rdb)
+	s.sessionWindow = newSubscriptionSessionWindowStore(rdb)
 	s.wsScheduler = NewOpenAIWSRoutingScheduler(s)
 	// The same sticky store also backs session -> subscription-account
 	// stickiness in the biz planner (docs #7).
@@ -1424,6 +1441,9 @@ type usageLogInput struct {
 	CacheReadTokens       int64
 	ChannelID             int64
 	SubscriptionAccountID int64
+	Group                 string
+	SessionHash           string
+	SessionWindowLimitUSD float64
 	ElapsedTime           int64
 	IsStream              bool
 }
@@ -1965,7 +1985,9 @@ func (s *HTTPServer) commitQuotaWithResponse(ctx context.Context, reservationID 
 	if len(details) > 0 {
 		detail := details[0]
 		s.recordChannelUsage(ctx, detail.ChannelID, actualTokens)
-		s.recordSubscriptionAccountQuotaUsage(ctx, detail.SubscriptionAccountID, reservationID, quotaToUSD(resp.GetCommittedAmount()))
+		costUSD := quotaToUSD(resp.GetCommittedAmount())
+		s.recordSubscriptionAccountQuotaUsage(ctx, detail.SubscriptionAccountID, reservationID, costUSD)
+		s.recordSubscriptionSessionWindowUsage(ctx, detail, reservationID, costUSD)
 		// recordSubscriptionUsage is a no-op on the dual-track
 		// path: the billing layer's CommitQuotaWithUsage already
 		// wrote the subscription usage via the row-locked
@@ -1998,6 +2020,16 @@ func (s *HTTPServer) recordSubscriptionAccountQuotaUsage(ctx context.Context, ac
 	if resp != nil && !resp.GetSuccess() && applogger.Log != nil {
 		applogger.Log.Warn("subscription account quota usage rejected", zap.Int64("account_id", accountID), zap.String("message", resp.GetMessage()))
 	}
+}
+
+func (s *HTTPServer) recordSubscriptionSessionWindowUsage(ctx context.Context, detail usageLogInput, reservationID string, costUSD float64) {
+	if s == nil || detail.SubscriptionAccountID <= 0 || detail.SessionWindowLimitUSD <= 0 || strings.TrimSpace(detail.SessionHash) == "" || costUSD <= 0 {
+		return
+	}
+	if s.sessionWindow == nil {
+		s.sessionWindow = newSubscriptionSessionWindowStore(nil)
+	}
+	s.sessionWindow.RecordUsage(ctx, detail.Group, detail.SessionHash, detail.SubscriptionAccountID, reservationID, costUSD, s.openAIWSStickyTTL())
 }
 
 func (s *HTTPServer) recordSubscriptionUsage(ctx context.Context, userID int64, quota int64) {

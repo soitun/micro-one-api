@@ -93,14 +93,14 @@ func (s *HTTPServer) handleSubscriptionAccountViaAdaptor(
 		if current == nil || current.Channel == nil {
 			break
 		}
-		result := s.runSubscriptionAttempt(r, current, clientModel, rawBody, inbound)
+		result := s.runSubscriptionAttempt(r, current, clientModel, rawBody, inbound, sessionHash)
 		if result.retryable {
 			accountID := subscriptionAccountIDFromPlan(current)
 			if accountID > 0 {
 				failedAccounts[accountID] = true
-				// A concurrency-full account is healthy, just busy: fail over to a
-				// sibling but never cool it down.
-				if !result.concurrencyFull {
+				// Local relay limits mean the account is healthy, just currently
+				// unavailable: fail over to a sibling but never cool it down.
+				if !result.concurrencyFull && !result.rpmFull && !result.sessionWindowFull {
 					s.blockRuntimeAccount(r.Context(), accountID, result.statusCode, result.err)
 				}
 			}
@@ -145,14 +145,14 @@ const (
 // result is escalated to cross-account failover (result.retryable) so the caller
 // can try a sibling account. Cross-account failover itself is handled by the
 // caller.
-func (s *HTTPServer) runSubscriptionAttempt(r *http.Request, current *relaybiz.RelayPlan, clientModel string, rawBody []byte, inbound relayadaptor.Format) subscriptionAdaptorResult {
-	result := s.executeAndMeter(r.Context(), current, clientModel, r.Header.Clone(), rawBody, inbound)
+func (s *HTTPServer) runSubscriptionAttempt(r *http.Request, current *relaybiz.RelayPlan, clientModel string, rawBody []byte, inbound relayadaptor.Format, sessionHash string) subscriptionAdaptorResult {
+	result := s.executeAndMeter(r.Context(), current, clientModel, r.Header.Clone(), rawBody, inbound, sessionHash)
 	for tries := 0; result.retryableSameAccount && tries < subscriptionSameAccountMaxRetries; tries++ {
 		metrics.RelaySubscriptionFailoverTotal.WithLabelValues("same_account", "retried").Inc()
 		if !sleepCtx(r.Context(), subscriptionSameAccountRetryDelay) {
 			break // client/context cancelled: stop retrying
 		}
-		result = s.executeAndMeter(r.Context(), current, clientModel, r.Header.Clone(), rawBody, inbound)
+		result = s.executeAndMeter(r.Context(), current, clientModel, r.Header.Clone(), rawBody, inbound, sessionHash)
 	}
 	if result.retryableSameAccount {
 		// Same-account retries exhausted: escalate to cross-account failover.
@@ -165,8 +165,8 @@ func (s *HTTPServer) runSubscriptionAttempt(r *http.Request, current *relaybiz.R
 
 // executeAndMeter runs a single subscription-account request and records the
 // adaptor request metric for that attempt.
-func (s *HTTPServer) executeAndMeter(ctx context.Context, current *relaybiz.RelayPlan, clientModel string, header http.Header, rawBody []byte, inbound relayadaptor.Format) subscriptionAdaptorResult {
-	result := s.executeSubscriptionAccountViaAdaptor(ctx, current, clientModel, header, rawBody, inbound)
+func (s *HTTPServer) executeAndMeter(ctx context.Context, current *relaybiz.RelayPlan, clientModel string, header http.Header, rawBody []byte, inbound relayadaptor.Format, sessionHash string) subscriptionAdaptorResult {
+	result := s.executeSubscriptionAccountViaAdaptor(ctx, current, clientModel, header, rawBody, inbound, sessionHash)
 	metrics.RelaySubscriptionAdaptorRequestsTotal.WithLabelValues(subscriptionMetricPlatform(current), string(inbound), subscriptionAdaptorMetricResult(result)).Inc()
 	return result
 }
@@ -202,9 +202,15 @@ type subscriptionAdaptorResult struct {
 	// limit, so no upstream call was made. It fails over to another account but,
 	// unlike a real upstream error, must not cool the account down.
 	concurrencyFull bool
-	body            []byte
-	header          http.Header
-	write           func(http.ResponseWriter)
+	// rpmFull marks that the account exhausted its configured local RPM window,
+	// so no upstream call was made and the account must not be cooled down.
+	rpmFull bool
+	// sessionWindowFull marks that the session already exhausted this account's
+	// configured cost window, so no upstream call was made.
+	sessionWindowFull bool
+	body              []byte
+	header            http.Header
+	write             func(http.ResponseWriter)
 }
 
 type subscriptionAccountQuotaRecorder interface {
@@ -219,6 +225,7 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 	inboundHeader http.Header,
 	rawBody []byte,
 	inbound relayadaptor.Format,
+	sessionHash string,
 ) subscriptionAdaptorResult {
 	result := subscriptionAdaptorResult{
 		statusCode: http.StatusInternalServerError,
@@ -265,6 +272,42 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 			releaseSlot()
 		}
 	}()
+
+	var rpmLimit int32
+	if plan.Account != nil {
+		rpmLimit = plan.Account.RPMLimit
+	}
+	if s.accountRPM == nil {
+		s.accountRPM = relaybiz.NewAccountRPMLimiter()
+	}
+	if !s.accountRPM.TryAcquire(ctx, accountID, rpmLimit) {
+		result.statusCode = http.StatusServiceUnavailable
+		result.err = fmt.Errorf("subscription account %d at rpm limit %d", accountID, rpmLimit)
+		result.retryable = true
+		result.rpmFull = true
+		result.write = func(w http.ResponseWriter) {
+			s.writeError(w, http.StatusServiceUnavailable, "all subscription accounts rpm limited")
+		}
+		return result
+	}
+
+	var sessionWindowLimitUSD float64
+	if plan.Account != nil {
+		sessionWindowLimitUSD = plan.Account.SessionWindowLimitUSD
+	}
+	if s.sessionWindow == nil {
+		s.sessionWindow = newSubscriptionSessionWindowStore(nil)
+	}
+	if s.sessionWindow.Exceeded(ctx, plan.Auth.Group, sessionHash, accountID, sessionWindowLimitUSD) {
+		result.statusCode = http.StatusServiceUnavailable
+		result.err = fmt.Errorf("subscription account %d at session window limit %.6f", accountID, sessionWindowLimitUSD)
+		result.retryable = true
+		result.sessionWindowFull = true
+		result.write = func(w http.ResponseWriter) {
+			s.writeError(w, http.StatusServiceUnavailable, "all subscription accounts session-window limited")
+		}
+		return result
+	}
 
 	// Prefer the first-class subscription account selected during planning
 	// (plan.Account), then the resolver, then the channel-fallback metadata.
@@ -470,6 +513,9 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 					CacheReadTokens:       actualUsage.CacheReadTokens,
 					ChannelID:             plan.Channel.ID,
 					SubscriptionAccountID: subscriptionAccountIDFromPlan(plan),
+					Group:                 plan.Auth.Group,
+					SessionHash:           sessionHash,
+					SessionWindowLimitUSD: sessionWindowLimitUSD,
 					IsStream:              true,
 				}
 				if err := s.commitQuotaAfterResponse(reservation.ReservationId, actualUsage.TotalTokens, true, logInput); err != nil {
@@ -534,6 +580,9 @@ func (s *HTTPServer) executeSubscriptionAccountViaAdaptor(
 				CacheReadTokens:       usage.CacheReadTokens,
 				ChannelID:             plan.Channel.ID,
 				SubscriptionAccountID: subscriptionAccountIDFromPlan(plan),
+				Group:                 plan.Auth.Group,
+				SessionHash:           sessionHash,
+				SessionWindowLimitUSD: sessionWindowLimitUSD,
 			}
 			if err := s.commitQuotaAfterResponse(reservation.ReservationId, usage.TotalTokens, true, logInput); err != nil {
 				s.logPostResponseCommitError(err)
@@ -704,6 +753,12 @@ func subscriptionAdaptorMetricResult(result subscriptionAdaptorResult) string {
 func subscriptionRetryReason(result subscriptionAdaptorResult) string {
 	if result.concurrencyFull {
 		return "concurrency"
+	}
+	if result.rpmFull {
+		return "rpm"
+	}
+	if result.sessionWindowFull {
+		return "session_window"
 	}
 	if result.retryableSameAccount {
 		return "same_account"

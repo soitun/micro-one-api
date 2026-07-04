@@ -642,6 +642,121 @@ func TestHandleChatCompletionsViaAdaptor_ConcurrencyFailover(t *testing.T) {
 	}
 }
 
+func TestHandleChatCompletionsViaAdaptor_RPMFailover(t *testing.T) {
+	selector := &adaptorFailoverChannelClient{
+		accounts: []*relaybiz.SubscriptionAccount{
+			{
+				ID: 43, Name: "second", Platform: "codex", AccountType: "oauth", Status: 1,
+				BaseURL: "https://example.invalid", Group: "default", Models: []string{"gpt-5"},
+				Priority: 10, AccessToken: "second-token", AccountID: "second-account",
+			},
+		},
+	}
+	relayUsecase := relaybiz.NewRelayUsecase(adaptorFailoverIdentity{}, selector, nil, nil)
+	httpServer := NewHTTPServer(nil, nil, nil, nil, relayUsecase)
+	httpServer.SetHybridAdaptorEnabled(true)
+	httpServer.wsPoolCfg.failoverMaxSwitches = 1
+
+	if !httpServer.accountRPM.TryAcquire(context.Background(), 42, 1) {
+		t.Fatal("precondition: first rpm acquire must succeed")
+	}
+
+	var authHeaders []string
+	httpServer.SetOAuthHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			authHeaders = append(authHeaders, req.Header.Get("Authorization"))
+			return newJSONResponse(`{"id":"resp_ok","object":"response","model":"gpt-5","status":"completed","output":[{"type":"message","id":"m","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`), nil
+		}),
+	})
+
+	plan := &relaybiz.RelayPlan{
+		Auth:    &relaybiz.AuthSnapshot{UserID: 42, Group: "default"},
+		Channel: &relaybiz.Channel{ID: 42, Type: relayprovider.ChannelTypeCodexOAuth, BaseURL: "https://example.invalid", Group: "default"},
+		Account: &relaybiz.SubscriptionAccount{
+			ID: 42, Platform: "codex", AccountType: "oauth", Status: 1, BaseURL: "https://example.invalid",
+			Group: "default", Models: []string{"gpt-5"}, Priority: 20, AccessToken: "first-token", AccountID: "first-account",
+			RPMLimit: 1,
+		},
+		ResolvedModel: "gpt-5",
+	}
+	body := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	switchBefore := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("rpm", "switched"))
+	blockBefore := testutil.ToFloat64(metrics.RelayRuntimeBlocksTotal.WithLabelValues("rpm"))
+
+	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(body), "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(authHeaders) != 1 || authHeaders[0] != "Bearer second-token" {
+		t.Fatalf("rpm-limited account must be skipped without an upstream call, got %v", authHeaders)
+	}
+	if delta := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("rpm", "switched")) - switchBefore; delta != 1 {
+		t.Fatalf("rpm failover metric delta = %v, want 1", delta)
+	}
+	if delta := testutil.ToFloat64(metrics.RelayRuntimeBlocksTotal.WithLabelValues("rpm")) - blockBefore; delta != 0 {
+		t.Fatalf("an rpm-limited account must NOT be cooled down, block delta = %v", delta)
+	}
+}
+
+func TestHandleChatCompletionsViaAdaptor_SessionWindowFailover(t *testing.T) {
+	selector := &adaptorFailoverChannelClient{
+		accounts: []*relaybiz.SubscriptionAccount{
+			{
+				ID: 43, Name: "second", Platform: "codex", AccountType: "oauth", Status: 1,
+				BaseURL: "https://example.invalid", Group: "default", Models: []string{"gpt-5"},
+				Priority: 10, AccessToken: "second-token", AccountID: "second-account",
+			},
+		},
+	}
+	relayUsecase := relaybiz.NewRelayUsecase(adaptorFailoverIdentity{}, selector, nil, nil)
+	httpServer := NewHTTPServer(nil, nil, nil, nil, relayUsecase)
+	httpServer.SetHybridAdaptorEnabled(true)
+	httpServer.wsPoolCfg.failoverMaxSwitches = 1
+	httpServer.sessionWindow.RecordUsage(context.Background(), "default", "session-a", 42, "reservation-1", 1, time.Hour)
+
+	var authHeaders []string
+	httpServer.SetOAuthHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			authHeaders = append(authHeaders, req.Header.Get("Authorization"))
+			return newJSONResponse(`{"id":"resp_ok","object":"response","model":"gpt-5","status":"completed","output":[{"type":"message","id":"m","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`), nil
+		}),
+	})
+
+	plan := &relaybiz.RelayPlan{
+		Auth:    &relaybiz.AuthSnapshot{UserID: 42, Group: "default"},
+		Channel: &relaybiz.Channel{ID: 42, Type: relayprovider.ChannelTypeCodexOAuth, BaseURL: "https://example.invalid", Group: "default"},
+		Account: &relaybiz.SubscriptionAccount{
+			ID: 42, Platform: "codex", AccountType: "oauth", Status: 1, BaseURL: "https://example.invalid",
+			Group: "default", Models: []string{"gpt-5"}, Priority: 20, AccessToken: "first-token", AccountID: "first-account",
+			SessionWindowLimitUSD: 1,
+		},
+		ResolvedModel: "gpt-5",
+	}
+	body := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	switchBefore := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("session_window", "switched"))
+	blockBefore := testutil.ToFloat64(metrics.RelayRuntimeBlocksTotal.WithLabelValues("session_window"))
+
+	httpServer.handleChatCompletionsViaAdaptor(rec, req, plan, "gpt-5", []byte(body), "session-a")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(authHeaders) != 1 || authHeaders[0] != "Bearer second-token" {
+		t.Fatalf("session-window-limited account must be skipped without an upstream call, got %v", authHeaders)
+	}
+	if delta := testutil.ToFloat64(metrics.RelaySubscriptionFailoverTotal.WithLabelValues("session_window", "switched")) - switchBefore; delta != 1 {
+		t.Fatalf("session window failover metric delta = %v, want 1", delta)
+	}
+	if delta := testutil.ToFloat64(metrics.RelayRuntimeBlocksTotal.WithLabelValues("session_window")) - blockBefore; delta != 0 {
+		t.Fatalf("a session-window-limited account must NOT be cooled down, block delta = %v", delta)
+	}
+}
+
 // --- session -> subscription-account stickiness bind/rebind (docs #7) ---
 
 func stickyCodexPlan(accountID int64, concurrency int32) *relaybiz.RelayPlan {

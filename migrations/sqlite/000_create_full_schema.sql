@@ -431,20 +431,27 @@ CREATE TABLE IF NOT EXISTS subscription_accounts (
   last_used_at INTEGER NOT NULL DEFAULT 0,
   quota_limit_usd REAL NOT NULL DEFAULT 0,
   quota_used_usd REAL NOT NULL DEFAULT 0,
+  quota_5h_limit_usd REAL NOT NULL DEFAULT 0,
+  quota_5h_used_usd REAL NOT NULL DEFAULT 0,
+  quota_5h_window_start INTEGER NOT NULL DEFAULT 0,
   quota_daily_limit_usd REAL NOT NULL DEFAULT 0,
   quota_daily_used_usd REAL NOT NULL DEFAULT 0,
   quota_daily_window_start INTEGER NOT NULL DEFAULT 0,
   quota_weekly_limit_usd REAL NOT NULL DEFAULT 0,
   quota_weekly_used_usd REAL NOT NULL DEFAULT 0,
   quota_weekly_window_start INTEGER NOT NULL DEFAULT 0,
-  rate_multiplier REAL NOT NULL DEFAULT 1
+  rate_multiplier REAL NOT NULL DEFAULT 1,
+  rpm_limit INTEGER NOT NULL DEFAULT 0,
+  session_window_limit_usd REAL NOT NULL DEFAULT 0,
+  quota_reset_strategy TEXT NOT NULL DEFAULT 'rolling',
+  quota_timezone TEXT NOT NULL DEFAULT 'UTC'
 );
 
 CREATE INDEX IF NOT EXISTS idx_subscription_platform_status ON subscription_accounts(platform, status);
 CREATE INDEX IF NOT EXISTS idx_subscription_group          ON subscription_accounts("group");
 CREATE INDEX IF NOT EXISTS idx_subscription_expires        ON subscription_accounts(expires_at);
 CREATE INDEX IF NOT EXISTS idx_subscription_rate_limited  ON subscription_accounts(rate_limited_until);
-CREATE INDEX IF NOT EXISTS idx_subscription_local_quota   ON subscription_accounts(status, quota_daily_window_start, quota_weekly_window_start);
+CREATE INDEX IF NOT EXISTS idx_subscription_local_quota   ON subscription_accounts(status, quota_5h_window_start, quota_daily_window_start, quota_weekly_window_start);
 
 CREATE TABLE IF NOT EXISTS subscription_account_abilities (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

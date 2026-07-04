@@ -121,6 +121,13 @@ message SubscriptionAccountInfo {
   double quota_weekly_used_usd = 25;  // 本地 7d 滚动已用 USD
   int64 quota_weekly_window_start = 26;
   double rate_multiplier = 27;        // 账号用量倍率(0/1 表示原价)
+  double quota_5h_limit_usd = 28;     // 本地 5h 滚动额度上限 USD(0 表示不限制)
+  double quota_5h_used_usd = 29;      // 本地 5h 滚动已用 USD
+  int64 quota_5h_window_start = 30;
+  int32 rpm_limit = 31;               // 账号级每分钟请求数限制(0 表示不限制)
+  double session_window_limit_usd = 32; // 同一 session_hash 在该账号上的成本上限 USD(0 表示不限制)
+  string quota_reset_strategy = 33;    // 本地日/周额度重置策略: rolling 或 fixed
+  string quota_timezone = 34;          // fixed 策略使用的 IANA 时区，默认 UTC
 }
 
 message SubscriptionAccountSummary {
@@ -158,6 +165,13 @@ message SubscriptionAccountSummary {
   double quota_weekly_used_usd = 32;                      // 本地 7d 滚动已用 USD
   int64 quota_weekly_window_start = 33;
   double rate_multiplier = 34;                            // 账号用量倍率(0/1 表示原价)
+  double quota_5h_limit_usd = 35;                         // 本地 5h 滚动额度上限 USD(0 表示不限制)
+  double quota_5h_used_usd = 36;                          // 本地 5h 滚动已用 USD
+  int64 quota_5h_window_start = 37;
+  int32 rpm_limit = 38;                                   // 账号级每分钟请求数限制(0 表示不限制)
+  double session_window_limit_usd = 39;                   // 同一 session_hash 在该账号上的成本上限 USD(0 表示不限制)
+  string quota_reset_strategy = 40;                       // 本地日/周额度重置策略: rolling 或 fixed
+  string quota_timezone = 41;                             // fixed 策略使用的 IANA 时区，默认 UTC
 }
 
 // ========== 账户快照 ==========

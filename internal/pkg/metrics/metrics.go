@@ -254,6 +254,7 @@ func init() {
 		RelayRuntimeBlocksTotal,
 		RelayRuntimeBlockActive,
 		RelayAccountConcurrencyFallbackTotal,
+		RelayAccountRPMFallbackTotal,
 		RelayAccountPoolChecksTotal,
 		RelayUpstreamPassthroughTotal,
 		RelayCodexQuotaSnapshotsTotal,

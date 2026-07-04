@@ -180,6 +180,13 @@ message CreateSubscriptionAccountRequest {
   double quota_weekly_used_usd = 20;
   int64 quota_weekly_window_start = 21;
   double rate_multiplier = 22;
+  double quota_5h_limit_usd = 23;
+  double quota_5h_used_usd = 24;
+  int64 quota_5h_window_start = 25;
+  int32 rpm_limit = 26;
+  double session_window_limit_usd = 27;
+  string quota_reset_strategy = 28;
+  string quota_timezone = 29;
 }
 
 message CreateSubscriptionAccountResponse {
@@ -211,6 +218,13 @@ message UpdateSubscriptionAccountRequest {
   optional double quota_weekly_used_usd = 20;
   optional int64 quota_weekly_window_start = 21;
   optional double rate_multiplier = 22;
+  optional double quota_5h_limit_usd = 23;
+  optional double quota_5h_used_usd = 24;
+  optional int64 quota_5h_window_start = 25;
+  optional int32 rpm_limit = 26;
+  optional double session_window_limit_usd = 27;
+  optional string quota_reset_strategy = 28;
+  optional string quota_timezone = 29;
 }
 
 message UpdateSubscriptionAccountResponse {
@@ -293,7 +307,7 @@ message AggregateSubscriptionAccountQuotaEventsResponse {
 
 message ResetSubscriptionAccountQuotaRequest {
   int64 account_id = 1;
-  string scope = 2; // total / daily / weekly / all
+  string scope = 2; // total / 5h / daily / weekly / all
 }
 
 message ResetSubscriptionAccountQuotaResponse {

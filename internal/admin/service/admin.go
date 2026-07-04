@@ -829,6 +829,9 @@ func (s *AdminService) CreateSubscriptionAccount(ctx context.Context, req *admin
 		Metadata:               req.Metadata,
 		QuotaLimitUsd:          req.QuotaLimitUsd,
 		QuotaUsedUsd:           req.QuotaUsedUsd,
+		Quota_5HLimitUsd:       req.Quota_5HLimitUsd,
+		Quota_5HUsedUsd:        req.Quota_5HUsedUsd,
+		Quota_5HWindowStart:    req.Quota_5HWindowStart,
 		QuotaDailyLimitUsd:     req.QuotaDailyLimitUsd,
 		QuotaDailyUsedUsd:      req.QuotaDailyUsedUsd,
 		QuotaDailyWindowStart:  req.QuotaDailyWindowStart,
@@ -836,6 +839,10 @@ func (s *AdminService) CreateSubscriptionAccount(ctx context.Context, req *admin
 		QuotaWeeklyUsedUsd:     req.QuotaWeeklyUsedUsd,
 		QuotaWeeklyWindowStart: req.QuotaWeeklyWindowStart,
 		RateMultiplier:         req.RateMultiplier,
+		RpmLimit:               req.RpmLimit,
+		SessionWindowLimitUsd:  req.SessionWindowLimitUsd,
+		QuotaResetStrategy:     req.QuotaResetStrategy,
+		QuotaTimezone:          req.QuotaTimezone,
 	})
 	if err != nil {
 		return &adminv1.AdminCreateSubscriptionAccountResponse{Success: false, Message: err.Error()}, nil
@@ -864,6 +871,9 @@ func (s *AdminService) UpdateSubscriptionAccount(ctx context.Context, req *admin
 		Metadata:               req.Metadata,
 		QuotaLimitUsd:          req.QuotaLimitUsd,
 		QuotaUsedUsd:           req.QuotaUsedUsd,
+		Quota_5HLimitUsd:       req.Quota_5HLimitUsd,
+		Quota_5HUsedUsd:        req.Quota_5HUsedUsd,
+		Quota_5HWindowStart:    req.Quota_5HWindowStart,
 		QuotaDailyLimitUsd:     req.QuotaDailyLimitUsd,
 		QuotaDailyUsedUsd:      req.QuotaDailyUsedUsd,
 		QuotaDailyWindowStart:  req.QuotaDailyWindowStart,
@@ -871,6 +881,10 @@ func (s *AdminService) UpdateSubscriptionAccount(ctx context.Context, req *admin
 		QuotaWeeklyUsedUsd:     req.QuotaWeeklyUsedUsd,
 		QuotaWeeklyWindowStart: req.QuotaWeeklyWindowStart,
 		RateMultiplier:         req.RateMultiplier,
+		RpmLimit:               req.RpmLimit,
+		SessionWindowLimitUsd:  req.SessionWindowLimitUsd,
+		QuotaResetStrategy:     req.QuotaResetStrategy,
+		QuotaTimezone:          req.QuotaTimezone,
 	})
 	if err != nil {
 		return &adminv1.AdminUpdateSubscriptionAccountResponse{Success: false, Message: err.Error()}, nil

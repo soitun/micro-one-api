@@ -101,6 +101,9 @@ type subscriptionAccountModel struct {
 
 	QuotaLimitUSD          float64 `gorm:"column:quota_limit_usd"`
 	QuotaUsedUSD           float64 `gorm:"column:quota_used_usd"`
+	Quota5hLimitUSD        float64 `gorm:"column:quota_5h_limit_usd"`
+	Quota5hUsedUSD         float64 `gorm:"column:quota_5h_used_usd"`
+	Quota5hWindowStart     int64   `gorm:"column:quota_5h_window_start"`
 	QuotaDailyLimitUSD     float64 `gorm:"column:quota_daily_limit_usd"`
 	QuotaDailyUsedUSD      float64 `gorm:"column:quota_daily_used_usd"`
 	QuotaDailyWindowStart  int64   `gorm:"column:quota_daily_window_start"`
@@ -108,6 +111,10 @@ type subscriptionAccountModel struct {
 	QuotaWeeklyUsedUSD     float64 `gorm:"column:quota_weekly_used_usd"`
 	QuotaWeeklyWindowStart int64   `gorm:"column:quota_weekly_window_start"`
 	RateMultiplier         float64 `gorm:"column:rate_multiplier"`
+	RPMLimit               int32   `gorm:"column:rpm_limit"`
+	SessionWindowLimitUSD  float64 `gorm:"column:session_window_limit_usd"`
+	QuotaResetStrategy     string  `gorm:"column:quota_reset_strategy"`
+	QuotaTimezone          string  `gorm:"column:quota_timezone"`
 }
 
 func (subscriptionAccountModel) TableName() string { return "subscription_accounts" }
@@ -839,6 +846,9 @@ func (r *Repository) updateSubscriptionAccountDB(ctx context.Context, account *b
 			"metadata":                  model.Metadata,
 			"quota_limit_usd":           model.QuotaLimitUSD,
 			"quota_used_usd":            model.QuotaUsedUSD,
+			"quota_5h_limit_usd":        model.Quota5hLimitUSD,
+			"quota_5h_used_usd":         model.Quota5hUsedUSD,
+			"quota_5h_window_start":     model.Quota5hWindowStart,
 			"quota_daily_limit_usd":     model.QuotaDailyLimitUSD,
 			"quota_daily_used_usd":      model.QuotaDailyUsedUSD,
 			"quota_daily_window_start":  model.QuotaDailyWindowStart,
@@ -846,6 +856,10 @@ func (r *Repository) updateSubscriptionAccountDB(ctx context.Context, account *b
 			"quota_weekly_used_usd":     model.QuotaWeeklyUsedUSD,
 			"quota_weekly_window_start": model.QuotaWeeklyWindowStart,
 			"rate_multiplier":           model.RateMultiplier,
+			"rpm_limit":                 model.RPMLimit,
+			"session_window_limit_usd":  model.SessionWindowLimitUSD,
+			"quota_reset_strategy":      model.QuotaResetStrategy,
+			"quota_timezone":            model.QuotaTimezone,
 			"updated_at":                model.UpdatedAt,
 		}).Error; err != nil {
 			return err
@@ -984,6 +998,8 @@ func (r *Repository) recordSubscriptionAccountQuotaUsageDB(ctx context.Context, 
 		applySubscriptionAccountQuotaUsage(account, usage.CostUSD, usage.OccurredAt)
 		return tx.Model(&subscriptionAccountModel{}).Where("id = ?", usage.AccountID).Updates(map[string]interface{}{
 			"quota_used_usd":            account.QuotaUsedUSD,
+			"quota_5h_used_usd":         account.Quota5hUsedUSD,
+			"quota_5h_window_start":     account.Quota5hWindowStart,
 			"quota_daily_used_usd":      account.QuotaDailyUsedUSD,
 			"quota_daily_window_start":  account.QuotaDailyWindowStart,
 			"quota_weekly_used_usd":     account.QuotaWeeklyUsedUSD,
@@ -1563,6 +1579,9 @@ func (r *Repository) subscriptionAccountModelToBiz(m *subscriptionAccountModel) 
 		Concurrency:            m.Concurrency,
 		QuotaLimitUSD:          m.QuotaLimitUSD,
 		QuotaUsedUSD:           m.QuotaUsedUSD,
+		Quota5hLimitUSD:        m.Quota5hLimitUSD,
+		Quota5hUsedUSD:         m.Quota5hUsedUSD,
+		Quota5hWindowStart:     m.Quota5hWindowStart,
 		QuotaDailyLimitUSD:     m.QuotaDailyLimitUSD,
 		QuotaDailyUsedUSD:      m.QuotaDailyUsedUSD,
 		QuotaDailyWindowStart:  m.QuotaDailyWindowStart,
@@ -1570,6 +1589,10 @@ func (r *Repository) subscriptionAccountModelToBiz(m *subscriptionAccountModel) 
 		QuotaWeeklyUsedUSD:     m.QuotaWeeklyUsedUSD,
 		QuotaWeeklyWindowStart: m.QuotaWeeklyWindowStart,
 		RateMultiplier:         m.RateMultiplier,
+		RPMLimit:               m.RPMLimit,
+		SessionWindowLimitUSD:  m.SessionWindowLimitUSD,
+		QuotaResetStrategy:     m.QuotaResetStrategy,
+		QuotaTimezone:          m.QuotaTimezone,
 		LastError:              subscriptionAccountMetadataValue(derefString(m.Metadata), "last_error"),
 	}
 }
@@ -1600,6 +1623,9 @@ func (r *Repository) subscriptionAccountBizToModel(a *biz.SubscriptionAccount) *
 		Concurrency:            a.Concurrency,
 		QuotaLimitUSD:          a.QuotaLimitUSD,
 		QuotaUsedUSD:           a.QuotaUsedUSD,
+		Quota5hLimitUSD:        a.Quota5hLimitUSD,
+		Quota5hUsedUSD:         a.Quota5hUsedUSD,
+		Quota5hWindowStart:     a.Quota5hWindowStart,
 		QuotaDailyLimitUSD:     a.QuotaDailyLimitUSD,
 		QuotaDailyUsedUSD:      a.QuotaDailyUsedUSD,
 		QuotaDailyWindowStart:  a.QuotaDailyWindowStart,
@@ -1607,6 +1633,10 @@ func (r *Repository) subscriptionAccountBizToModel(a *biz.SubscriptionAccount) *
 		QuotaWeeklyUsedUSD:     a.QuotaWeeklyUsedUSD,
 		QuotaWeeklyWindowStart: a.QuotaWeeklyWindowStart,
 		RateMultiplier:         a.RateMultiplier,
+		RPMLimit:               a.RPMLimit,
+		SessionWindowLimitUSD:  a.SessionWindowLimitUSD,
+		QuotaResetStrategy:     a.EffectiveQuotaResetStrategy(),
+		QuotaTimezone:          a.EffectiveQuotaTimezone(),
 	}
 }
 
@@ -1617,8 +1647,14 @@ func applySubscriptionAccountQuotaUsage(account *biz.SubscriptionAccount, costUS
 	nowUnix := occurredAt.Unix()
 	chargedUSD := costUSD * account.EffectiveRateMultiplier()
 	account.QuotaUsedUSD += chargedUSD
-	account.QuotaDailyUsedUSD, account.QuotaDailyWindowStart = incrementWindowUsage(account.QuotaDailyUsedUSD, account.QuotaDailyWindowStart, chargedUSD, nowUnix, 24*time.Hour)
-	account.QuotaWeeklyUsedUSD, account.QuotaWeeklyWindowStart = incrementWindowUsage(account.QuotaWeeklyUsedUSD, account.QuotaWeeklyWindowStart, chargedUSD, nowUnix, 7*24*time.Hour)
+	account.Quota5hUsedUSD, account.Quota5hWindowStart = incrementWindowUsage(account.Quota5hUsedUSD, account.Quota5hWindowStart, chargedUSD, nowUnix, 5*time.Hour)
+	if account.UsesFixedQuotaReset() {
+		account.QuotaDailyUsedUSD, account.QuotaDailyWindowStart = incrementFixedWindowUsage(account, account.QuotaDailyUsedUSD, account.QuotaDailyWindowStart, chargedUSD, occurredAt, "daily")
+		account.QuotaWeeklyUsedUSD, account.QuotaWeeklyWindowStart = incrementFixedWindowUsage(account, account.QuotaWeeklyUsedUSD, account.QuotaWeeklyWindowStart, chargedUSD, occurredAt, "weekly")
+	} else {
+		account.QuotaDailyUsedUSD, account.QuotaDailyWindowStart = incrementWindowUsage(account.QuotaDailyUsedUSD, account.QuotaDailyWindowStart, chargedUSD, nowUnix, 24*time.Hour)
+		account.QuotaWeeklyUsedUSD, account.QuotaWeeklyWindowStart = incrementWindowUsage(account.QuotaWeeklyUsedUSD, account.QuotaWeeklyWindowStart, chargedUSD, nowUnix, 7*24*time.Hour)
+	}
 	account.LastUsedAt = nowUnix
 	account.UpdatedAt = time.Now().Unix()
 }
@@ -1630,6 +1666,14 @@ func incrementWindowUsage(used float64, windowStart int64, delta float64, nowUni
 	return used + delta, windowStart
 }
 
+func incrementFixedWindowUsage(account *biz.SubscriptionAccount, used float64, windowStart int64, delta float64, now time.Time, scope string) (float64, int64) {
+	fixedStart := account.FixedQuotaWindowStart(now, scope)
+	if windowStart < fixedStart || windowStart > now.Unix() {
+		return delta, fixedStart
+	}
+	return used + delta, fixedStart
+}
+
 func resetSubscriptionAccountQuota(account *biz.SubscriptionAccount, scope string) {
 	if account == nil {
 		return
@@ -1637,6 +1681,9 @@ func resetSubscriptionAccountQuota(account *biz.SubscriptionAccount, scope strin
 	switch scope {
 	case "total":
 		account.QuotaUsedUSD = 0
+	case "5h":
+		account.Quota5hUsedUSD = 0
+		account.Quota5hWindowStart = 0
 	case "daily":
 		account.QuotaDailyUsedUSD = 0
 		account.QuotaDailyWindowStart = 0
@@ -1645,6 +1692,8 @@ func resetSubscriptionAccountQuota(account *biz.SubscriptionAccount, scope strin
 		account.QuotaWeeklyWindowStart = 0
 	case "all":
 		account.QuotaUsedUSD = 0
+		account.Quota5hUsedUSD = 0
+		account.Quota5hWindowStart = 0
 		account.QuotaDailyUsedUSD = 0
 		account.QuotaDailyWindowStart = 0
 		account.QuotaWeeklyUsedUSD = 0
@@ -1661,6 +1710,8 @@ func subscriptionAccountQuotaResetUpdates(scope string) map[string]interface{} {
 	switch scope {
 	case "total":
 		return map[string]interface{}{"quota_used_usd": 0}
+	case "5h":
+		return map[string]interface{}{"quota_5h_used_usd": 0, "quota_5h_window_start": 0}
 	case "daily":
 		return map[string]interface{}{"quota_daily_used_usd": 0, "quota_daily_window_start": 0}
 	case "weekly":
@@ -1668,6 +1719,8 @@ func subscriptionAccountQuotaResetUpdates(scope string) map[string]interface{} {
 	case "all":
 		return map[string]interface{}{
 			"quota_used_usd":            0,
+			"quota_5h_used_usd":         0,
+			"quota_5h_window_start":     0,
 			"quota_daily_used_usd":      0,
 			"quota_daily_window_start":  0,
 			"quota_weekly_used_usd":     0,

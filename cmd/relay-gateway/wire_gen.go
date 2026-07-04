@@ -353,6 +353,9 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 		if redisLimiter := relaybiz.NewRedisAccountConcurrencyLimiter(redisClient); redisLimiter != nil {
 			httpServer.SetAccountConcurrencyLimiter(redisLimiter)
 		}
+		if redisRPMLimiter := relaybiz.NewRedisAccountRPMLimiter(redisClient); redisRPMLimiter != nil {
+			httpServer.SetAccountRPMLimiter(redisRPMLimiter)
+		}
 	}
 	var routeMiddleware []func(http.Handler) http.Handler
 	if cfg.Subscription.GetSubscriptionEnabled() {

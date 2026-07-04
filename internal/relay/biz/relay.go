@@ -96,6 +96,10 @@ type SubscriptionAccount struct {
 	// (memory or Redis-backed AccountConcurrencyLimiter) so a single
 	// subscription account is not saturated into upstream 429s.
 	Concurrency int32
+	// RPMLimit is the maximum number of relay dispatch attempts this account
+	// will serve per rolling minute. 0 means unlimited.
+	RPMLimit              int32
+	SessionWindowLimitUSD float64
 }
 
 // RelayPlan is the result of relay planning, containing all resolved

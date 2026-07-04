@@ -93,19 +93,21 @@ func (c *channelClient) SelectSubscriptionAccount(ctx context.Context, group, mo
 		return nil, nil
 	}
 	return &biz.SubscriptionAccount{
-		ID:          info.GetId(),
-		Name:        info.GetName(),
-		Platform:    info.GetPlatform(),
-		AccountType: info.GetAccountType(),
-		Status:      info.GetStatus(),
-		BaseURL:     info.GetBaseUrl(),
-		Group:       info.GetGroup(),
-		Models:      splitCSV(info.GetModels()),
-		Priority:    info.GetPriority(),
-		AccessToken: info.GetAccessToken(),
-		AccountID:   info.GetAccountId(),
-		Fingerprint: info.GetFingerprint(),
-		Concurrency: info.GetConcurrency(),
+		ID:                    info.GetId(),
+		Name:                  info.GetName(),
+		Platform:              info.GetPlatform(),
+		AccountType:           info.GetAccountType(),
+		Status:                info.GetStatus(),
+		BaseURL:               info.GetBaseUrl(),
+		Group:                 info.GetGroup(),
+		Models:                splitCSV(info.GetModels()),
+		Priority:              info.GetPriority(),
+		AccessToken:           info.GetAccessToken(),
+		AccountID:             info.GetAccountId(),
+		Fingerprint:           info.GetFingerprint(),
+		Concurrency:           info.GetConcurrency(),
+		RPMLimit:              info.GetRpmLimit(),
+		SessionWindowLimitUSD: info.GetSessionWindowLimitUsd(),
 	}, nil
 }
 

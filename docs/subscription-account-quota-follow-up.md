@@ -17,16 +17,23 @@
 
 - `subscription_accounts` 增加本地额度字段：
   - `quota_limit_usd` / `quota_used_usd`
+  - `quota_5h_limit_usd` / `quota_5h_used_usd` / `quota_5h_window_start`
   - `quota_daily_limit_usd` / `quota_daily_used_usd` / `quota_daily_window_start`
   - `quota_weekly_limit_usd` / `quota_weekly_used_usd` / `quota_weekly_window_start`
+  - `quota_reset_strategy` / `quota_timezone`
+  - `rpm_limit`
+  - `session_window_limit_usd`
   - `rate_multiplier`
-- `SelectSubscriptionAccount` 会跳过本地总额、24h、7d 任一耗尽的账号。
+- `SelectSubscriptionAccount` 会跳过本地总额、5h、24h、7d 任一耗尽的账号。默认日/周额度是滚动 24h/7d；`quota_reset_strategy=fixed` 时日/周额度按 `quota_timezone` 的自然日/自然周重置。
+- relay-gateway 会在订阅账号出站前按 `rpm_limit` 做 60 秒滚动 RPM 限制，超限账号只在本次请求内 failover，不触发 runtime cooldown。
+- relay-gateway 会按 `session_hash + account_id` 记录 session 成本窗口；同一会话在某账号达到 `session_window_limit_usd` 后跳过该账号，不触发 runtime cooldown。
 - relay-gateway 在 billing commit 成功后，按 `CommitQuotaResponse.committed_amount` 折算 USD，调用 channel-service 回写账号用量。
 - channel-service 按 `cost_usd * rate_multiplier` 累计账号本地用量。
 - `subscription_account_quota_events` 记录账号额度回写事件，按 `reservation_id + subscription_account_id + cost_source` 幂等去重，并保存账号倍率快照。
 - channel-service 暴露账号额度事件聚合，admin summary / 成本分析页可以按 `subscription_account_id` 对照 ledger 消费与账号侧额度事件。
 - admin 订阅账号页面可以查看、编辑额度/倍率，并可重置本地用量。
-- 新增管理接口：`POST /v1/subscription-accounts/{account_id}/reset-quota`，`scope` 支持 `total`、`daily`、`weekly`、`all`。
+- 新增管理接口：`POST /v1/subscription-accounts/{account_id}/reset-quota`，`scope` 支持 `total`、`5h`、`daily`、`weekly`、`all`。
+- 第四阶段已补 5h 成本窗口、RPM、session 成本窗口、固定重置周期和时区配置。
 
 ## 关键文件
 
@@ -36,18 +43,28 @@
   - `SubscriptionAccount` 持有本地额度字段。
   - `IsSchedulableAt` 会调用 `LocalQuotaExceededAt`。
   - `RecordSubscriptionAccountQuotaUsage` 和 `ResetSubscriptionAccountQuota` 是 channel usecase 入口。
+- `internal/relay/biz/account_rpm.go`
+  - `MemoryAccountRPMLimiter` / `RedisAccountRPMLimiter` 按账号限制每分钟请求数。
+  - Redis 可用时多 relay 副本共享 RPM 窗口，Redis 异常时降级到进程内 limiter。
+- `internal/relay/server/subscription_session_window.go`
+  - 按 `group + session_hash + account_id` 记录 session 成本窗口。
+  - 使用 `reservation_id` 幂等去重；Redis 可用时跨 relay 副本共享，异常时降级到进程内窗口。
 
 数据库和迁移：
 
 - `migrations/051_add_subscription_account_local_quota.sql`
 - `migrations/052_create_subscription_account_quota_events.sql`
+- `migrations/053_add_subscription_account_5h_quota.sql`
+- `migrations/054_add_subscription_account_rpm_limit.sql`
+- `migrations/055_add_subscription_account_session_window_limit.sql`
+- `migrations/056_add_subscription_account_quota_reset_config.sql`
 - `migrations/postgres/000_create_full_schema.sql`
 - `migrations/sqlite/000_create_full_schema.sql`
 - `internal/channel/data/data.go`
   - `recordSubscriptionAccountQuotaUsageDB` 使用行锁读取账号并累计用量。
   - `subscription_account_quota_events` 在同一事务内插入，重复事件不再次累计账号用量。
   - `AggregateSubscriptionAccountQuotaEvents` 按账号汇总 `cost_usd`、`charged_usd`、平均倍率、事件数和最近发生时间。
-  - daily 窗口为滚动 24h，weekly 窗口为滚动 7d。
+  - 5h 窗口固定为滚动 5h；daily / weekly 默认滚动 24h、7d，`quota_reset_strategy=fixed` 时按 `quota_timezone` 的 00:00 和周一 00:00 重置，非法时区回退 `UTC`。
 
 RPC / API：
 
@@ -68,13 +85,14 @@ relay 回写：
 - `internal/relay/server/http.go`
   - `commitQuotaWithResponse` 保留 billing commit 响应。
   - `recordSubscriptionAccountQuotaUsage` 回写 channel-service。
+  - `recordSubscriptionSessionWindowUsage` 在 commit 成功后记录 session 成本窗口。
 - `internal/relay/server/openai_ws_forwarder.go`
   - WebSocket 多轮提交时补齐 `SubscriptionAccountID`。
 
 管理端：
 
 - `web/src/pages/admin/SubscriptionAccountsPage.tsx`
-  - 列表展示本地总额、24h、7d 用量。
+  - 列表展示本地总额、5h、24h、7d、RPM、session 窗口用量配置。
   - 创建/编辑支持额度和倍率。
   - 单账号支持重置用量。
 - `web/src/pages/admin/CostAnalysisPage.tsx`
@@ -84,19 +102,24 @@ relay 回写：
 ## 当前数据流
 
 1. relay-gateway 完成选路，订阅账号请求会带上 `subscription_account_id`。
-2. 请求成功后，relay-gateway 调用 billing-service `CommitQuota`。
-3. billing-service 返回 `committed_amount`、`subscription_cost`、`balance_cost`。
-4. relay-gateway 用 `committed_amount` 经 `quotaToUSD` 折算成本。
-5. relay-gateway 调用 channel-service `RecordSubscriptionAccountQuotaUsage(account_id, cost_usd, reservation_id, cost_source)`。
-6. channel-service 先按 `reservation_id + subscription_account_id + cost_source` 插入 `subscription_account_quota_events`：
+2. relay-gateway 在出站前检查账号并发、`rpm_limit` 和 `session_window_limit_usd`：
+   - 并发满、RPM 满或当前 session 对该账号的成本窗口满时，跳过该账号并尝试同优先级/下一优先级账号。
+   - RPM 限制是请求数窗口，不写入 5h / 24h / 7d 成本统计。
+   - session 窗口按 `session_hash + account_id` 记录成本，不写入账号 5h / 24h / 7d 成本统计。
+3. 请求成功后，relay-gateway 调用 billing-service `CommitQuota`。
+4. billing-service 返回 `committed_amount`、`subscription_cost`、`balance_cost`。
+5. relay-gateway 用 `committed_amount` 经 `quotaToUSD` 折算成本。
+6. relay-gateway 调用 channel-service `RecordSubscriptionAccountQuotaUsage(account_id, cost_usd, reservation_id, cost_source)`，并按 `session_hash + account_id` 记录 session 窗口成本。
+7. channel-service 先按 `reservation_id + subscription_account_id + cost_source` 插入 `subscription_account_quota_events`：
    - 新事件保存 `cost_usd`、`charged_usd`、`rate_multiplier`、`occurred_at`。
    - 重复事件直接返回，不再次累计账号用量。
-7. channel-service 在 `subscription_accounts` 上累计：
+8. channel-service 在 `subscription_accounts` 上累计：
    - 总用量：一直累加。
-   - 24h 用量：窗口为空或超过 24h 时重开窗口。
-   - 7d 用量：窗口为空或超过 7d 时重开窗口。
-8. 后台成本分析通过 billing ledger 聚合和 channel 事件聚合，按 `subscription_account_id` 对照用户消费、ledger 成本和账号侧本地扣减。
-9. 下一次选路时，channel-service 会跳过本地额度耗尽的账号。
+   - 5h 用量：窗口为空或超过 5h 时重开窗口。
+   - 24h 用量：默认窗口为空或超过 24h 时重开窗口；fixed 策略下按配置时区自然日累计。
+   - 7d 用量：默认窗口为空或超过 7d 时重开窗口；fixed 策略下按配置时区周一 00:00 起的自然周累计。
+9. 后台成本分析通过 billing ledger 聚合和 channel 事件聚合，按 `subscription_account_id` 对照用户消费、ledger 成本和账号侧本地扣减。
+10. 下一次选路时，channel-service 会跳过本地额度耗尽的账号。
 
 ## 已知边界
 
@@ -190,33 +213,42 @@ relay 回写：
 - Redis acquire 异常时回落到内存 limiter，请求不会因 Redis 异常被全局阻断。
 - runtime blocker Redis 共享、过期和 fail-open 已有单元测试覆盖。
 
-### 4. 更细的上游窗口策略
+### 4. 更细的上游窗口策略（5h / RPM / session window / fixed reset 已完成）
 
 目标：如果运营需要，补 sub2api 风格的 5h 成本窗口、RPM、会话窗口等策略。
 
 现状：
 
-- 本地额度有总额、滚动 24h、滚动 7d。
+- 本地额度有总额、滚动 5h，以及可配置为滚动或固定周期的 daily / weekly。
+- `quota_reset_strategy` 支持 `rolling` / `fixed`，默认 `rolling` 保持兼容。
+- `quota_timezone` 是 fixed 策略使用的 IANA 时区，默认 `UTC`，非法时区回退 `UTC`。
+- fixed 策略下 daily 在配置时区 00:00 重置，weekly 在配置时区周一 00:00 重置。
+- relay-gateway 支持账号级 60 秒滚动 RPM 限制。
+- relay-gateway 支持同一 `session_hash` 在同一账号上的成本窗口限制。
 - Codex 5h/7d 快照已通过 `account_quota_snapshots` 独立记录。
-- 尚未支持账号级 RPM、会话窗口成本、固定重置周期或时区配置。
 
 建议：
 
 - 先确认真实运营需求，不要直接把所有 sub2api 字段搬进调度热路径。
 - 如果要做，优先从只读展示和告警开始，再进入调度排除。
 
-可能字段：
+已实现字段：
 
 - `quota_5h_limit_usd`
 - `quota_5h_used_usd`
 - `quota_5h_window_start`
 - `rpm_limit`
 - `session_window_limit_usd`
+- `quota_reset_strategy`
+- `quota_timezone`
 
 验证：
 
 - 同一账号在 5h 窗口耗尽后被跳过，窗口过期后恢复。
 - RPM 限制只影响当前短窗口，不污染 daily/weekly 统计。
+- 同一账号 RPM 满后不请求上游、不触发 runtime cooldown，并 failover 到 sibling 账号。
+- 同一 session 在某账号达到 session 窗口成本上限后不请求该账号、不触发 runtime cooldown，并 failover 到 sibling 账号。
+- fixed daily / weekly 会按配置时区边界重置，weekly 以周一 00:00 为周期起点。
 
 ### 5. 管理端批量能力
 

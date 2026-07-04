@@ -95,6 +95,18 @@ var RelayAccountConcurrencyFallbackTotal = prometheus.NewCounterVec(
 	[]string{"reason"},
 )
 
+// RelayAccountRPMFallbackTotal counts Redis-backed account-RPM operations that
+// fell back or degraded because Redis returned an error.
+var RelayAccountRPMFallbackTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "micro_one_api",
+		Subsystem: "relay",
+		Name:      "account_rpm_fallback_total",
+		Help:      "Total number of Redis account-RPM operations that degraded due to Redis errors",
+	},
+	[]string{"reason"},
+)
+
 // RelayAccountPoolChecksTotal counts local subscription-account schedulability checks.
 var RelayAccountPoolChecksTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
