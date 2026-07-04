@@ -11,10 +11,16 @@ service ChannelService {
   rpc SelectSubscriptionAccount(SelectSubscriptionAccountRequest) returns (SelectSubscriptionAccountReply);
   rpc GetSubscriptionAccount(GetSubscriptionAccountRequest) returns (GetSubscriptionAccountReply);
   rpc ListSubscriptionAccounts(ListSubscriptionAccountsRequest) returns (ListSubscriptionAccountsResponse);
+  rpc ListOAuthRefreshCandidates(ListOAuthRefreshCandidatesRequest) returns (ListOAuthRefreshCandidatesResponse);
+  rpc ClearSubscriptionAccountError(ClearSubscriptionAccountErrorRequest) returns (ClearSubscriptionAccountErrorResponse);
+  rpc SetSubscriptionAccountError(SetSubscriptionAccountErrorRequest) returns (SetSubscriptionAccountErrorResponse);
+  rpc SetTempUnschedulable(SetTempUnschedulableRequest) returns (SetTempUnschedulableResponse);
+  rpc ClearTempUnschedulable(ClearTempUnschedulableRequest) returns (ClearTempUnschedulableResponse);
   rpc CreateSubscriptionAccount(CreateSubscriptionAccountRequest) returns (CreateSubscriptionAccountResponse);
   rpc UpdateSubscriptionAccount(UpdateSubscriptionAccountRequest) returns (UpdateSubscriptionAccountResponse);
   rpc DeleteSubscriptionAccount(DeleteSubscriptionAccountRequest) returns (DeleteSubscriptionAccountResponse);
   rpc ChangeSubscriptionAccountStatus(ChangeSubscriptionAccountStatusRequest) returns (ChangeSubscriptionAccountStatusResponse);
+  rpc RecordAccountQuotaSnapshot(RecordAccountQuotaSnapshotRequest) returns (RecordAccountQuotaSnapshotResponse);
   rpc GetChannel(GetChannelRequest) returns (GetChannelReply);
   rpc ListAvailableModels(ListAvailableModelsRequest) returns (ListAvailableModelsReply);
   rpc ListChannels(ListChannelsRequest) returns (ListChannelsResponse);
@@ -101,6 +107,53 @@ message ListSubscriptionAccountsResponse {
   int64 total = 2;
 }
 
+message ListOAuthRefreshCandidatesRequest {
+  int64 within_seconds = 1;
+}
+
+message ListOAuthRefreshCandidatesResponse {
+  repeated int64 account_ids = 1;
+}
+
+message ClearSubscriptionAccountErrorRequest {
+  int64 account_id = 1;
+}
+
+message ClearSubscriptionAccountErrorResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message SetSubscriptionAccountErrorRequest {
+  int64 account_id = 1;
+  string message = 2;
+}
+
+message SetSubscriptionAccountErrorResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message SetTempUnschedulableRequest {
+  int64 account_id = 1;
+  int64 until = 2;
+  string reason = 3;
+}
+
+message SetTempUnschedulableResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ClearTempUnschedulableRequest {
+  int64 account_id = 1;
+}
+
+message ClearTempUnschedulableResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 message CreateSubscriptionAccountRequest {
   string name = 1;
   string platform = 2;
@@ -159,6 +212,27 @@ message ChangeSubscriptionAccountStatusRequest {
 }
 
 message ChangeSubscriptionAccountStatusResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// RecordAccountQuotaSnapshotRequest upserts a Codex 5h/7d upstream quota
+// snapshot for an account. Optional fields are absent when the upstream did not
+// report that window. updated_at is unix seconds.
+message RecordAccountQuotaSnapshotRequest {
+  int64 account_id = 1;
+  optional double primary_used_percent = 2;
+  optional int32 primary_reset_after_seconds = 3;
+  optional int32 primary_window_minutes = 4;
+  optional double secondary_used_percent = 5;
+  optional int32 secondary_reset_after_seconds = 6;
+  optional int32 secondary_window_minutes = 7;
+  optional double primary_over_secondary_percent = 8;
+  int64 updated_at = 9;
+  bool snapshot_paused = 10;
+}
+
+message RecordAccountQuotaSnapshotResponse {
   bool success = 1;
   string message = 2;
 }

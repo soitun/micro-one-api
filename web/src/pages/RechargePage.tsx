@@ -2,16 +2,19 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Check, ChevronRight, CreditCard, Loader2, ShieldCheck, WalletCards } from 'lucide-react';
 import { toast } from 'sonner';
+import { PurchasablePlansSection } from '@/components/PurchasablePlansSection';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api';
 import { unwrapApiData } from '@/lib/api-response';
+import { amountUnitsToCurrencyUnits } from '@/lib/amount';
 import { cn } from '@/lib/utils';
 
-const RATE = 10;
+const DEFAULT_RECHARGE_AMOUNT_MULTIPLIER = 10;
+const RATE = rechargeAmountMultiplier();
 const PRESET_AMOUNTS = [2, 10, 20, 50, 100];
 
 interface AccountDashboard {
-  quota?: number;
+  balance?: number;
 }
 
 interface PaymentOrder {
@@ -34,14 +37,16 @@ function formatCny(value: number) {
 }
 
 function formatUsd(value: number) {
-  return `$ ${value.toFixed(2)}`;
+  return `$ ${value.toFixed(4)}`;
 }
 
-function quotaToUsd(value?: number) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return 0;
-  }
-  return value / 500000;
+function amountUnitsToUsd(value?: number) {
+  return amountUnitsToCurrencyUnits(value);
+}
+
+function rechargeAmountMultiplier() {
+  const parsed = Number(import.meta.env.VITE_RECHARGE_AMOUNT_MULTIPLIER ?? DEFAULT_RECHARGE_AMOUNT_MULTIPLIER);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_RECHARGE_AMOUNT_MULTIPLIER;
 }
 
 function normalizeAmount(value: string) {
@@ -140,7 +145,7 @@ export function RechargePage() {
           <h2 className="text-lg font-black text-slate-950 dark:text-white">快捷金额</h2>
           <div className="hidden items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-black text-emerald-600 sm:flex dark:bg-emerald-500/10 dark:text-emerald-300">
             <WalletCards className="size-4" />
-            当前余额 {formatUsd(quotaToUsd(dashboard?.quota))}
+            当前余额 {formatUsd(amountUnitsToUsd(dashboard?.balance))}
           </div>
         </div>
 
@@ -227,6 +232,10 @@ export function RechargePage() {
             <div className="mt-3 text-lg font-black text-slate-950 dark:text-white">1 CNY = {RATE} USD</div>
           </div>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-card">
+        <PurchasablePlansSection />
       </section>
 
       <div className="fixed inset-x-4 bottom-4 z-10 md:left-[19rem] md:right-8 xl:right-10">

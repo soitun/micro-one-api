@@ -15,6 +15,8 @@ import (
 	relaybiz "micro-one-api/internal/relay/biz"
 	relaydata "micro-one-api/internal/relay/data"
 	relayprovider "micro-one-api/internal/relay/provider"
+	subscriptionbiz "micro-one-api/internal/subscription/biz"
+	subscriptiondata "micro-one-api/internal/subscription/data"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
@@ -184,12 +186,12 @@ func TestHTTPServerUsageReturnsBalanceForAPIKey(t *testing.T) {
 		nil,
 		&rawBillingClient{accountSnapshot: &commonv1.AccountSnapshot{
 			UserId:       "42",
-			Quota:        1000000,
-			UsedQuota:    250000,
+			Balance:      10001000000,
+			UsedAmount:   250000,
 			RequestCount: 9,
 			Group:        "default",
 			GroupRatio:   1,
-			FrozenQuota:  50000,
+			FrozenAmount: 50000,
 		}},
 		nil,
 		nil,
@@ -224,10 +226,10 @@ func TestHTTPServerUsageReturnsBalanceForAPIKey(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v, body=%s", err, rec.Body.String())
 	}
-	if body.Mode != "unrestricted" || !body.IsValid || body.Remaining != 2 || body.Balance != 2 || body.Unit != "USD" || body.PlanName != "钱包余额" {
+	if body.Mode != "unrestricted" || !body.IsValid || body.Remaining != 1000100 || body.Balance != 1000100 || body.Unit != "USD" || body.PlanName != "钱包余额" {
 		t.Fatalf("usage summary mismatch: %+v", body)
 	}
-	if body.Quota.Remaining != 1000000 || body.Quota.Used != 250000 || body.Quota.Frozen != 50000 || body.Quota.Unit != "quota" || body.Quota.PerUSD != 500000 {
+	if body.Quota.Remaining != 10001000000 || body.Quota.Used != 250000 || body.Quota.Frozen != 50000 || body.Quota.Unit != "quota" || body.Quota.PerUSD != 10000 {
 		t.Fatalf("quota mismatch: %+v", body.Quota)
 	}
 }
@@ -836,6 +838,34 @@ func TestHTTPServerBillingMutationsIgnoreCanceledRequestContext(t *testing.T) {
 	}
 	if billingClient.commits != 1 || billingClient.releases != 1 {
 		t.Fatalf("billing mutations = commits:%d releases:%d, want 1/1", billingClient.commits, billingClient.releases)
+	}
+}
+
+func TestHTTPServerCommitQuotaSkipsRelaySubscriptionUsage(t *testing.T) {
+	t.Setenv("PAYMENT_QUOTA_PER_UNIT", "100")
+	billingClient := &rawBillingClient{failOnCanceledContext: true}
+	repo := subscriptiondata.NewMemoryRepositoryForTest()
+	group := &subscriptionbiz.SubscriptionGroup{Name: "pro", Platform: "openai", Status: subscriptionbiz.SubscriptionGroupStatusEnabled}
+	if err := repo.CreateGroup(context.Background(), group); err != nil {
+		t.Fatalf("CreateGroup() error = %v", err)
+	}
+	uc := subscriptionbiz.NewSubscriptionUsecase(repo, repo)
+	if _, err := uc.Assign(context.Background(), &subscriptionbiz.AssignSubscriptionRequest{UserID: 42, GroupID: group.ID, ExpiresAt: time.Now().Add(time.Hour).Unix()}); err != nil {
+		t.Fatalf("Assign() error = %v", err)
+	}
+	srv := &HTTPServer{billingClient: billingClient}
+	srv.SetSubscriptionUsecase(uc)
+
+	if err := srv.commitQuota(context.Background(), "reservation-1", 250, true, usageLogInput{UserID: 42}); err != nil {
+		t.Fatalf("commitQuota error = %v", err)
+	}
+
+	progress, err := uc.GetProgress(context.Background(), 42)
+	if err != nil {
+		t.Fatalf("GetProgress() error = %v", err)
+	}
+	if progress.DailyUsed.Used != 0 || progress.WeeklyUsed.Used != 0 || progress.MonthlyUsed.Used != 0 {
+		t.Fatalf("subscription usage = daily:%v weekly:%v monthly:%v, want 0", progress.DailyUsed.Used, progress.WeeklyUsed.Used, progress.MonthlyUsed.Used)
 	}
 }
 

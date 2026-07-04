@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/LoadingStates';
 import { adminApiClient, apiClient } from '@/lib/api';
 import { unwrapApiData } from '@/lib/api-response';
+import { formatAmountUnits } from '@/lib/amount';
 import {
   Table,
   TableBody,
@@ -45,6 +46,8 @@ interface PaymentOrder {
   trade_no?: string;
   tradeNo?: string;
   channel?: string;
+  asset_type?: string;
+  assetType?: string;
   asset_amount?: number;
   assetAmount?: number;
   money_cents?: number;
@@ -55,6 +58,8 @@ interface PaymentOrder {
   providerTradeNo?: string;
   asset_issue_status?: string;
   assetIssueStatus?: string;
+  group_id?: number;
+  groupId?: number;
   pay_url?: string;
   payUrl?: string;
   created_at?: number | string | { seconds?: number };
@@ -86,7 +91,7 @@ interface OrderRow {
 const ORDER_TYPES = new Set(['recharge', 'redeem', 'refund']);
 
 const TYPE_NAMES: Record<string, string> = {
-  payment: '支付充值',
+  payment: '支付订单',
   recharge: '充值',
   redeem: '兑换',
   refund: '退款',
@@ -110,8 +115,8 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatQuota(value: number) {
-  return (value / 500000).toFixed(4);
+function formatAmount(value: number) {
+  return formatAmountUnits(value);
 }
 
 function formatMoney(cents: unknown, currency?: string) {
@@ -143,6 +148,14 @@ function getAssetAmount(order: PaymentOrder) {
   return numberValue(order.asset_amount ?? order.assetAmount);
 }
 
+function getAssetType(order: PaymentOrder) {
+  return order.asset_type || order.assetType || 'balance';
+}
+
+function getGroupID(order: PaymentOrder) {
+  return numberValue(order.group_id ?? order.groupId);
+}
+
 function getMoneyCents(order: PaymentOrder) {
   return numberValue(order.money_cents ?? order.moneyCents);
 }
@@ -158,13 +171,15 @@ function getPayURL(order: PaymentOrder) {
 function paymentOrderToRow(order: PaymentOrder): OrderRow {
   const tradeNo = getTradeNo(order);
   const issueStatus = order.asset_issue_status || order.assetIssueStatus || '-';
+  const assetType = getAssetType(order);
+  const assetLabel = assetType === 'subscription' ? `订阅分组 #${getGroupID(order) || '-'}` : formatAmount(getAssetAmount(order));
   return {
     id: `payment-${order.id || tradeNo}`,
     type: 'payment',
     amount: formatMoney(getMoneyCents(order), order.currency),
-    balance: formatQuota(getAssetAmount(order)),
+    balance: assetLabel,
     reference: tradeNo,
-    remark: `状态：${STATUS_NAMES[order.status || ''] || order.status || '-'}；资产：${issueStatus}`,
+    remark: `状态：${STATUS_NAMES[order.status || ''] || order.status || '-'}；资产：${assetType === 'subscription' ? '订阅' : issueStatus}`,
     createdAt: getCreatedAt(order),
     userID: getUserID(order),
     status: order.status,
@@ -176,8 +191,8 @@ function ledgerToRow(log: LedgerLog, index: number): OrderRow {
   return {
     id: `ledger-${log.id || log.reference_id || log.created_at}-${index}`,
     type: log.type,
-    amount: formatQuota(log.amount ?? 0),
-    balance: formatQuota(log.balance_after ?? 0),
+    amount: formatAmount(log.amount ?? 0),
+    balance: formatAmount(log.balance_after ?? 0),
     reference: log.reference_id || '-',
     remark: log.remark || '-',
     createdAt: log.created_at,
@@ -376,7 +391,10 @@ export function OrdersPage() {
               <DetailRow label="支付渠道" value={selectedOrder.channel || '-'} />
               <DetailRow label="状态" value={STATUS_NAMES[selectedOrder.status || ''] || selectedOrder.status || '-'} />
               <DetailRow label="支付金额" value={formatMoney(getMoneyCents(selectedOrder), selectedOrder.currency)} />
-              <DetailRow label="到账额度" value={formatQuota(getAssetAmount(selectedOrder))} />
+              <DetailRow
+                label={getAssetType(selectedOrder) === 'subscription' ? '订阅权益' : '到账金额'}
+                value={getAssetType(selectedOrder) === 'subscription' ? `订阅分组 #${getGroupID(selectedOrder) || '-'}` : formatAmount(getAssetAmount(selectedOrder))}
+              />
               <DetailRow label="资产状态" value={selectedOrder.asset_issue_status || selectedOrder.assetIssueStatus || '-'} />
               <DetailRow label="创建时间" value={formatDate(getCreatedAt(selectedOrder))} />
             </div>

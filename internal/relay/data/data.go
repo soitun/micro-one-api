@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	channelv1 "micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
@@ -21,6 +22,10 @@ type Data struct {
 	Accounts relaycredential.SubscriptionAccountResolver
 }
 
+// dataClientTimeout is the per-call timeout applied to the circuit-breaker
+// wrappers when constructing clients via NewData.
+const dataClientTimeout = 30 * time.Second
+
 func NewData(identityEndpoint, channelEndpoint string) (*Data, error) {
 	identityConn, err := grpc.NewClient(identityEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -31,14 +36,19 @@ func NewData(identityEndpoint, channelEndpoint string) (*Data, error) {
 		_ = identityConn.Close()
 		return nil, err
 	}
+	// Wrap the raw gRPC clients with the same resilient (circuit-breaker +
+	// timeout) wrappers the wired path uses, and construct the channel client
+	// once so all consumers share breaker state.
+	identitySvc := NewResilientIdentityClient(identityv1.NewIdentityServiceClient(identityConn), dataClientTimeout)
+	channelSvc := NewResilientChannelClient(channelv1.NewChannelServiceClient(channelConn), dataClientTimeout)
 	return &Data{
 		Identity: &identityClient{
-			client: identityv1.NewIdentityServiceClient(identityConn),
+			client: identitySvc,
 		},
 		Channel: &channelClient{
-			client: channelv1.NewChannelServiceClient(channelConn),
+			client: channelSvc,
 		},
-		Accounts: NewChannelSubscriptionAccountStore(channelv1.NewChannelServiceClient(channelConn)),
+		Accounts: NewChannelSubscriptionAccountStore(channelSvc),
 	}, nil
 }
 
@@ -95,7 +105,16 @@ func (c *channelClient) SelectSubscriptionAccount(ctx context.Context, group, mo
 		AccessToken: info.GetAccessToken(),
 		AccountID:   info.GetAccountId(),
 		Fingerprint: info.GetFingerprint(),
+		Concurrency: info.GetConcurrency(),
 	}, nil
+}
+
+func (c *channelClient) GetSubscriptionAccountByID(ctx context.Context, accountID int64) (*biz.SubscriptionAccount, error) {
+	reply, err := NewChannelSubscriptionAccountStore(c.client).getSubscriptionAccount(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	return subscriptionAccountInfoToBiz(reply.GetAccount()), nil
 }
 
 func (c *channelClient) SelectChannel(ctx context.Context, group, model string, excludeFirstPriority bool) (*biz.Channel, error) {

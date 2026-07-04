@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // --- Test doubles ---
@@ -59,6 +61,15 @@ func (r *stubLedgerRepo) AggregateLedgerByDate(ctx context.Context, userID strin
 }
 func (r *stubLedgerRepo) AggregateUsage(ctx context.Context, filter UsageFilter) ([]*UsageBucket, *UsageTotals, error) {
 	return nil, nil, nil
+}
+func (r *stubLedgerRepo) CreateLedgerInTx(ctx context.Context, tx *gorm.DB, ledger *Ledger) error {
+	return r.CreateLedger(ctx, ledger)
+}
+func (r *stubLedgerRepo) FindByDedupeKey(ctx context.Context, tx *gorm.DB, key string) (*Ledger, error) {
+	return nil, nil
+}
+func (r *stubLedgerRepo) SumSubscriptionCostByReservation(ctx context.Context, reservationIDs []string) (int64, error) {
+	return 0, nil
 }
 
 // --- Tests ---

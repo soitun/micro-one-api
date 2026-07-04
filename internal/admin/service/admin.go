@@ -18,6 +18,7 @@ import (
 	commonv1 "micro-one-api/api/common/v1"
 	identityv1 "micro-one-api/api/identity/v1"
 	relayprovider "micro-one-api/internal/relay/provider"
+	subscriptionbiz "micro-one-api/internal/subscription/biz"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -33,6 +34,8 @@ type AdminService struct {
 	systemOptsRepo  SystemOptionsStore
 	httpClient      *http.Client
 	providerFactory *relayprovider.ProviderFactory
+	subscriptionUc  *subscriptionbiz.SubscriptionUsecase
+	groupUc         *subscriptionbiz.GroupUsecase
 }
 
 // SystemOptionsStore is the interface for system options persistence.
@@ -68,6 +71,15 @@ func NewAdminService(
 	}
 }
 
+// SetSubscriptionUsecases wires optional user-subscription management.
+func (s *AdminService) SetSubscriptionUsecases(subscriptionUc *subscriptionbiz.SubscriptionUsecase, groupUc *subscriptionbiz.GroupUsecase) {
+	if s == nil {
+		return
+	}
+	s.subscriptionUc = subscriptionUc
+	s.groupUc = groupUc
+}
+
 // TopUpQuota 充值
 func (s *AdminService) TopUpQuota(ctx context.Context, req *adminv1.TopUpQuotaRequest) (*adminv1.TopUpQuotaResponse, error) {
 	billingReq := &billingv1.TopUpQuotaRequest{
@@ -93,8 +105,8 @@ func (s *AdminService) TopUpQuota(ctx context.Context, req *adminv1.TopUpQuotaRe
 	}
 
 	return &adminv1.TopUpQuotaResponse{
-		Success:  true,
-		NewQuota: resp.NewQuota,
+		Success:    true,
+		NewBalance: resp.NewBalance,
 	}, nil
 }
 
@@ -395,10 +407,10 @@ func (s *AdminService) GetAccountSnapshot(ctx context.Context, req *adminv1.GetA
 			Username:     "",
 			DisplayName:  "",
 			Group:        resp.Snapshot.Group,
-			Quota:        resp.Snapshot.Quota,
-			UsedQuota:    resp.Snapshot.UsedQuota,
+			Balance:      resp.Snapshot.Balance,
+			UsedAmount:   resp.Snapshot.UsedAmount,
 			RequestCount: resp.Snapshot.RequestCount,
-			FrozenQuota:  resp.Snapshot.FrozenQuota,
+			FrozenAmount: resp.Snapshot.FrozenAmount,
 			Status:       0,
 		},
 	}, nil
@@ -423,10 +435,10 @@ func (s *AdminService) BatchGetAccountSnapshots(ctx context.Context, userIDs []s
 			accounts[userID] = &commonv1.AccountInfo{
 				UserId:       snapshot.GetUserId(),
 				Group:        snapshot.GetGroup(),
-				Quota:        snapshot.GetQuota(),
-				UsedQuota:    snapshot.GetUsedQuota(),
+				Balance:      snapshot.GetBalance(),
+				UsedAmount:   snapshot.GetUsedAmount(),
 				RequestCount: snapshot.GetRequestCount(),
-				FrozenQuota:  snapshot.GetFrozenQuota(),
+				FrozenAmount: snapshot.GetFrozenAmount(),
 			}
 		}
 	}
@@ -471,7 +483,7 @@ func (s *AdminService) CreateUser(ctx context.Context, req *adminv1.AdminCreateU
 		Email:       req.Email,
 		Password:    req.Password,
 		Group:       req.Group,
-		Quota:       req.Quota,
+		Balance:     req.Balance,
 	})
 	if err != nil {
 		return &adminv1.AdminCreateUserResponse{Success: false, Message: err.Error()}, nil
@@ -577,9 +589,9 @@ func (s *AdminService) ResetUserQuota(ctx context.Context, req *adminv1.ResetUse
 	}
 	currentQuota := int64(0)
 	if snapshot != nil && snapshot.Snapshot != nil {
-		currentQuota = snapshot.Snapshot.Quota
+		currentQuota = snapshot.Snapshot.Balance
 	}
-	delta := req.NewQuota - currentQuota
+	delta := req.NewBalance - currentQuota
 	if delta == 0 {
 		return &adminv1.ResetUserQuotaResponse{Success: true, Message: "ok"}, nil
 	}
@@ -926,18 +938,18 @@ type UsageAggregateView struct {
 	Key                   string `json:"key"`
 	UserID                string `json:"user_id,omitempty"`
 	ChannelID             int64  `json:"channel_id,omitempty"`
-	SubscriptionAccountID int64 `json:"subscription_account_id,omitempty"`
-	Model            string `json:"model,omitempty"`
-	TokenName        string `json:"token_name,omitempty"`
-	Type             string `json:"type,omitempty"`
-	Quota            int64  `json:"quota"`
-	UpstreamCost     int64  `json:"upstream_cost"`
-	GrossProfit      int64  `json:"gross_profit"`
-	PromptTokens     int64  `json:"prompt_tokens"`
-	CompletionTokens int64  `json:"completion_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	Count            int64  `json:"count"`
-	ElapsedTime      int64  `json:"elapsed_time"`
+	SubscriptionAccountID int64  `json:"subscription_account_id,omitempty"`
+	Model                 string `json:"model,omitempty"`
+	TokenName             string `json:"token_name,omitempty"`
+	Type                  string `json:"type,omitempty"`
+	Quota                 int64  `json:"quota"`
+	UpstreamCost          int64  `json:"upstream_cost"`
+	GrossProfit           int64  `json:"gross_profit"`
+	PromptTokens          int64  `json:"prompt_tokens"`
+	CompletionTokens      int64  `json:"completion_tokens"`
+	CacheReadTokens       int64  `json:"cache_read_tokens"`
+	Count                 int64  `json:"count"`
+	ElapsedTime           int64  `json:"elapsed_time"`
 }
 
 func (s *AdminService) ListReconciliationRuns(ctx context.Context, page, pageSize int32) (*ListReconciliationRunsResult, error) {
@@ -983,16 +995,16 @@ func usageAggregateViewFromBucket(bucket *billingv1.UsageBucket, groupBy string)
 		ChannelID:             bucket.GetChannelId(),
 		SubscriptionAccountID: bucket.GetSubscriptionAccountId(),
 		Model:                 bucket.GetModel(),
-		TokenName:        bucket.GetTokenName(),
-		Type:             bucket.GetType(),
-		Quota:            bucket.GetQuota(),
-		UpstreamCost:     bucket.GetUpstreamCost(),
-		GrossProfit:      bucket.GetGrossProfit(),
-		PromptTokens:     bucket.GetPromptTokens(),
-		CompletionTokens: bucket.GetCompletionTokens(),
-		CacheReadTokens:  bucket.GetCacheReadTokens(),
-		Count:            bucket.GetCount(),
-		ElapsedTime:      bucket.GetElapsedTime(),
+		TokenName:             bucket.GetTokenName(),
+		Type:                  bucket.GetType(),
+		Quota:                 bucket.GetQuota(),
+		UpstreamCost:          bucket.GetUpstreamCost(),
+		GrossProfit:           bucket.GetGrossProfit(),
+		PromptTokens:          bucket.GetPromptTokens(),
+		CompletionTokens:      bucket.GetCompletionTokens(),
+		CacheReadTokens:       bucket.GetCacheReadTokens(),
+		Count:                 bucket.GetCount(),
+		ElapsedTime:           bucket.GetElapsedTime(),
 	}
 	switch groupBy {
 	case "user":
@@ -1459,9 +1471,9 @@ var oneAPIOptionDefaults = map[string]string{
 	"WeChatAccountQRCodeImageURL":    "",
 	"MessagePusherAddress":           "",
 	"TurnstileSiteKey":               "",
-	"QuotaForNewUser":                "0",
-	"QuotaForInviter":                "0",
-	"QuotaForInvitee":                "0",
+	"AmountForNewUser":               "0",
+	"AmountForInviter":               "0",
+	"AmountForInvitee":               "0",
 	"QuotaRemindThreshold":           "0",
 	"PreConsumedQuota":               "0",
 	"ModelRatio":                     "{}",
@@ -1470,9 +1482,16 @@ var oneAPIOptionDefaults = map[string]string{
 	"CompletionRatio":                "{}",
 	"TopUpLink":                      "",
 	"ChatLink":                       "",
-	"QuotaPerUnit":                   "500000",
+	"AmountPerUnit":                  "10000",
 	"RetryTimes":                     "0",
 	"Theme":                          "default",
+}
+
+var oneAPIOptionLegacyAliases = map[string]string{
+	"AmountForNewUser": "QuotaForNewUser",
+	"AmountForInviter": "QuotaForInviter",
+	"AmountForInvitee": "QuotaForInvitee",
+	"AmountPerUnit":    "QuotaPerUnit",
 }
 
 func (s *AdminService) ListOneAPIOptions(context.Context) ([]OneAPIOption, error) {
@@ -1484,6 +1503,12 @@ func (s *AdminService) ListOneAPIOptions(context.Context) ([]OneAPIOption, error
 		for key := range values {
 			if v, err := s.systemOptsRepo.Get(key); err == nil && v != "" {
 				values[key] = v
+				continue
+			}
+			if legacyKey := oneAPIOptionLegacyAliases[key]; legacyKey != "" {
+				if v, err := s.systemOptsRepo.Get(legacyKey); err == nil && v != "" {
+					values[key] = v
+				}
 			}
 		}
 		if v, err := s.systemOptsRepo.Get("site_title"); err == nil && v != "" && values["SystemName"] == oneAPIOptionDefaults["SystemName"] {
@@ -1512,6 +1537,11 @@ func (s *AdminService) GetOneAPIOption(_ context.Context, key string) (string, e
 	if s.systemOptsRepo != nil {
 		if v, err := s.systemOptsRepo.Get(key); err == nil && v != "" {
 			return v, nil
+		}
+		if legacyKey := oneAPIOptionLegacyAliases[key]; legacyKey != "" {
+			if v, err := s.systemOptsRepo.Get(legacyKey); err == nil && v != "" {
+				return v, nil
+			}
 		}
 	}
 	return oneAPIOptionDefaults[key], nil
@@ -1868,25 +1898,29 @@ func (s *AdminService) ListLedgerEntries(ctx context.Context, req *adminv1.ListL
 			createdAt = entry.GetCreatedAt().AsTime().Unix()
 		}
 		entries = append(entries, map[string]interface{}{
-			"id":               parseInt64(entry.GetId()),
-			"userId":           entry.GetUserId(),
-			"type":             entry.GetType(),
-			"amount":           entry.GetAmount(),
-			"balanceAfter":     entry.GetBalanceAfter(),
-			"referenceId":      entry.GetReferenceId(),
-			"remark":           entry.GetRemark(),
-			"createdAt":        createdAt,
-			"tokenName":        entry.GetTokenName(),
-			"modelName":        entry.GetModelName(),
-			"quota":            entry.GetQuota(),
-			"promptTokens":     entry.GetPromptTokens(),
-			"completionTokens": entry.GetCompletionTokens(),
-			"cacheReadTokens":  entry.GetCacheReadTokens(),
+			"id":                    parseInt64(entry.GetId()),
+			"userId":                entry.GetUserId(),
+			"type":                  entry.GetType(),
+			"amount":                entry.GetAmount(),
+			"balanceAfter":          entry.GetBalanceAfter(),
+			"referenceId":           entry.GetReferenceId(),
+			"remark":                entry.GetRemark(),
+			"createdAt":             createdAt,
+			"tokenName":             entry.GetTokenName(),
+			"modelName":             entry.GetModelName(),
+			"quota":                 entry.GetQuota(),
+			"promptTokens":          entry.GetPromptTokens(),
+			"completionTokens":      entry.GetCompletionTokens(),
+			"cacheReadTokens":       entry.GetCacheReadTokens(),
 			"channelId":             entry.GetChannelId(),
 			"subscriptionAccountId": entry.GetSubscriptionAccountId(),
 			"elapsedTime":           entry.GetElapsedTime(),
-			"isStream":         entry.GetIsStream(),
-			"endpoint":         entry.GetEndpoint(),
+			"isStream":              entry.GetIsStream(),
+			"endpoint":              entry.GetEndpoint(),
+			"costSource":            entry.GetCostSource(),
+			"subscriptionCost":      entry.GetSubscriptionCost(),
+			"balanceCost":           entry.GetBalanceCost(),
+			"ledgerDedupeKey":       entry.GetLedgerDedupeKey(),
 		})
 	}
 

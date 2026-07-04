@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -75,15 +76,28 @@ type countingPaymentIssuer struct {
 	issued int
 }
 
-func (i *countingPaymentIssuer) IssueQuota(ctx context.Context, order *PaymentOrder) error {
+func (i *countingPaymentIssuer) IssueBalance(ctx context.Context, order *PaymentOrder) error {
 	i.issued++
 	return nil
+}
+
+type countingSubscriptionAssigner struct {
+	assigned int
+	order    *PaymentOrder
+	err      error
+}
+
+func (a *countingSubscriptionAssigner) AssignSubscriptionAfterPayment(ctx context.Context, order *PaymentOrder) error {
+	a.assigned++
+	a.order = order
+	return a.err
 }
 
 func TestPaymentUsecaseGetOrderRefreshesPaidAlipayOrder(t *testing.T) {
 	repo := &memoryPaymentRepo{order: &PaymentOrder{
 		TradeNo:          "PAY-1",
 		Channel:          PaymentChannelAlipay,
+		AssetType:        PaymentAssetTypeBalance,
 		Status:           PaymentOrderStatusPending,
 		AssetIssueStatus: PaymentAssetIssueStatusPending,
 	}}
@@ -113,6 +127,7 @@ func TestPaymentUsecaseGetOrderRefreshesClosedAlipayOrder(t *testing.T) {
 	repo := &memoryPaymentRepo{order: &PaymentOrder{
 		TradeNo:          "PAY-1",
 		Channel:          PaymentChannelAlipay,
+		AssetType:        PaymentAssetTypeBalance,
 		Status:           PaymentOrderStatusPending,
 		AssetIssueStatus: PaymentAssetIssueStatusPending,
 	}}
@@ -132,5 +147,80 @@ func TestPaymentUsecaseGetOrderRefreshesClosedAlipayOrder(t *testing.T) {
 	}
 	if issuer.issued != 0 {
 		t.Fatalf("issued = %d", issuer.issued)
+	}
+}
+
+func TestPaymentUsecasePaidSubscriptionOrderRequiresAssigner(t *testing.T) {
+	repo := &memoryPaymentRepo{order: &PaymentOrder{
+		TradeNo:          "PAY-SUB-1",
+		Channel:          PaymentChannelAlipay,
+		AssetType:        PaymentAssetTypeSubscription,
+		AssetAmount:      1,
+		GroupID:          9,
+		Status:           PaymentOrderStatusPending,
+		AssetIssueStatus: PaymentAssetIssueStatusPending,
+	}}
+	issuer := &countingPaymentIssuer{}
+	uc := NewPaymentUsecase(repo, &statusPaymentProvider{status: &PaymentProviderStatus{
+		ProviderTradeNo: "ALI-SUB-1",
+		Paid:            true,
+	}}, issuer)
+
+	order, err := uc.GetOrderByTradeNo(context.Background(), "PAY-SUB-1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "subscription assigner is not configured") {
+		t.Fatalf("err = %v", err)
+	}
+	if order != nil {
+		t.Fatalf("order = %#v", order)
+	}
+	if repo.order.Status != PaymentOrderStatusPending {
+		t.Fatalf("status = %q", repo.order.Status)
+	}
+	if issuer.issued != 0 {
+		t.Fatalf("issued = %d", issuer.issued)
+	}
+}
+
+func TestPaymentUsecasePaidSubscriptionOrderAssignsSubscription(t *testing.T) {
+	repo := &memoryPaymentRepo{order: &PaymentOrder{
+		TradeNo:          "PAY-SUB-1",
+		Channel:          PaymentChannelAlipay,
+		AssetType:        PaymentAssetTypeSubscription,
+		AssetAmount:      1,
+		GroupID:          9,
+		Status:           PaymentOrderStatusPending,
+		AssetIssueStatus: PaymentAssetIssueStatusPending,
+	}}
+	issuer := &countingPaymentIssuer{}
+	assigner := &countingSubscriptionAssigner{}
+	uc := NewPaymentUsecaseWithAssigner(repo, &statusPaymentProvider{status: &PaymentProviderStatus{
+		ProviderTradeNo: "ALI-SUB-1",
+		Paid:            true,
+	}}, issuer, assigner)
+
+	order, err := uc.GetOrderByTradeNo(context.Background(), "PAY-SUB-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if order.Status != PaymentOrderStatusPaid {
+		t.Fatalf("status = %q", order.Status)
+	}
+	if order.AssetIssueStatus != PaymentAssetIssueStatusIssued {
+		t.Fatalf("asset_issue_status = %q", order.AssetIssueStatus)
+	}
+	if order.ProviderTradeNo != "ALI-SUB-1" {
+		t.Fatalf("provider_trade_no = %q", order.ProviderTradeNo)
+	}
+	if issuer.issued != 0 {
+		t.Fatalf("issued = %d", issuer.issued)
+	}
+	if assigner.assigned != 1 {
+		t.Fatalf("assigned = %d", assigner.assigned)
+	}
+	if assigner.order == nil || assigner.order.GroupID != 9 {
+		t.Fatalf("assigner order = %#v", assigner.order)
 	}
 }

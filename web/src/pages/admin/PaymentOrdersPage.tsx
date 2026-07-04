@@ -10,6 +10,7 @@ import { useAdminTableState } from '@/hooks/useAdminTableState';
 import { buildAdminListParams } from '@/lib/admin-table-query';
 import { adminApiClient } from '@/lib/api';
 import { unwrapApiData } from '@/lib/api-response';
+import { formatAmountUnits } from '@/lib/amount';
 import { sortRows, type SortState } from '@/lib/table-utils';
 import {
   Table,
@@ -39,6 +40,8 @@ interface PaymentOrder {
   providerTradeNo?: string;
   asset_issue_status?: string;
   assetIssueStatus?: string;
+  group_id?: number;
+  groupId?: number;
   paid_at?: string | { seconds?: number };
   paidAt?: string | { seconds?: number };
   created_at?: string | { seconds?: number };
@@ -66,8 +69,8 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatQuota(value: unknown) {
-  return (numberValue(value) / 500000).toFixed(4);
+function formatAmount(value: unknown) {
+  return formatAmountUnits(numberValue(value));
 }
 
 function formatMoney(cents: unknown, currency?: string) {
@@ -98,6 +101,21 @@ function getUserID(order: PaymentOrder) {
 
 function getAssetAmount(order: PaymentOrder) {
   return order.asset_amount ?? order.assetAmount ?? 0;
+}
+
+function getAssetType(order: PaymentOrder) {
+  return order.asset_type || order.assetType || 'balance';
+}
+
+function getGroupID(order: PaymentOrder) {
+  return numberValue(order.group_id ?? order.groupId);
+}
+
+function formatAsset(order: PaymentOrder) {
+  if (getAssetType(order) === 'subscription') {
+    return `订阅分组 #${getGroupID(order) || '-'}`;
+  }
+  return formatAmount(getAssetAmount(order));
 }
 
 function getMoneyCents(order: PaymentOrder) {
@@ -211,7 +229,7 @@ export function AdminPaymentOrdersPage() {
       {isLoading ? (
         <TableSkeleton columns={['订单号', '用户', '渠道', '状态', '金额', '资产', '渠道单号', '创建时间']} rows={8} />
       ) : visibleOrders.length === 0 ? (
-        <EmptyState title="暂无支付订单" description="用户发起充值支付后会显示在这里。" />
+        <EmptyState title="暂无支付订单" description="用户发起充值或订阅支付后会显示在这里。" />
       ) : (
         <>
           <div className="overflow-x-auto rounded-lg bg-white shadow-sm ring-1 ring-slate-200 dark:bg-card dark:ring-white/10">
@@ -249,8 +267,10 @@ export function AdminPaymentOrdersPage() {
                     </TableCell>
                     <TableCell className="font-semibold">{formatMoney(getMoneyCents(order), order.currency)}</TableCell>
                     <TableCell>
-                      <div className="font-semibold">{formatQuota(getAssetAmount(order))}</div>
-                      <div className="text-xs text-slate-400">{order.asset_issue_status || order.assetIssueStatus || '-'}</div>
+                      <div className="font-semibold">{formatAsset(order)}</div>
+                      <div className="text-xs text-slate-400">
+                        {getAssetType(order) === 'subscription' ? 'subscription' : order.asset_issue_status || order.assetIssueStatus || '-'}
+                      </div>
                     </TableCell>
                     <TableCell className="font-mono text-xs">{getProviderTradeNo(order)}</TableCell>
                     <TableCell>{formatDate(getCreatedAt(order))}</TableCell>

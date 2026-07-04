@@ -116,12 +116,12 @@ func (m *mockIdentityRepo) DeleteUser(ctx context.Context, userID int64) error {
 	return nil
 }
 
-func (m *mockIdentityRepo) IncreaseUserQuota(ctx context.Context, userID int64, amount int64) error {
+func (m *mockIdentityRepo) IncreaseUserBalance(ctx context.Context, userID int64, amount int64) error {
 	user, ok := m.users[userID]
 	if !ok {
 		return ErrUserNotFound
 	}
-	user.Quota += amount
+	user.Balance += amount
 	return nil
 }
 
@@ -918,11 +918,11 @@ func TestIdentityUsecase_GetOrCreateAffCode_GeneratesWhenMissing(t *testing.T) {
 }
 
 func TestIdentityUsecase_RegisterWithAffCode_DoesNotApplyBonusesAtBizLayer(t *testing.T) {
-	t.Setenv("INVITEE_BONUS_QUOTA", "25")
-	t.Setenv("INVITER_BONUS_QUOTA", "50")
+	t.Setenv("INVITEE_BONUS_AMOUNT", "25")
+	t.Setenv("INVITER_BONUS_AMOUNT", "50")
 	repo := &mockIdentityRepo{
 		users: map[int64]*User{
-			1: {ID: 1, Username: "alice", Status: UserStatusEnabled, AffCode: "INVITE01", Quota: 100},
+			1: {ID: 1, Username: "alice", Status: UserStatusEnabled, AffCode: "INVITE01", Balance: 100},
 		},
 		tokens: make(map[string]*Token),
 	}
@@ -932,11 +932,11 @@ func TestIdentityUsecase_RegisterWithAffCode_DoesNotApplyBonusesAtBizLayer(t *te
 	if err != nil {
 		t.Fatalf("RegisterWithAffCode() error = %v", err)
 	}
-	if repo.users[1].Quota != 100 {
-		t.Fatalf("inviter quota = %d, want unchanged 100 (bonus credit happens in billing, not biz)", repo.users[1].Quota)
+	if repo.users[1].Balance != 100 {
+		t.Fatalf("inviter quota = %d, want unchanged 100 (bonus credit happens in billing, not biz)", repo.users[1].Balance)
 	}
-	if user.Quota != 0 {
-		t.Fatalf("invitee quota at biz layer = %d, want 0 (bonus credit happens in billing, not biz)", user.Quota)
+	if user.Balance != 0 {
+		t.Fatalf("invitee quota at biz layer = %d, want 0 (bonus credit happens in billing, not biz)", user.Balance)
 	}
 	if user.InviterID != 1 {
 		t.Fatalf("invitee InviterID = %d, want 1", user.InviterID)

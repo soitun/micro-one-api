@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,6 +18,8 @@ import (
 	commonv1 "micro-one-api/api/common/v1"
 	identityv1 "micro-one-api/api/identity/v1"
 	"micro-one-api/internal/admin/service"
+	subscriptionbiz "micro-one-api/internal/subscription/biz"
+	subscriptiondata "micro-one-api/internal/subscription/data"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -50,7 +54,7 @@ func (c *adminHTTPIdentityClient) GetUser(ctx context.Context, req *identityv1.G
 			Email:       "alice@example.com",
 			Group:       "default",
 			Status:      1,
-			Quota:       500,
+			Balance:     500,
 			Role:        c.userRole,
 		},
 	}, nil
@@ -281,20 +285,21 @@ type adminHTTPBillingClient struct {
 	paymentTotal       int64
 	paymentListLastReq *billingv1.ListPaymentOrdersRequest
 	paymentGetLastReq  *billingv1.GetPaymentOrderByTradeNoRequest
+	paymentCreateReq   *billingv1.CreatePaymentOrderRequest
 	aggregateReqs      []*billingv1.AggregateUsageRequest
 }
 
 func (c *adminHTTPBillingClient) TopUpQuota(ctx context.Context, req *billingv1.TopUpQuotaRequest, opts ...grpc.CallOption) (*billingv1.TopUpQuotaResponse, error) {
 	c.topupUserID = req.UserId
 	c.topupAmount = req.Amount
-	return &billingv1.TopUpQuotaResponse{Success: true, NewQuota: req.Amount}, nil
+	return &billingv1.TopUpQuotaResponse{Success: true, NewBalance: req.Amount}, nil
 }
 
 func (c *adminHTTPBillingClient) GetAccountSnapshot(ctx context.Context, req *billingv1.GetAccountSnapshotRequest, opts ...grpc.CallOption) (*billingv1.GetAccountSnapshotResponse, error) {
 	return &billingv1.GetAccountSnapshotResponse{
 		Snapshot: &commonv1.AccountSnapshot{
-			UserId: req.UserId,
-			Quota:  500,
+			UserId:  req.UserId,
+			Balance: 500,
 		},
 	}, nil
 }
@@ -303,9 +308,9 @@ func (c *adminHTTPBillingClient) BatchGetAccountSnapshots(ctx context.Context, r
 	snapshots := make(map[string]*commonv1.AccountSnapshot, len(req.GetUserIds()))
 	for _, userID := range req.GetUserIds() {
 		snapshots[userID] = &commonv1.AccountSnapshot{
-			UserId:    userID,
-			Quota:     500,
-			UsedQuota: 100,
+			UserId:     userID,
+			Balance:    500,
+			UsedAmount: 100,
 		}
 	}
 	return &billingv1.BatchGetAccountSnapshotsResponse{Snapshots: snapshots}, nil
@@ -405,8 +410,8 @@ func (c *adminHTTPBillingClient) ListPaymentOrders(ctx context.Context, req *bil
 				UserId:           "42",
 				TradeNo:          "PAY-1",
 				Channel:          "alipay",
-				AssetType:        "quota",
-				AssetAmount:      500000,
+				AssetType:        "balance",
+				AssetAmount:      1000000,
 				MoneyCents:       1000,
 				Currency:         "CNY",
 				Status:           "paid",
@@ -421,6 +426,29 @@ func (c *adminHTTPBillingClient) ListPaymentOrders(ctx context.Context, req *bil
 	}, nil
 }
 
+func (c *adminHTTPBillingClient) CreatePaymentOrder(ctx context.Context, req *billingv1.CreatePaymentOrderRequest, opts ...grpc.CallOption) (*billingv1.PaymentOrderResponse, error) {
+	c.paymentCreateReq = req
+	return &billingv1.PaymentOrderResponse{
+		Success: true,
+		Order: &billingv1.PaymentOrder{
+			Id:               99,
+			UserId:           req.GetUserId(),
+			TradeNo:          "PAY-SUB-1",
+			Channel:          req.GetChannel(),
+			AssetType:        req.GetAssetType(),
+			AssetAmount:      req.GetAssetAmount(),
+			MoneyCents:       req.GetMoneyCents(),
+			Currency:         req.GetCurrency(),
+			Status:           "pending",
+			PayUrl:           "mock://payment/PAY-SUB-1",
+			AssetIssueStatus: "pending",
+			GroupId:          req.GetGroupId(),
+			CreatedAt:        timestamppb.Now(),
+			UpdatedAt:        timestamppb.Now(),
+		},
+	}, nil
+}
+
 func (c *adminHTTPBillingClient) GetPaymentOrderByTradeNo(ctx context.Context, req *billingv1.GetPaymentOrderByTradeNoRequest, opts ...grpc.CallOption) (*billingv1.PaymentOrderResponse, error) {
 	c.paymentGetLastReq = req
 	return &billingv1.PaymentOrderResponse{
@@ -430,8 +458,8 @@ func (c *adminHTTPBillingClient) GetPaymentOrderByTradeNo(ctx context.Context, r
 			UserId:           "42",
 			TradeNo:          req.GetTradeNo(),
 			Channel:          "alipay",
-			AssetType:        "quota",
-			AssetAmount:      500000,
+			AssetType:        "balance",
+			AssetAmount:      1000000,
 			MoneyCents:       1000,
 			Currency:         "CNY",
 			Status:           "paid",
@@ -495,6 +523,166 @@ func newAdminHTTPOptionTestServer(store service.SystemOptionsStore) http.Handler
 	return NewHTTPServer(":0", adminSvc)
 }
 
+func newAdminHTTPSubscriptionTestServer() http.Handler {
+	adminSvc := service.NewAdminService(nil, nil, nil, nil)
+	repo := subscriptiondata.NewMemoryRepositoryForTest()
+	adminSvc.SetSubscriptionUsecases(
+		subscriptionbiz.NewSubscriptionUsecase(repo, repo),
+		subscriptionbiz.NewGroupUsecase(repo),
+	)
+	return NewHTTPServer(":0", adminSvc)
+}
+
+func newAdminHTTPSubscriptionPaymentTestServer(identity identityv1.IdentityServiceClient, billing billingv1.BillingServiceClient) http.Handler {
+	adminSvc := service.NewAdminService(billing, identity, nil, nil)
+	repo := subscriptiondata.NewMemoryRepositoryForTest()
+	adminSvc.SetSubscriptionUsecases(
+		subscriptionbiz.NewSubscriptionUsecase(repo, repo),
+		subscriptionbiz.NewGroupUsecase(repo),
+	)
+	return NewHTTPServer(":0", adminSvc)
+}
+
+func TestAdminHTTPSubscriptionManagement(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	srv := newAdminHTTPSubscriptionTestServer()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/subscription-groups", strings.NewReader(`{"name":"pro","display_name":"Pro","platform":"openai","daily_limit_usd":10,"status":1}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("create group status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/subscription-groups", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	var groupListResp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &groupListResp); err != nil {
+		t.Fatalf("decode group list response: %v, body=%s", err, rec.Body.String())
+	}
+	if len(groupListResp.Data) != 1 || groupListResp.Data[0].ID <= 0 {
+		t.Fatalf("group list response mismatch: %s", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/subscriptions/assign", strings.NewReader(`{"user_id":42,"group_id":`+strconv.FormatInt(groupListResp.Data[0].ID, 10)+`,"subscription_name":"alice-pro","expires_at":4102444800}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"subscription_name":"alice-pro"`) {
+		t.Fatalf("assign status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/subscriptions?user_id=42", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"user_id":42`) {
+		t.Fatalf("list subscriptions status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// Omitting user_id lists every subscription rather than erroring, so admins
+	// can browse without knowing a user id.
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/subscriptions", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"subscription_name":"alice-pro"`) {
+		t.Fatalf("list all subscriptions status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/subscriptions/1/reset-quota", strings.NewReader(`{"scope":"all"}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("reset status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/subscriptions/progress?user_id=42", nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"remaining_seconds"`) {
+		t.Fatalf("progress status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserSubscriptionPurchaseCreatesPaymentOrderWithDefaultChannel(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	identityClient := &adminHTTPIdentityClient{validateValid: true, validateUserID: 42}
+	billingClient := &adminHTTPBillingClient{}
+	srv := newAdminHTTPSubscriptionPaymentTestServer(identityClient, billingClient)
+
+	createBody := `{"name":"codex-pro","display_name":"Codex Pro","platform":"openai","status":1,"price_quota":10,"duration_days":30}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/subscription-groups", strings.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("create group status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/subscriptions/purchase/payment", strings.NewReader(`{"group_id":1}`))
+	req.Header.Set("Authorization", "Bearer user-token")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("purchase payment status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	got := billingClient.paymentCreateReq
+	if got == nil {
+		t.Fatal("CreatePaymentOrder was not called")
+	}
+	if got.GetUserId() != "42" || got.GetChannel() != "alipay" || got.GetAssetType() != "subscription" || got.GetAssetAmount() != 1 || got.GetMoneyCents() != 1000 || got.GetGroupId() != 1 {
+		t.Fatalf("CreatePaymentOrder request = %+v", got)
+	}
+}
+
+func TestAdminHTTPProxiesAlipayNotifyToBillingHTTP(t *testing.T) {
+	var seenPaths []string
+	billingHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read proxied body: %v", err)
+		}
+		seenPaths = append(seenPaths, r.URL.Path+"?"+r.URL.RawQuery+" body="+string(body))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("success"))
+	}))
+	defer billingHTTP.Close()
+	t.Setenv("BILLING_HTTP_ENDPOINT", billingHTTP.URL)
+
+	srv := NewHTTPServer(":0", nil)
+	paths := []string{
+		"/api/v1/user/payments/alipay/notify?x=1",
+		"/api/user/payments/alipay/notify?x=1",
+		"/api/status?x=1",
+	}
+	for _, path := range paths {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("trade_status=TRADE_SUCCESS"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || rec.Body.String() != "success" {
+			t.Fatalf("notify proxy %s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if len(seenPaths) != 3 {
+		t.Fatalf("proxied requests = %v", seenPaths)
+	}
+	if !strings.Contains(seenPaths[0], "/api/v1/user/payments/alipay/notify?x=1 body=trade_status=TRADE_SUCCESS") ||
+		!strings.Contains(seenPaths[1], "/api/user/payments/alipay/notify?x=1 body=trade_status=TRADE_SUCCESS") ||
+		!strings.Contains(seenPaths[2], "/api/v1/user/payments/alipay/notify?x=1 body=trade_status=TRADE_SUCCESS") {
+		t.Fatalf("unexpected proxied requests: %v", seenPaths)
+	}
+}
+
 func TestAdminHTTPStatusIsUnauthenticated(t *testing.T) {
 	srv := NewHTTPServer(":0", nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
@@ -545,7 +733,7 @@ func TestAdminHTTPProxiesUserTopUp(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		gotBody = body["key"]
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"success":true,"data":500000}`))
+		_, _ = w.Write([]byte(`{"success":true,"data":1000000}`))
 	}))
 	defer upstream.Close()
 
@@ -641,6 +829,50 @@ func TestAdminHTTPNotificationProxyRewritesListPath(t *testing.T) {
 	}
 }
 
+func TestAdminHTTPProxiesSubscriptionOAuthToChannelService(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"auth_url":"https://example.com/auth","session_id":"s1","state":"st"}`))
+	}))
+	defer upstream.Close()
+	t.Setenv("CHANNEL_HTTP_ENDPOINT", upstream.URL)
+
+	srv := NewHTTPServer(":0", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/subscription/oauth/claude/auth-url", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer admin-token")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/api/v1/admin/accounts/subscription/oauth/claude/auth-url" {
+		t.Fatalf("proxied path = %q, want the oauth auth-url path preserved", gotPath)
+	}
+	if !strings.Contains(rec.Body.String(), `"session_id":"s1"`) {
+		t.Fatalf("response was not proxied: %s", rec.Body.String())
+	}
+}
+
+func TestAdminHTTPSubscriptionOAuthRequiresAdminAuth(t *testing.T) {
+	t.Setenv("ADMIN_TOKEN", "admin-token")
+	t.Setenv("CHANNEL_HTTP_ENDPOINT", "http://channel-service:8002")
+
+	srv := NewHTTPServer(":0", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/subscription/oauth/claude/auth-url", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 without admin auth", rec.Code)
+	}
+}
+
 func TestParseReverseProxyTargetRejectsUnsafeEndpoints(t *testing.T) {
 	for _, endpoint := range []string{
 		"",
@@ -676,6 +908,41 @@ func TestAdminHTTPPageUsesExternalWebRoot(t *testing.T) {
 	}
 }
 
+func TestAdminHTTPPageDisablesShellCache(t *testing.T) {
+	webRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(webRoot, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webRoot, "index.html"), []byte(`<!doctype html><div id="root">external</div>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webRoot, "assets", "app.js"), []byte(`console.log("external asset")`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewHTTPServer(":0", nil, "", webRoot)
+
+	for _, path := range []string{"/", "/subscriptions"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200, body=%s", path, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "no-cache, no-store, must-revalidate" {
+			t.Fatalf("GET %s Cache-Control = %q", path, got)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Cache-Control"); got != "" {
+		t.Fatalf("asset Cache-Control = %q, want empty", got)
+	}
+}
+
 func TestAdminHTTPPageFallsBackToEmbedWhenExternalWebRootInvalid(t *testing.T) {
 	webRoot := t.TempDir()
 	srv := NewHTTPServer(":0", nil, "", webRoot)
@@ -694,7 +961,7 @@ func TestReadonlyPricingReturnsModelPriceRows(t *testing.T) {
 		"ModelPrice":      `{"gpt-5.5":{"input_price":0.00000065,"output_price":0.0000039,"cache_read_price":0.000001}}`,
 		"ModelRatio":      `{"legacy-model":0.5}`,
 		"CompletionRatio": `{"legacy-model":2}`,
-		"QuotaPerUnit":    `500000`,
+		"AmountPerUnit":   `10000`,
 	}})
 	req := httptest.NewRequest(http.MethodGet, "/api/pricing", nil)
 	rec := httptest.NewRecorder()
@@ -711,8 +978,34 @@ func TestReadonlyPricingReturnsModelPriceRows(t *testing.T) {
 		`"output_price":3.9`,
 		`"cache_read_price":1`,
 		`"model":"legacy-model"`,
-		`"input_price":1`,
-		`"output_price":2`,
+		`"input_price":50`,
+		`"output_price":100`,
+		`"amount_per_unit":10000`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("pricing response missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestReadonlyPricingReadsLegacyQuotaPerUnit(t *testing.T) {
+	srv := newAdminHTTPOptionTestServer(&adminHTTPSystemOptionsStore{values: map[string]string{
+		"ModelRatio":   `{"legacy-model":0.5}`,
+		"QuotaPerUnit": `10000`,
+	}})
+	req := httptest.NewRequest(http.MethodGet, "/api/pricing", nil)
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`"model":"legacy-model"`,
+		`"input_price":50`,
+		`"amount_per_unit":10000`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("pricing response missing %q: %s", want, body)
@@ -1758,8 +2051,8 @@ func TestAdminHTTPSummaryCountsOnlyPaidPaymentOrders(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	billingClient := &adminHTTPBillingClient{
 		paymentOrders: []*billingv1.PaymentOrder{
-			{TradeNo: "PAY-PAID", Status: "paid", AssetAmount: 500000, MoneyCents: 10000},
-			{TradeNo: "PAY-PENDING", Status: "pending", AssetAmount: 999999, MoneyCents: 20000},
+			{TradeNo: "PAY-PAID", Status: "paid", AssetAmount: 10000000, MoneyCents: 10000},
+			{TradeNo: "PAY-PENDING", Status: "pending", AssetAmount: 20000000, MoneyCents: 20000},
 		},
 		paymentTotal: 2,
 		reconRuns: []*billingv1.ReconciliationRun{
@@ -2269,7 +2562,7 @@ func TestAdminHTTPResetUserQuotaUsesDelta(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
 	billingClient := &adminHTTPBillingClient{}
 	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, billingClient)
-	req := httptest.NewRequest(http.MethodPost, "/v1/users/reset-quota", strings.NewReader(`{"user_id":42,"new_quota":800,"operator_id":"root","remark":"reset"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/users/reset-quota", strings.NewReader(`{"user_id":42,"new_balance":800,"operator_id":"root","remark":"reset"}`))
 	req.Header.Set("Authorization", "Bearer admin-token")
 	rec := httptest.NewRecorder()
 

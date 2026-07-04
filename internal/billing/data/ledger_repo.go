@@ -21,6 +21,30 @@ func NewLedgerRepo(data *Data) biz.LedgerRepo {
 }
 
 func (r *ledgerRepo) CreateLedger(ctx context.Context, ledger *biz.Ledger) error {
+	return r.CreateLedgerInTx(ctx, r.data.db.WithContext(ctx), ledger)
+}
+
+// CreateLedgerInTx inserts a ledger entry inside the caller's transaction.
+// The function is the new authoritative write path: the
+// LedgerDedupeKey uniqueness is enforced by the database, so the CAS
+// commit pipeline can safely retry on conflict and end up with exactly
+// one row per (reservation_id, type, cost_source) triple.
+func (r *ledgerRepo) CreateLedgerInTx(ctx context.Context, tx *gorm.DB, ledger *biz.Ledger) error {
+	if tx == nil {
+		tx = r.data.db.WithContext(ctx)
+	}
+	costSource := ledger.CostSource
+	if costSource == "" {
+		costSource = biz.CostSourceBalance
+	}
+	balanceCost := ledger.BalanceCost
+	if costSource == biz.CostSourceBalance && ledger.Type == biz.LedgerTypeConsume && ledger.SubscriptionCost == 0 && balanceCost == 0 {
+		balanceCost = absLedgerAmount(ledger.Amount)
+	}
+	dedupeKey := ledger.LedgerDedupeKey
+	if dedupeKey == "" {
+		dedupeKey = legacyLedgerDedupeKey(ledger)
+	}
 	model := &ledgerModel{
 		UserID:                ledger.UserID,
 		Amount:                ledger.Amount,
@@ -40,9 +64,29 @@ func (r *ledgerRepo) CreateLedger(ctx context.Context, ledger *biz.Ledger) error
 		ElapsedTime:           ledger.ElapsedTime,
 		IsStream:              ledger.IsStream,
 		Endpoint:              ledger.Endpoint,
+		CostSource:            costSource,
+		SubscriptionCost:      ledger.SubscriptionCost,
+		BalanceCost:           balanceCost,
+		LedgerDedupeKey:       dedupeKey,
 	}
+	return tx.Create(model).Error
+}
 
-	return r.data.db.WithContext(ctx).Create(model).Error
+func legacyLedgerDedupeKey(ledger *biz.Ledger) string {
+	if ledger == nil {
+		return fmt.Sprintf("legacy:unknown:%d", time.Now().UnixNano())
+	}
+	if ledger.ReferenceID != "" {
+		return fmt.Sprintf("%s:%s:legacy", ledger.ReferenceID, ledger.Type)
+	}
+	return fmt.Sprintf("legacy:%s:%s:%d", ledger.UserID, ledger.Type, time.Now().UnixNano())
+}
+
+func absLedgerAmount(amount int64) int64 {
+	if amount < 0 {
+		return -amount
+	}
+	return amount
 }
 
 func (r *ledgerRepo) ListLedgers(ctx context.Context, userID string, page, pageSize int32) ([]*biz.Ledger, int64, error) {
@@ -75,42 +119,34 @@ func (r *ledgerRepo) ListLedgers(ctx context.Context, userID string, page, pageS
 
 	ledgers := make([]*biz.Ledger, len(models))
 	for i, model := range models {
-		ledgers[i] = &biz.Ledger{
-			ID:                    model.ID,
-			UserID:                model.UserID,
-			Amount:                model.Amount,
-			UpstreamCost:          model.UpstreamCost,
-			BalanceAfter:          model.BalanceAfter,
-			Type:                  model.Type,
-			ReferenceID:           stringFromPtr(model.ReferenceID),
-			Remark:                stringFromPtr(model.Remark),
-			TokenName:             model.TokenName,
-			ModelName:             model.ModelName,
-			Quota:                 model.Quota,
-			PromptTokens:          model.PromptTokens,
-			CompletionTokens:      model.CompletionTokens,
-			CacheReadTokens:       model.CacheReadTokens,
-			ChannelID:             model.ChannelID,
-			SubscriptionAccountID: model.SubscriptionAccountID,
-			ElapsedTime:           model.ElapsedTime,
-			IsStream:              model.IsStream,
-			Endpoint:              model.Endpoint,
-			CreatedAt:             model.CreatedAt,
-		}
+		ledgers[i] = ledgerFromModel(&model)
 	}
-
 	return ledgers, total, nil
 }
 
 func (r *ledgerRepo) ListLedgersWithTimeRange(ctx context.Context, userID string, page, pageSize int32, startTime, endTime time.Time) ([]*biz.Ledger, int64, error) {
+	return r.listLedgersInternal(ctx, userID, page, pageSize, "", startTime, endTime, false)
+}
+
+func (r *ledgerRepo) ListLedgersWithFilters(ctx context.Context, userID string, page, pageSize int32, ledgerType string, startTime, endTime time.Time) ([]*biz.Ledger, int64, error) {
+	return r.listLedgersInternal(ctx, userID, page, pageSize, ledgerType, startTime, endTime, false)
+}
+
+func (r *ledgerRepo) listLedgersInternal(ctx context.Context, userID string, page, pageSize int32, ledgerType string, startTime, endTime time.Time, _ bool) ([]*biz.Ledger, int64, error) {
 	var models []ledgerModel
 	var total int64
 
-	offset := (page - 1) * pageSize
+	offset := int((page - 1) * pageSize)
+	if offset < 0 {
+		offset = 0
+	}
 
 	query := r.data.db.WithContext(ctx).Model(&ledgerModel{})
 	if userID != "" {
 		query = query.Where("user_id = ?", userID)
+	}
+	if ledgerType != "" {
+		query = query.Where("type = ?", ledgerType)
 	}
 	if !startTime.IsZero() {
 		query = query.Where("created_at >= ?", startTime)
@@ -118,380 +154,217 @@ func (r *ledgerRepo) ListLedgersWithTimeRange(ctx context.Context, userID string
 	if !endTime.IsZero() {
 		query = query.Where("created_at <= ?", endTime)
 	}
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if err := query.
+		Order("created_at DESC").
+		Limit(int(pageSize)).
+		Offset(offset).
+		Find(&models).Error; err != nil {
+		return nil, 0, err
+	}
+
+	ledgers := make([]*biz.Ledger, len(models))
+	for i := range models {
+		ledgers[i] = ledgerFromModel(&models[i])
+	}
+	return ledgers, total, nil
+}
+
+func (r *ledgerRepo) ListLedgersBySubscriptionAccount(ctx context.Context, subscriptionAccountID int64, page, pageSize int32) ([]*biz.Ledger, int64, error) {
+	var models []ledgerModel
+	var total int64
+
+	offset := int((page - 1) * pageSize)
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := r.data.db.WithContext(ctx).Model(&ledgerModel{}).
+		Where("subscription_account_id = ?", subscriptionAccountID)
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	fetchQuery := r.data.db.WithContext(ctx)
-	if userID != "" {
-		fetchQuery = fetchQuery.Where("user_id = ?", userID)
-	}
-	if !startTime.IsZero() {
-		fetchQuery = fetchQuery.Where("created_at >= ?", startTime)
-	}
-	if !endTime.IsZero() {
-		fetchQuery = fetchQuery.Where("created_at <= ?", endTime)
-	}
-
-	if err := fetchQuery.
+	if err := query.
 		Order("created_at DESC").
 		Limit(int(pageSize)).
-		Offset(int(offset)).
+		Offset(offset).
 		Find(&models).Error; err != nil {
 		return nil, 0, err
 	}
 
 	ledgers := make([]*biz.Ledger, len(models))
-	for i, model := range models {
-		ledgers[i] = &biz.Ledger{
-			ID:                    model.ID,
-			UserID:                model.UserID,
-			Amount:                model.Amount,
-			UpstreamCost:          model.UpstreamCost,
-			BalanceAfter:          model.BalanceAfter,
-			Type:                  model.Type,
-			ReferenceID:           stringFromPtr(model.ReferenceID),
-			Remark:                stringFromPtr(model.Remark),
-			TokenName:             model.TokenName,
-			ModelName:             model.ModelName,
-			Quota:                 model.Quota,
-			PromptTokens:          model.PromptTokens,
-			CompletionTokens:      model.CompletionTokens,
-			CacheReadTokens:       model.CacheReadTokens,
-			ChannelID:             model.ChannelID,
-			SubscriptionAccountID: model.SubscriptionAccountID,
-			ElapsedTime:           model.ElapsedTime,
-			IsStream:              model.IsStream,
-			Endpoint:              model.Endpoint,
-			CreatedAt:             model.CreatedAt,
-		}
+	for i := range models {
+		ledgers[i] = ledgerFromModel(&models[i])
 	}
-
-	return ledgers, total, nil
-}
-
-func (r *ledgerRepo) ListLedgersWithFilters(ctx context.Context, userID string, page, pageSize int32, ledgerType string, startTime, endTime time.Time) ([]*biz.Ledger, int64, error) {
-	var models []ledgerModel
-	var total int64
-
-	offset := (page - 1) * pageSize
-
-	// Build count query
-	countQuery := r.data.db.WithContext(ctx).Model(&ledgerModel{})
-	if userID != "" {
-		countQuery = countQuery.Where("user_id = ?", userID)
-	}
-	if ledgerType != "" {
-		countQuery = countQuery.Where("type = ?", ledgerType)
-	}
-	if !startTime.IsZero() {
-		countQuery = countQuery.Where("created_at >= ?", startTime)
-	}
-	if !endTime.IsZero() {
-		countQuery = countQuery.Where("created_at <= ?", endTime)
-	}
-
-	if err := countQuery.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	// Build fetch query
-	fetchQuery := r.data.db.WithContext(ctx)
-	if userID != "" {
-		fetchQuery = fetchQuery.Where("user_id = ?", userID)
-	}
-	if ledgerType != "" {
-		fetchQuery = fetchQuery.Where("type = ?", ledgerType)
-	}
-	if !startTime.IsZero() {
-		fetchQuery = fetchQuery.Where("created_at >= ?", startTime)
-	}
-	if !endTime.IsZero() {
-		fetchQuery = fetchQuery.Where("created_at <= ?", endTime)
-	}
-
-	if err := fetchQuery.
-		Order("created_at DESC").
-		Limit(int(pageSize)).
-		Offset(int(offset)).
-		Find(&models).Error; err != nil {
-		return nil, 0, err
-	}
-
-	ledgers := make([]*biz.Ledger, len(models))
-	for i, model := range models {
-		ledgers[i] = &biz.Ledger{
-			ID:                    model.ID,
-			UserID:                model.UserID,
-			Amount:                model.Amount,
-			UpstreamCost:          model.UpstreamCost,
-			BalanceAfter:          model.BalanceAfter,
-			Type:                  model.Type,
-			ReferenceID:           stringFromPtr(model.ReferenceID),
-			Remark:                stringFromPtr(model.Remark),
-			TokenName:             model.TokenName,
-			ModelName:             model.ModelName,
-			Quota:                 model.Quota,
-			PromptTokens:          model.PromptTokens,
-			CompletionTokens:      model.CompletionTokens,
-			CacheReadTokens:       model.CacheReadTokens,
-			ChannelID:             model.ChannelID,
-			SubscriptionAccountID: model.SubscriptionAccountID,
-			ElapsedTime:           model.ElapsedTime,
-			IsStream:              model.IsStream,
-			Endpoint:              model.Endpoint,
-			CreatedAt:             model.CreatedAt,
-		}
-	}
-
-	return ledgers, total, nil
-}
-
-// ListLedgersBySubscriptionAccount returns ledger entries attributed to a
-// specific subscription account, ordered newest-first.
-func (r *ledgerRepo) ListLedgersBySubscriptionAccount(ctx context.Context, subscriptionAccountID int64, page, pageSize int32) ([]*biz.Ledger, int64, error) {
-	var models []ledgerModel
-	var total int64
-
-	offset := (page - 1) * pageSize
-
-	countQuery := r.data.db.WithContext(ctx).Model(&ledgerModel{}).Where("subscription_account_id = ?", subscriptionAccountID)
-	if err := countQuery.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	fetchQuery := r.data.db.WithContext(ctx).Where("subscription_account_id = ?", subscriptionAccountID)
-	if err := fetchQuery.
-		Order("created_at DESC").
-		Limit(int(pageSize)).
-		Offset(int(offset)).
-		Find(&models).Error; err != nil {
-		return nil, 0, err
-	}
-
-	ledgers := make([]*biz.Ledger, len(models))
-	for i, model := range models {
-		ledgers[i] = &biz.Ledger{
-			ID:                    model.ID,
-			UserID:                model.UserID,
-			Amount:                model.Amount,
-			UpstreamCost:          model.UpstreamCost,
-			BalanceAfter:          model.BalanceAfter,
-			Type:                  model.Type,
-			ReferenceID:           stringFromPtr(model.ReferenceID),
-			Remark:                stringFromPtr(model.Remark),
-			TokenName:             model.TokenName,
-			ModelName:             model.ModelName,
-			Quota:                 model.Quota,
-			PromptTokens:          model.PromptTokens,
-			CompletionTokens:      model.CompletionTokens,
-			CacheReadTokens:       model.CacheReadTokens,
-			ChannelID:             model.ChannelID,
-			SubscriptionAccountID: model.SubscriptionAccountID,
-			ElapsedTime:           model.ElapsedTime,
-			IsStream:              model.IsStream,
-			Endpoint:              model.Endpoint,
-			CreatedAt:             model.CreatedAt,
-		}
-	}
-
 	return ledgers, total, nil
 }
 
 func (r *ledgerRepo) AggregateLedgerByDate(ctx context.Context, userID string, ledgerType string, startTime, endTime time.Time) ([]*biz.DailyAggregate, []*biz.ModelAggregate, error) {
-	// Fetch raw rows, aggregate in Go (database-agnostic, avoids MySQL-specific SQL)
-	type rawRow struct {
-		CreatedAt        time.Time
-		Amount           int64
+	if ledgerType == "" {
+		ledgerType = biz.LedgerTypeConsume
+	}
+
+	// Build dialect-specific date expression
+	var dateExpr string
+	switch r.data.db.Dialector.Name() {
+	case "postgres":
+		dateExpr = `TO_CHAR(created_at, 'YYYY-MM-DD')`
+	case "mysql":
+		dateExpr = `DATE_FORMAT(created_at, '%Y-%m-%d')`
+	default: // sqlite
+		dateExpr = `strftime('%Y-%m-%d', created_at)`
+	}
+
+	dailyQuery := r.data.db.WithContext(ctx).Model(&ledgerModel{}).
+		Select(dateExpr+` as date,
+			COALESCE(SUM(ABS(amount)), 0) as quota,
+			COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+			COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
+			COUNT(*) as count,
+			COALESCE(SUM(elapsed_time), 0) as elapsed_time`).
+		Where("type = ?", ledgerType)
+	if userID != "" {
+		dailyQuery = dailyQuery.Where("user_id = ?", userID)
+	}
+	if !startTime.IsZero() {
+		dailyQuery = dailyQuery.Where("created_at >= ?", startTime)
+	}
+	if !endTime.IsZero() {
+		dailyQuery = dailyQuery.Where("created_at <= ?", endTime)
+	}
+	dailyQuery = dailyQuery.Group("date").Order("date ASC")
+
+	type dailyRow struct {
+		Date             string
+		Quota            int64
 		PromptTokens     int64
 		CompletionTokens int64
 		CacheReadTokens  int64
+		Count            int64
 		ElapsedTime      int64
-		ModelName        string
 	}
-	var rows []rawRow
-	err := r.data.db.WithContext(ctx).Raw(`
-		SELECT created_at, amount, prompt_tokens, completion_tokens, cache_read_tokens, elapsed_time, model_name
-		FROM billing_ledgers
-		WHERE user_id = ? AND type = ? AND created_at >= ? AND created_at <= ?
-	`, userID, ledgerType, startTime, endTime).Scan(&rows).Error
-	if err != nil {
+	var dailyRows []dailyRow
+	if err := dailyQuery.Scan(&dailyRows).Error; err != nil {
 		return nil, nil, err
 	}
-
-	// Aggregate by date
-	type dailyAcc struct {
-		quota            int64
-		promptTokens     int64
-		completionTokens int64
-		cacheReadTokens  int64
-		count            int64
-		elapsedTime      int64
-	}
-	dailyMap := map[string]*dailyAcc{}
-	modelMap := map[string]int64{}
-
-	for _, row := range rows {
-		date := row.CreatedAt.Format("2006-01-02")
-		acc, ok := dailyMap[date]
-		if !ok {
-			acc = &dailyAcc{}
-			dailyMap[date] = acc
-		}
-		amount := row.Amount
-		if amount < 0 {
-			amount = -amount
-		}
-		acc.quota += amount
-		acc.promptTokens += row.PromptTokens
-		acc.completionTokens += row.CompletionTokens
-		acc.cacheReadTokens += row.CacheReadTokens
-		acc.count++
-		acc.elapsedTime += row.ElapsedTime
-
-		if row.ModelName != "" {
-			modelMap[row.ModelName] += row.PromptTokens + row.CompletionTokens
-		}
-	}
-
-	// Build sorted daily results
-	dates := make([]string, 0, len(dailyMap))
-	for d := range dailyMap {
-		dates = append(dates, d)
-	}
-	sort.Strings(dates)
-
-	daily := make([]*biz.DailyAggregate, len(dates))
-	for i, d := range dates {
-		acc := dailyMap[d]
+	daily := make([]*biz.DailyAggregate, len(dailyRows))
+	for i, row := range dailyRows {
 		daily[i] = &biz.DailyAggregate{
-			Date:             d,
-			Quota:            acc.quota,
-			PromptTokens:     acc.promptTokens,
-			CompletionTokens: acc.completionTokens,
-			CacheReadTokens:  acc.cacheReadTokens,
-			Count:            acc.count,
-			ElapsedTime:      acc.elapsedTime,
+			Date:             row.Date,
+			Quota:            row.Quota,
+			PromptTokens:     row.PromptTokens,
+			CompletionTokens: row.CompletionTokens,
+			CacheReadTokens:  row.CacheReadTokens,
+			Count:            row.Count,
+			ElapsedTime:      row.ElapsedTime,
 		}
 	}
 
-	// Build sorted model results (by tokens desc)
-	type modelKV struct {
+	modelQuery := r.data.db.WithContext(ctx).Model(&ledgerModel{}).
+		Select(`model_name as model, COALESCE(SUM(quota), 0) as tokens`).
+		Where("type = ?", ledgerType)
+	if userID != "" {
+		modelQuery = modelQuery.Where("user_id = ?", userID)
+	}
+	if !startTime.IsZero() {
+		modelQuery = modelQuery.Where("created_at >= ?", startTime)
+	}
+	if !endTime.IsZero() {
+		modelQuery = modelQuery.Where("created_at <= ?", endTime)
+	}
+	modelQuery = modelQuery.Group("model_name").Order("tokens DESC")
+
+	type modelRow struct {
 		Model  string
 		Tokens int64
 	}
-	modelList := make([]modelKV, 0, len(modelMap))
-	for m, t := range modelMap {
-		modelList = append(modelList, modelKV{Model: m, Tokens: t})
+	var modelRows []modelRow
+	if err := modelQuery.Scan(&modelRows).Error; err != nil {
+		return nil, nil, err
 	}
-	sort.Slice(modelList, func(i, j int) bool {
-		return modelList[i].Tokens > modelList[j].Tokens
-	})
-
-	models := make([]*biz.ModelAggregate, len(modelList))
-	for i, m := range modelList {
-		models[i] = &biz.ModelAggregate{
-			Model:  m.Model,
-			Tokens: m.Tokens,
-		}
+	models := make([]*biz.ModelAggregate, len(modelRows))
+	for i, row := range modelRows {
+		models[i] = &biz.ModelAggregate{Model: row.Model, Tokens: row.Tokens}
 	}
-
 	return daily, models, nil
 }
 
-// AggregateUsage performs a multi-dimensional aggregation in SQL (GROUP BY),
-// across all users by default. Grouping dimensions are resolved against a fixed
-// allow-list, so group_by values can never reach the query as raw SQL.
 func (r *ledgerRepo) AggregateUsage(ctx context.Context, filter biz.UsageFilter) ([]*biz.UsageBucket, *biz.UsageTotals, error) {
-	dayExpr, hourExpr := r.dateExprs()
-
-	// dimension -> (select expression, output column alias)
-	type dim struct{ expr, alias string }
-	allowed := map[string]dim{
-		biz.UsageDimUser:                {"user_id", "g_user"},
-		biz.UsageDimChannel:             {"channel_id", "g_channel"},
-		biz.UsageDimModel:               {"model_name", "g_model"},
-		biz.UsageDimToken:               {"token_name", "g_token"},
-		biz.UsageDimType:                {"type", "g_type"},
-		biz.UsageDimDay:                 {dayExpr, "g_day"},
-		biz.UsageDimHour:                {hourExpr, "g_hour"},
-		biz.UsageDimSubscriptionAccount: {"subscription_account_id", "g_subscription_account"},
+	// Empty Type means "all types"; the previous default-to-consume
+	// behaviour was a bug in the dual-track port. The caller decides
+	// whether to scope the aggregate; we never impose a default.
+	groupCols, selectCols, joinSQL := usageQueryParts(filter.GroupBy)
+	if groupCols == "" {
+		return nil, nil, fmt.Errorf("no group_by dimensions")
 	}
 
-	selectParts := make([]string, 0, len(filter.GroupBy)+5)
-	groupParts := make([]string, 0, len(filter.GroupBy))
-	seen := map[string]bool{}
-	for _, raw := range filter.GroupBy {
-		key := strings.ToLower(strings.TrimSpace(raw))
-		d, ok := allowed[key]
-		if !ok || seen[key] {
-			continue
-		}
-		seen[key] = true
-		selectParts = append(selectParts, fmt.Sprintf("%s AS %s", d.expr, d.alias))
-		groupParts = append(groupParts, d.alias)
+	q := r.data.db.WithContext(ctx).Model(&ledgerModel{}).
+		Select(selectCols).
+		Joins(joinSQL)
+	// Empty Type means "all types". The caller decides whether to
+	// scope the aggregate; we never impose a default.
+	if filter.Type != "" {
+		q = q.Where("type = ?", filter.Type)
 	}
-
-	selectParts = append(selectParts,
-		"COALESCE(SUM(ABS(amount)), 0) AS quota",
-		"COALESCE(SUM(upstream_cost), 0) AS upstream_cost",
-		"COALESCE(SUM(ABS(amount) - upstream_cost), 0) AS gross_profit",
-		"COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens",
-		"COALESCE(SUM(completion_tokens), 0) AS completion_tokens",
-		"COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens",
-		"COUNT(1) AS count",
-		"COALESCE(SUM(elapsed_time), 0) AS elapsed_time",
-	)
-
-	db := r.data.db.WithContext(ctx).Table("billing_ledgers")
-	db = applyUsageFilters(db, filter)
-
-	db = db.Select(strings.Join(selectParts, ", "))
-	if len(groupParts) > 0 {
-		db = db.Group(strings.Join(groupParts, ", "))
+	if filter.UserID != "" {
+		q = q.Where("user_id = ?", filter.UserID)
 	}
-	db = db.Order("quota DESC")
-	if filter.Limit > 0 {
-		db = db.Limit(filter.Limit)
+	if filter.ChannelID > 0 {
+		q = q.Where("channel_id = ?", filter.ChannelID)
 	}
-
-	type aggRow struct {
-		GUser                string
-		GChannel             int64
-		GSubscriptionAccount int64
-		GModel               string
-		GToken               string
-		GType                string
-		GDay                 string
-		GHour                string
-		Quota                int64
-		UpstreamCost         int64
-		GrossProfit          int64
-		PromptTokens         int64
-		CompletionTokens     int64
-		CacheReadTokens      int64
-		Count                int64
-		ElapsedTime          int64
+	if filter.SubscriptionAccountID > 0 {
+		q = q.Where("subscription_account_id = ?", filter.SubscriptionAccountID)
 	}
-	var rows []aggRow
-	if err := db.Scan(&rows).Error; err != nil {
+	if filter.Model != "" {
+		q = q.Where("model_name = ?", filter.Model)
+	}
+	if !filter.StartTime.IsZero() {
+		q = q.Where("created_at >= ?", filter.StartTime)
+	}
+	if !filter.EndTime.IsZero() {
+		q = q.Where("created_at <= ?", filter.EndTime)
+	}
+	q = q.Group(groupCols)
+	type bucketRow struct {
+		UserID                string
+		ChannelID             int64  `gorm:"column:channel_id"`
+		SubscriptionAccountID int64  `gorm:"column:subscription_account_id"`
+		Model                 string `gorm:"column:model"`
+		TokenName             string `gorm:"column:token_name"`
+		Type                  string `gorm:"column:type"`
+		Day                   string `gorm:"column:day"`
+		Hour                  string `gorm:"column:hour"`
+		Quota                 int64
+		UpstreamCost          int64
+		GrossProfit           int64
+		PromptTokens          int64
+		CompletionTokens      int64
+		CacheReadTokens       int64
+		Count                 int64
+		ElapsedTime           int64
+	}
+	var rows []bucketRow
+	if err := q.Scan(&rows).Error; err != nil {
 		return nil, nil, err
 	}
-
 	buckets := make([]*biz.UsageBucket, len(rows))
 	totals := &biz.UsageTotals{}
-	for i := range rows {
-		row := rows[i]
+	for i, row := range rows {
 		buckets[i] = &biz.UsageBucket{
-			UserID:                row.GUser,
-			ChannelID:             row.GChannel,
-			SubscriptionAccountID: row.GSubscriptionAccount,
-			Model:                 row.GModel,
-			TokenName:             row.GToken,
-			Type:                  row.GType,
-			Day:                   row.GDay,
-			Hour:                  row.GHour,
+			UserID:                row.UserID,
+			ChannelID:             row.ChannelID,
+			SubscriptionAccountID: row.SubscriptionAccountID,
+			Model:                 row.Model,
+			TokenName:             row.TokenName,
+			Type:                  row.Type,
+			Day:                   row.Day,
+			Hour:                  row.Hour,
 			Quota:                 row.Quota,
 			UpstreamCost:          row.UpstreamCost,
 			GrossProfit:           row.GrossProfit,
@@ -501,91 +374,163 @@ func (r *ledgerRepo) AggregateUsage(ctx context.Context, filter biz.UsageFilter)
 			Count:                 row.Count,
 			ElapsedTime:           row.ElapsedTime,
 		}
+		totals.Quota += row.Quota
+		totals.UpstreamCost += row.UpstreamCost
+		totals.GrossProfit += row.GrossProfit
+		totals.PromptTokens += row.PromptTokens
+		totals.CompletionTokens += row.CompletionTokens
+		totals.CacheReadTokens += row.CacheReadTokens
+		totals.Count += row.Count
+		totals.ElapsedTime += row.ElapsedTime
 	}
 
-	totals, err := r.aggregateUsageTotals(ctx, filter)
-	if err != nil {
-		return nil, nil, err
+	// Sort buckets by quota DESC when limit is set.
+	if filter.Limit > 0 && len(buckets) > filter.Limit {
+		sort.Slice(buckets, func(i, j int) bool {
+			return buckets[i].Quota > buckets[j].Quota
+		})
+		buckets = buckets[:filter.Limit]
 	}
 	return buckets, totals, nil
 }
 
-func (r *ledgerRepo) aggregateUsageTotals(ctx context.Context, filter biz.UsageFilter) (*biz.UsageTotals, error) {
-	type totalRow struct {
-		Quota            int64
-		UpstreamCost     int64
-		GrossProfit      int64
-		PromptTokens     int64
-		CompletionTokens int64
-		CacheReadTokens  int64
-		Count            int64
-		ElapsedTime      int64
+func usageQueryParts(groupBy []string) (groupCols, selectCols, joinSQL string) {
+	cols := []string{
+		"COALESCE(SUM(ABS(amount)), 0) as quota",
+		"COALESCE(SUM(upstream_cost), 0) as upstream_cost",
+		"COALESCE(SUM(ABS(amount) - upstream_cost), 0) as gross_profit",
+		"COALESCE(SUM(prompt_tokens), 0) as prompt_tokens",
+		"COALESCE(SUM(completion_tokens), 0) as completion_tokens",
+		"COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens",
+		"COUNT(*) as count",
+		"COALESCE(SUM(elapsed_time), 0) as elapsed_time",
 	}
-	var row totalRow
-	err := applyUsageFilters(r.data.db.WithContext(ctx).Table("billing_ledgers"), filter).
-		Select(strings.Join([]string{
-			"COALESCE(SUM(ABS(amount)), 0) AS quota",
-			"COALESCE(SUM(upstream_cost), 0) AS upstream_cost",
-			"COALESCE(SUM(ABS(amount) - upstream_cost), 0) AS gross_profit",
-			"COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens",
-			"COALESCE(SUM(completion_tokens), 0) AS completion_tokens",
-			"COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens",
-			"COUNT(1) AS count",
-			"COALESCE(SUM(elapsed_time), 0) AS elapsed_time",
-		}, ", ")).
-		Scan(&row).Error
-	if err != nil {
-		return nil, err
-	}
-	return &biz.UsageTotals{
-		Quota:            row.Quota,
-		UpstreamCost:     row.UpstreamCost,
-		GrossProfit:      row.GrossProfit,
-		PromptTokens:     row.PromptTokens,
-		CompletionTokens: row.CompletionTokens,
-		CacheReadTokens:  row.CacheReadTokens,
-		Count:            row.Count,
-		ElapsedTime:      row.ElapsedTime,
-	}, nil
-}
-
-func applyUsageFilters(db *gorm.DB, filter biz.UsageFilter) *gorm.DB {
-	if filter.Type != "" {
-		db = db.Where("type = ?", filter.Type)
-	}
-	if filter.UserID != "" {
-		db = db.Where("user_id = ?", filter.UserID)
-	}
-	if filter.ChannelID != 0 {
-		db = db.Where("channel_id = ?", filter.ChannelID)
-	}
-	if filter.SubscriptionAccountID != 0 {
-		db = db.Where("subscription_account_id = ?", filter.SubscriptionAccountID)
-	}
-	if filter.Model != "" {
-		db = db.Where("model_name = ?", filter.Model)
-	}
-	if !filter.StartTime.IsZero() {
-		db = db.Where("created_at >= ?", filter.StartTime)
-	}
-	if !filter.EndTime.IsZero() {
-		db = db.Where("created_at <= ?", filter.EndTime)
-	}
-	return db
-}
-
-// dateExprs returns dialect-specific SQL expressions formatting created_at into
-// day (YYYY-MM-DD) and hour (YYYY-MM-DD HH) strings. billing_ledgers.created_at
-// is TIMESTAMPTZ on Postgres and DATETIME on MySQL, so the Postgres branch
-// uses to_char on the timestamp directly while MySQL keeps DATE_FORMAT.
-func (r *ledgerRepo) dateExprs() (day, hour string) {
-	if r.data.db != nil && r.data.db.Dialector != nil {
-		switch r.data.db.Dialector.Name() {
-		case "sqlite":
-			return "strftime('%Y-%m-%d', created_at)", "strftime('%Y-%m-%d %H', created_at)"
-		case "postgres":
-			return "to_char(created_at, 'YYYY-MM-DD')", "to_char(created_at, 'YYYY-MM-DD HH')"
+	// We accumulate the SELECT column expression and the GROUP BY
+	// column separately: the SELECT uses an alias when the source
+	// column is hidden behind a function/case expression; the GROUP
+	// BY uses the bare column name.
+	for _, dim := range groupBy {
+		switch dim {
+		case biz.UsageDimUser:
+			cols = append(cols, "user_id")
+		case biz.UsageDimChannel:
+			cols = append(cols, "channel_id")
+		case biz.UsageDimModel:
+			cols = append(cols, "model_name as model")
+		case biz.UsageDimToken:
+			cols = append(cols, "token_name")
+		case biz.UsageDimType:
+			cols = append(cols, "type")
+		case biz.UsageDimDay:
+			// Use DATE_FORMAT for MySQL, strftime for SQLite
+			cols = append(cols, "DATE_FORMAT(created_at, '%Y-%m-%d') as day")
+		case biz.UsageDimHour:
+			// Use DATE_FORMAT for MySQL, strftime for SQLite
+			cols = append(cols, "DATE_FORMAT(created_at, '%Y-%m-%d %H') as hour")
+		case biz.UsageDimSubscriptionAccount:
+			cols = append(cols, "subscription_account_id")
 		}
 	}
-	return "DATE_FORMAT(created_at, '%Y-%m-%d')", "DATE_FORMAT(created_at, '%Y-%m-%d %H')"
+	// The original code grouped by the user-facing dimension string
+	// (e.g. "channel") which is not a real column; map each
+	// dimension to its bare column name so SQLite's strict
+	// GROUP BY resolution is happy.
+	dimColumn := func(dim string) string {
+		switch dim {
+		case biz.UsageDimUser:
+			return "user_id"
+		case biz.UsageDimChannel:
+			return "channel_id"
+		case biz.UsageDimModel:
+			return "model_name"
+		case biz.UsageDimToken:
+			return "token_name"
+		case biz.UsageDimType:
+			return "type"
+		case biz.UsageDimDay, biz.UsageDimHour:
+			return "created_at"
+		case biz.UsageDimSubscriptionAccount:
+			return "subscription_account_id"
+		}
+		return dim
+	}
+	groupByCols := make([]string, 0, len(groupBy))
+	for _, dim := range groupBy {
+		groupByCols = append(groupByCols, dimColumn(dim))
+	}
+	groupCols = strings.Join(groupByCols, ", ")
+	selectCols = strings.Join(cols, ", ")
+	return groupCols, selectCols, ""
+}
+
+// FindByDedupeKey returns the ledger entry with the given dedupe key or
+// nil if none exists. Used by the CAS commit pipeline to detect
+// pre-existing entries left by an earlier failed attempt.
+func (r *ledgerRepo) FindByDedupeKey(ctx context.Context, tx *gorm.DB, key string) (*biz.Ledger, error) {
+	if tx == nil {
+		tx = r.data.db.WithContext(ctx)
+	}
+	if key == "" {
+		return nil, nil
+	}
+	var model ledgerModel
+	if err := tx.WithContext(ctx).Where("ledger_dedupe_key = ?", key).First(&model).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return ledgerFromModel(&model), nil
+}
+
+// SumSubscriptionCostByReservation returns the total subscription_cost
+// recorded against the given reservation IDs. Used by reconciliation to
+// verify the subscription-side ledger matches the per-reservation actual
+// absorption.
+func (r *ledgerRepo) SumSubscriptionCostByReservation(ctx context.Context, reservationIDs []string) (int64, error) {
+	if len(reservationIDs) == 0 {
+		return 0, nil
+	}
+	var total int64
+	q := r.data.db.WithContext(ctx).Model(&ledgerModel{}).
+		Where("reference_id IN ?", reservationIDs).
+		Where("type = ?", biz.LedgerTypeConsume).
+		Where("cost_source = ?", biz.CostSourceSubscription).
+		Select("COALESCE(SUM(subscription_cost), 0)")
+	if err := q.Scan(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func ledgerFromModel(model *ledgerModel) *biz.Ledger {
+	if model == nil {
+		return nil
+	}
+	return &biz.Ledger{
+		ID:                    model.ID,
+		UserID:                model.UserID,
+		Amount:                model.Amount,
+		UpstreamCost:          model.UpstreamCost,
+		BalanceAfter:          model.BalanceAfter,
+		Type:                  model.Type,
+		ReferenceID:           stringFromPtr(model.ReferenceID),
+		Remark:                stringFromPtr(model.Remark),
+		TokenName:             model.TokenName,
+		ModelName:             model.ModelName,
+		Quota:                 model.Quota,
+		PromptTokens:          model.PromptTokens,
+		CompletionTokens:      model.CompletionTokens,
+		CacheReadTokens:       model.CacheReadTokens,
+		ChannelID:             model.ChannelID,
+		SubscriptionAccountID: model.SubscriptionAccountID,
+		ElapsedTime:           model.ElapsedTime,
+		IsStream:              model.IsStream,
+		Endpoint:              model.Endpoint,
+		CostSource:            model.CostSource,
+		SubscriptionCost:      model.SubscriptionCost,
+		BalanceCost:           model.BalanceCost,
+		LedgerDedupeKey:       model.LedgerDedupeKey,
+		CreatedAt:             model.CreatedAt,
+	}
 }

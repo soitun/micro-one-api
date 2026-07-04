@@ -38,8 +38,8 @@ func setupRedeemTestDB(t *testing.T) *gorm.DB {
 				user_id TEXT,
 				code TEXT,
 				amount INTEGER,
-				quota_before INTEGER,
-				quota_after INTEGER,
+				balance_before INTEGER,
+				balance_after INTEGER,
 				created_at DATETIME
 			)
 		`).Error
@@ -179,7 +179,7 @@ func TestRedeemRepo_UpdateRedeemCodeCount_Insufficient(t *testing.T) {
 
 	ctx := context.Background()
 	err = repo.UpdateRedeemCodeCount(ctx, "CODE123", 5) // 尝试减少 5 个
-	assert.Error(t, err) // 应该失败，因为只有 2 个可用
+	assert.Error(t, err)                                // 应该失败，因为只有 2 个可用
 	assert.Contains(t, err.Error(), "insufficient")
 
 	// 验证计数没有被修改
@@ -201,11 +201,11 @@ func TestRedeemRepo_CreateRedeemRecord(t *testing.T) {
 
 	ctx := context.Background()
 	record := &biz.RedeemRecord{
-		UserID:      "user1",
-		Code:        "CODE123",
-		Amount:      1000,
-		QuotaBefore: 500,
-		QuotaAfter:  1500,
+		UserID:        "user1",
+		Code:          "CODE123",
+		Amount:        1000,
+		BalanceBefore: 500,
+		BalanceAfter:  1500,
 	}
 
 	err := repo.CreateRedeemRecord(ctx, record)
@@ -218,6 +218,6 @@ func TestRedeemRepo_CreateRedeemRecord(t *testing.T) {
 	assert.Equal(t, "user1", model.UserID)
 	assert.Equal(t, "CODE123", model.Code)
 	assert.Equal(t, int64(1000), model.Amount)
-	assert.Equal(t, int64(500), model.QuotaBefore)
-	assert.Equal(t, int64(1500), model.QuotaAfter)
+	assert.Equal(t, int64(500), model.BalanceBefore)
+	assert.Equal(t, int64(1500), model.BalanceAfter)
 }

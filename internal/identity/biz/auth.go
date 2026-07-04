@@ -61,7 +61,7 @@ type User struct {
 	PasswordHash  string
 	OAuthProvider string
 	OAuthID       string
-	Quota         int64
+	Balance       int64
 	AffCode       string
 	InviterID     int64
 }
@@ -135,7 +135,7 @@ type IdentityRepo interface {
 	CreateUser(ctx context.Context, user *User) error
 	UpdateUser(ctx context.Context, user *User) error
 	DeleteUser(ctx context.Context, userID int64) error
-	IncreaseUserQuota(ctx context.Context, userID int64, amount int64) error
+	IncreaseUserBalance(ctx context.Context, userID int64, amount int64) error
 	CreateToken(ctx context.Context, token *Token) error
 	FindTokenByID(ctx context.Context, userID, tokenID int64) (*Token, error)
 	ListTokens(ctx context.Context, userID int64, page, pageSize int32, keyword string) ([]*Token, int64, error)

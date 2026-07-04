@@ -35,7 +35,7 @@ type userModel struct {
 	PasswordHash  string `gorm:"column:password_hash"`
 	OAuthProvider string `gorm:"column:oauth_provider;index"`
 	OAuthID       string `gorm:"column:oauth_id;index"`
-	Quota         int64  `gorm:"column:quota"`
+	Balance       int64  `gorm:"column:balance"`
 	AffCode       string `gorm:"column:aff_code;uniqueIndex"`
 	InviterID     int64  `gorm:"column:inviter_id;index"`
 }
@@ -283,9 +283,9 @@ func (r *Repository) DeleteUser(ctx context.Context, userID int64) error {
 	return nil
 }
 
-func (r *Repository) IncreaseUserQuota(ctx context.Context, userID int64, amount int64) error {
+func (r *Repository) IncreaseUserBalance(ctx context.Context, userID int64, amount int64) error {
 	if r.db != nil {
-		return r.increaseUserQuotaDB(ctx, userID, amount)
+		return r.increaseUserBalanceDB(ctx, userID, amount)
 	}
 	r.identityLock.Lock()
 	defer r.identityLock.Unlock()
@@ -293,7 +293,7 @@ func (r *Repository) IncreaseUserQuota(ctx context.Context, userID int64, amount
 	if !ok {
 		return biz.ErrUserNotFound
 	}
-	user.Quota += amount
+	user.Balance += amount
 	return nil
 }
 
@@ -547,7 +547,7 @@ func (r *Repository) createUserDB(ctx context.Context, user *biz.User) error {
 		PasswordHash:  user.PasswordHash,
 		OAuthProvider: user.OAuthProvider,
 		OAuthID:       user.OAuthID,
-		Quota:         user.Quota,
+		Balance:       user.Balance,
 		AffCode:       user.AffCode,
 		InviterID:     user.InviterID,
 	}
@@ -574,10 +574,10 @@ func (r *Repository) updateUserDB(ctx context.Context, user *biz.User) error {
 	}).Error
 }
 
-func (r *Repository) increaseUserQuotaDB(ctx context.Context, userID int64, amount int64) error {
+func (r *Repository) increaseUserBalanceDB(ctx context.Context, userID int64, amount int64) error {
 	result := r.db.WithContext(ctx).Model(&userModel{}).
 		Where("id = ?", userID).
-		Update("quota", gorm.Expr("quota + ?", amount))
+		Update("balance", gorm.Expr("balance + ?", amount))
 	if result.Error != nil {
 		return result.Error
 	}
@@ -715,7 +715,7 @@ func userModelToBiz(model userModel) *biz.User {
 		PasswordHash:  model.PasswordHash,
 		OAuthProvider: model.OAuthProvider,
 		OAuthID:       model.OAuthID,
-		Quota:         model.Quota,
+		Balance:       model.Balance,
 		AffCode:       model.AffCode,
 		InviterID:     model.InviterID,
 	}
@@ -766,7 +766,7 @@ func (r *Repository) listUsersDB(ctx context.Context, page, pageSize int32, keyw
 			Group:       m.Group,
 			Status:      m.Status,
 			Role:        m.Role,
-			Quota:       m.Quota,
+			Balance:     m.Balance,
 			AffCode:     m.AffCode,
 			InviterID:   m.InviterID,
 		}

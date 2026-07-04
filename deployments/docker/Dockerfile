@@ -25,6 +25,9 @@ RUN npm ci --no-audit --no-fund
 
 COPY web/ ./
 
+ARG VITE_RECHARGE_AMOUNT_MULTIPLIER=10
+ENV VITE_RECHARGE_AMOUNT_MULTIPLIER=${VITE_RECHARGE_AMOUNT_MULTIPLIER}
+
 RUN npm run build
 
 # ---------------------------------------------------------------------------
@@ -52,8 +55,6 @@ RUN go mod download && go mod verify
 
 COPY . .
 
-ARG SERVICE_NAME
-
 RUN make proto-tools && make proto
 
 # For admin-api, the web dist was built in the dedicated web-builder stage
@@ -62,6 +63,7 @@ RUN make proto-tools && make proto
 # intermediate /tmp/web-dist path lets us guard the COPY with a shell
 # conditional on SERVICE_NAME.
 COPY --from=web-builder /web/dist /tmp/web-dist
+ARG SERVICE_NAME
 RUN if [ "$SERVICE_NAME" = "admin-api" ]; then \
       rm -rf /app/internal/admin/server/static/web && \
       mkdir -p /app/internal/admin/server/static/web && \

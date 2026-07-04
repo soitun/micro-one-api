@@ -240,6 +240,24 @@ func init() {
 		QuotaBalanceRemaining,
 		QuotaFrozenAmount,
 	)
+
+	// Register subscription system metrics
+	prometheus.MustRegister(
+		SubscriptionQuotaChecksTotal,
+		SubscriptionUsageRecordsTotal,
+		SubscriptionPriorityReservationsTotal,
+		NegativeBalanceTotal,
+		OverdueReceivablesTotal,
+		RelaySubscriptionAdaptorRequestsTotal,
+		RelaySubscriptionFailoverTotal,
+		RelaySubscriptionStickyTotal,
+		RelayRuntimeBlocksTotal,
+		RelayRuntimeBlockActive,
+		RelayAccountPoolChecksTotal,
+		RelayUpstreamPassthroughTotal,
+		RelayCodexQuotaSnapshotsTotal,
+		RelayCodexQuotaUsedPercent,
+	)
 }
 
 // Handler returns an HTTP handler that serves Prometheus metrics.

@@ -76,7 +76,7 @@ func (uc *IdentityUsecase) EnsureRootAdmin(ctx context.Context) (*BootstrapResul
 		Status:       UserStatusEnabled,
 		Role:         RoleRootUser,
 		PasswordHash: string(hash),
-		Quota:        uc.defaultQuota,
+		Balance:      uc.defaultQuota,
 	}
 	if err := uc.repo.CreateUser(ctx, user); err != nil {
 		return nil, fmt.Errorf("create admin user: %w", err)

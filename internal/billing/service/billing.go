@@ -35,16 +35,27 @@ func (s *BillingService) ReserveQuota(ctx context.Context, req *billingv1.Reserv
 			ErrorMessage: err.Error(),
 		}, nil
 	}
-
-	return &billingv1.ReserveQuotaResponse{
-		Success:        true,
-		ReservationId:  reservation.ReservationID,
-		ReservedAmount: reservation.Amount,
-	}, nil
+	// The relay layer and any debugging tools read the cost-dimension
+	// split off the response. We forward the raw float USD as int64
+	// nanodollars (USD * 1e9) so the wire type is a stable integer
+	// regardless of float precision; the relay converts back to a
+	// display USD when needed.
+	resp := &billingv1.ReserveQuotaResponse{
+		Success:            true,
+		ReservationId:      reservation.ReservationID,
+		ReservedAmount:     reservation.Amount,
+		BalanceAmountQuota: reservation.BalanceAmountQuota,
+		SubscriptionId:     reservation.SubscriptionID,
+	}
+	if reservation.SubscriptionAmountUSD > 0 {
+		// Convert to nanodollars for stable int64 transport.
+		resp.SubscriptionAmountUsd = int64(reservation.SubscriptionAmountUSD * 1e9)
+	}
+	return resp, nil
 }
 
 func (s *BillingService) CommitQuota(ctx context.Context, req *billingv1.CommitQuotaRequest) (*billingv1.CommitQuotaResponse, error) {
-	committedAmount, refundAmount, err := s.uc.CommitQuotaWithUsage(ctx, req.ReservationId, req.ActualTokens, req.Success, biz.LedgerUsage{
+	committedAmount, refundAmount, result, err := s.uc.CommitQuotaWithUsageAndSplit(ctx, req.ReservationId, req.ActualTokens, req.Success, biz.LedgerUsage{
 		TokenName:             req.TokenName,
 		Endpoint:              req.Endpoint,
 		PromptTokens:          req.PromptTokens,
@@ -63,9 +74,11 @@ func (s *BillingService) CommitQuota(ctx context.Context, req *billingv1.CommitQ
 	}
 
 	return &billingv1.CommitQuotaResponse{
-		Success:         true,
-		CommittedAmount: committedAmount,
-		RefundAmount:    refundAmount,
+		Success:          true,
+		CommittedAmount:  committedAmount,
+		RefundAmount:     refundAmount,
+		SubscriptionCost: result.SubscriptionCost,
+		BalanceCost:      result.BalanceCost,
 	}, nil
 }
 
@@ -92,12 +105,12 @@ func (s *BillingService) GetAccountSnapshot(ctx context.Context, req *billingv1.
 	return &billingv1.GetAccountSnapshotResponse{
 		Snapshot: &commonv1.AccountSnapshot{
 			UserId:       account.UserID,
-			Quota:        account.Quota,
-			UsedQuota:    account.UsedQuota,
+			Balance:      account.Balance,
+			UsedAmount:   account.UsedAmount,
 			RequestCount: account.RequestCount,
 			Group:        account.Group,
 			GroupRatio:   account.GroupRatio(),
-			FrozenQuota:  account.FrozenQuota,
+			FrozenAmount: account.FrozenAmount,
 		},
 	}, nil
 }
@@ -112,12 +125,12 @@ func (s *BillingService) BatchGetAccountSnapshots(ctx context.Context, req *bill
 	for userID, account := range accounts {
 		snapshots[userID] = &commonv1.AccountSnapshot{
 			UserId:       account.UserID,
-			Quota:        account.Quota,
-			UsedQuota:    account.UsedQuota,
+			Balance:      account.Balance,
+			UsedAmount:   account.UsedAmount,
 			RequestCount: account.RequestCount,
 			Group:        account.Group,
 			GroupRatio:   account.GroupRatio(),
-			FrozenQuota:  account.FrozenQuota,
+			FrozenAmount: account.FrozenAmount,
 		}
 	}
 
@@ -136,8 +149,23 @@ func (s *BillingService) TopUpQuota(ctx context.Context, req *billingv1.TopUpQuo
 	}
 
 	return &billingv1.TopUpQuotaResponse{
-		Success:  true,
-		NewQuota: newQuota,
+		Success:    true,
+		NewBalance: newQuota,
+	}, nil
+}
+
+func (s *BillingService) PurchaseSubscription(ctx context.Context, req *billingv1.PurchaseSubscriptionRequest) (*billingv1.PurchaseSubscriptionResponse, error) {
+	newQuota, err := s.uc.PurchaseSubscription(ctx, req.UserId, req.PriceAmount, req.GroupId, req.Remark)
+	if err != nil {
+		return &billingv1.PurchaseSubscriptionResponse{
+			Success:      false,
+			ErrorMessage: err.Error(),
+		}, nil
+	}
+
+	return &billingv1.PurchaseSubscriptionResponse{
+		Success:    true,
+		NewBalance: newQuota,
 	}, nil
 }
 
@@ -156,7 +184,7 @@ func (s *BillingService) CreateRedeemCode(ctx context.Context, req *billingv1.Cr
 }
 
 func (s *BillingService) CreateRedeemCodesBatch(ctx context.Context, req *billingv1.CreateRedeemCodesBatchRequest) (*billingv1.CreateRedeemCodesBatchResponse, error) {
-	codes, err := s.uc.CreateRedeemCodesBatch(ctx, req.Name, req.Amount, req.Count, req.BatchSize, req.OperatorId)
+	codes, err := s.uc.CreateRedeemCodesBatch(ctx, req.Name, req.Amount, req.Count, req.BatchSize)
 	if err != nil {
 		return &billingv1.CreateRedeemCodesBatchResponse{
 			Success:      false,
@@ -281,9 +309,9 @@ func (s *BillingService) RedeemCode(ctx context.Context, req *billingv1.RedeemCo
 	}
 
 	return &billingv1.RedeemCodeResponse{
-		Success:  true,
-		Amount:   amount,
-		NewQuota: newQuota,
+		Success:    true,
+		Amount:     amount,
+		NewBalance: newQuota,
 	}, nil
 }
 
@@ -330,25 +358,29 @@ func (s *BillingService) ListLedger(ctx context.Context, req *billingv1.ListLedg
 	entries := make([]*commonv1.LedgerEntry, len(ledgers))
 	for i, ledger := range ledgers {
 		entries[i] = &commonv1.LedgerEntry{
-			Id:               fmt.Sprintf("%d", ledger.ID),
-			UserId:           ledger.UserID,
-			Amount:           ledger.Amount,
-			BalanceAfter:     ledger.BalanceAfter,
-			Type:             ledger.Type,
-			ReferenceId:      ledger.ReferenceID,
-			Remark:           ledger.Remark,
-			CreatedAt:        toProtoTimestamp(ledger.CreatedAt),
-			TokenName:        ledger.TokenName,
-			ModelName:        ledger.ModelName,
-			Quota:            ledger.Quota,
-			PromptTokens:     ledger.PromptTokens,
-			CompletionTokens: ledger.CompletionTokens,
-			CacheReadTokens:  ledger.CacheReadTokens,
-			ChannelId:            ledger.ChannelID,
+			Id:                    fmt.Sprintf("%d", ledger.ID),
+			UserId:                ledger.UserID,
+			Amount:                ledger.Amount,
+			BalanceAfter:          ledger.BalanceAfter,
+			Type:                  ledger.Type,
+			ReferenceId:           ledger.ReferenceID,
+			Remark:                ledger.Remark,
+			CreatedAt:             toProtoTimestamp(ledger.CreatedAt),
+			TokenName:             ledger.TokenName,
+			ModelName:             ledger.ModelName,
+			Quota:                 ledger.Quota,
+			PromptTokens:          ledger.PromptTokens,
+			CompletionTokens:      ledger.CompletionTokens,
+			CacheReadTokens:       ledger.CacheReadTokens,
+			ChannelId:             ledger.ChannelID,
 			SubscriptionAccountId: ledger.SubscriptionAccountID,
-			ElapsedTime:          ledger.ElapsedTime,
-			IsStream:             ledger.IsStream,
-			Endpoint:             ledger.Endpoint,
+			ElapsedTime:           ledger.ElapsedTime,
+			IsStream:              ledger.IsStream,
+			Endpoint:              ledger.Endpoint,
+			CostSource:            ledger.CostSource,
+			SubscriptionCost:      ledger.SubscriptionCost,
+			BalanceCost:           ledger.BalanceCost,
+			LedgerDedupeKey:       ledger.LedgerDedupeKey,
 		}
 	}
 
@@ -417,13 +449,13 @@ func (s *BillingService) AggregateLedgerByDate(ctx context.Context, req *billing
 
 func (s *BillingService) AggregateUsage(ctx context.Context, req *billingv1.AggregateUsageRequest) (*billingv1.AggregateUsageResponse, error) {
 	filter := biz.UsageFilter{
-		GroupBy:              req.GetGroupBy(),
-		UserID:               req.GetUserId(),
-		ChannelID:            req.GetChannelId(),
+		GroupBy:               req.GetGroupBy(),
+		UserID:                req.GetUserId(),
+		ChannelID:             req.GetChannelId(),
 		SubscriptionAccountID: req.GetSubscriptionAccountId(),
-		Model:                req.GetModel(),
-		Type:                 req.GetType(),
-		Limit:                int(req.GetLimit()),
+		Model:                 req.GetModel(),
+		Type:                  req.GetType(),
+		Limit:                 int(req.GetLimit()),
 	}
 	if req.GetStartTime().IsValid() {
 		filter.StartTime = req.GetStartTime().AsTime()
@@ -440,22 +472,22 @@ func (s *BillingService) AggregateUsage(ctx context.Context, req *billingv1.Aggr
 	bucketsProto := make([]*billingv1.UsageBucket, len(buckets))
 	for i, b := range buckets {
 		bucketsProto[i] = &billingv1.UsageBucket{
-			UserId:               b.UserID,
-			ChannelId:            b.ChannelID,
+			UserId:                b.UserID,
+			ChannelId:             b.ChannelID,
 			SubscriptionAccountId: b.SubscriptionAccountID,
-			Model:                b.Model,
-			TokenName:        b.TokenName,
-			Type:             b.Type,
-			Day:              b.Day,
-			Hour:             b.Hour,
-			Quota:            b.Quota,
-			UpstreamCost:     b.UpstreamCost,
-			GrossProfit:      b.GrossProfit,
-			PromptTokens:     b.PromptTokens,
-			CompletionTokens: b.CompletionTokens,
-			CacheReadTokens:  b.CacheReadTokens,
-			Count:            b.Count,
-			ElapsedTime:      b.ElapsedTime,
+			Model:                 b.Model,
+			TokenName:             b.TokenName,
+			Type:                  b.Type,
+			Day:                   b.Day,
+			Hour:                  b.Hour,
+			Quota:                 b.Quota,
+			UpstreamCost:          b.UpstreamCost,
+			GrossProfit:           b.GrossProfit,
+			PromptTokens:          b.PromptTokens,
+			CompletionTokens:      b.CompletionTokens,
+			CacheReadTokens:       b.CacheReadTokens,
+			Count:                 b.Count,
+			ElapsedTime:           b.ElapsedTime,
 		}
 	}
 
@@ -497,6 +529,7 @@ func (s *BillingService) CreatePaymentOrder(ctx context.Context, req *billingv1.
 		AssetAmount: req.GetAssetAmount(),
 		MoneyCents:  req.GetMoneyCents(),
 		Currency:    req.GetCurrency(),
+		GroupID:     req.GetGroupId(),
 	})
 	if err != nil {
 		return &billingv1.PaymentOrderResponse{Success: false, ErrorMessage: err.Error()}, nil
@@ -600,6 +633,7 @@ func toProtoPaymentOrder(order *biz.PaymentOrder) *billingv1.PaymentOrder {
 		ProviderPayload:  order.ProviderPayload,
 		PayUrl:           order.PayURL,
 		AssetIssueStatus: order.AssetIssueStatus,
+		GroupId:          order.GroupID,
 		PaidAt:           toProtoTimestampPtr(order.PaidAt),
 		CreatedAt:        toProtoTimestamp(order.CreatedAt),
 		UpdatedAt:        toProtoTimestamp(order.UpdatedAt),

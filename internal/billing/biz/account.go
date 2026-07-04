@@ -5,15 +5,15 @@ type Account struct {
 	Username     string
 	DisplayName  string
 	Group        string
-	Quota        int64
-	UsedQuota    int64
+	Balance      int64
+	UsedAmount   int64
 	RequestCount int64
-	FrozenQuota  int64
+	FrozenAmount int64
 	Status       int32
 }
 
-func (a *Account) AvailableQuota() int64 {
-	return a.Quota - a.FrozenQuota
+func (a *Account) AvailableBalance() int64 {
+	return a.Balance - a.FrozenAmount
 }
 
 // GroupRatio returns the ratio for this account's group using default ratios.

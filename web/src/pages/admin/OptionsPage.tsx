@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { adminApiClient } from '@/lib/api';
 import { ensureApiSuccess, unwrapApiData } from '@/lib/api-response';
+import { amountUnitsToCurrencyUnits, currencyUnitsToAmountUnits } from '@/lib/amount';
 
 interface OptionItem {
   key: string;
@@ -25,22 +26,22 @@ const FEATURED_OPTIONS = [
     type: 'boolean',
   },
   {
-    key: 'QuotaForNewUser',
-    label: '新用户默认额度',
-    description: '新用户注册时获得的初始额度。',
-    type: 'quota',
+    key: 'AmountForNewUser',
+    label: '新用户默认金额',
+    description: '新用户注册时获得的初始钱包金额。',
+    type: 'amount',
   },
   {
-    key: 'QuotaForInviter',
-    label: '邀请人奖励额度',
-    description: '成功邀请一位新用户后,邀请人获得的奖励额度。',
-    type: 'quota',
+    key: 'AmountForInviter',
+    label: '邀请人奖励金额',
+    description: '成功邀请一位新用户后,邀请人获得的奖励金额。',
+    type: 'amount',
   },
   {
-    key: 'QuotaForInvitee',
-    label: '被邀请人奖励额度',
-    description: '被邀请的新用户获得的奖励额度。',
-    type: 'quota',
+    key: 'AmountForInvitee',
+    label: '被邀请人奖励金额',
+    description: '被邀请的新用户获得的奖励金额。',
+    type: 'amount',
   },
 ] as const;
 
@@ -48,13 +49,13 @@ function optionValue(options: OptionItem[] | undefined, key: string) {
   return options?.find((option) => option.key === key)?.value ?? '';
 }
 
-function quotaToDisplay(value: string) {
+function amountToDisplay(value: string) {
   const raw = Number.parseInt(value || '0', 10);
-  return Number.isFinite(raw) ? (raw / 500000).toString() : '0';
+  return Number.isFinite(raw) ? amountUnitsToCurrencyUnits(raw).toString() : '0';
 }
 
-function displayToQuota(value: string) {
-  return Math.floor(Number.parseFloat(value || '0') * 500000).toString();
+function displayToAmount(value: string) {
+  return currencyUnitsToAmountUnits(value).toString();
 }
 
 export function AdminOptionsPage() {
@@ -88,7 +89,7 @@ export function AdminOptionsPage() {
         const current = drafts[item.key] ?? optionValue(options, item.key);
         return {
           ...item,
-          value: item.type === 'quota' ? quotaToDisplay(current) : current,
+          value: item.type === 'amount' ? amountToDisplay(current) : current,
         };
       }),
     [drafts, options]
@@ -99,7 +100,7 @@ export function AdminOptionsPage() {
   };
 
   const saveOption = (key: string, value: string, type?: string) => {
-    const normalizedValue = type === 'quota' ? displayToQuota(value) : value;
+    const normalizedValue = type === 'amount' ? displayToAmount(value) : value;
     updateMutation.mutate({ key, value: normalizedValue });
   };
 
@@ -125,7 +126,7 @@ export function AdminOptionsPage() {
       <div>
         <h2 className="text-2xl font-semibold">系统选项</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          管理系统注册、额度发放和兼容 one-api 的设置项。
+          管理系统注册、钱包金额发放和兼容 one-api 的设置项。
         </p>
       </div>
 

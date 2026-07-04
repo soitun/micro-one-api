@@ -190,7 +190,7 @@ func upsertPassword(ctx context.Context, db *gorm.DB, username, hash, email stri
 		"status":        userStatusEnabled,
 		"role":          newRole,
 		"password_hash": hash,
-		"quota":         quota,
+		"balance":       quota,
 	}
 	if err := db.WithContext(ctx).Table("users").Create(row).Error; err != nil {
 		return false, fmt.Errorf("create user: %w", err)

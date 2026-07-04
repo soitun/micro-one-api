@@ -7,16 +7,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { apiClient } from '@/lib/api';
 import { unwrapApiData } from '@/lib/api-response';
+import { formatUSD } from '@/lib/amount';
 
 interface AccountDashboard {
-  quota?: number;
+  balance?: number;
 }
 
-function formatQuota(value?: number) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return '$0.00';
-  }
-  return `$${(value / 500000).toFixed(2)}`;
+function formatAmount(value?: number) {
+  return formatUSD(value);
 }
 
 export function RedeemPage() {
@@ -42,7 +40,7 @@ export function RedeemPage() {
       setCode('');
       queryClient.invalidateQueries({ queryKey: ['redeem-dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      toast.success(`兑换成功：${formatQuota(amount)}`);
+      toast.success(`兑换成功：${formatAmount(amount)}`);
     },
   });
 
@@ -65,7 +63,7 @@ export function RedeemPage() {
             </div>
             <h2 className="text-3xl font-black tracking-normal text-slate-950 dark:text-white">兑换码充值</h2>
             <p className="mt-2 max-w-xl text-sm font-medium text-slate-500 dark:text-slate-400">
-              输入管理员发放的兑换码，成功后额度会立即入账。
+              输入管理员发放的兑换码，成功后金额会立即入账。
             </p>
 
             <div className="mt-8 space-y-3">
@@ -93,7 +91,7 @@ export function RedeemPage() {
 
             {redeemedAmount !== null && (
               <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-                兑换成功，已到账 {formatQuota(redeemedAmount)}
+                兑换成功，已到账 {formatAmount(redeemedAmount)}
               </div>
             )}
           </div>
@@ -103,7 +101,7 @@ export function RedeemPage() {
               <WalletCards className="size-5" />
               当前余额
             </div>
-            <div className="mt-4 text-5xl font-black">{formatQuota(dashboard?.quota)}</div>
+            <div className="mt-4 text-5xl font-black">{formatAmount(dashboard?.balance)}</div>
             <div className="mt-3 text-sm font-semibold text-violet-100">兑换后可在使用记录和订单中查看账务流水。</div>
           </div>
         </div>

@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { adminApiClient } from '@/lib/api';
 import { ensureApiSuccess, unwrapApiData } from '@/lib/api-response';
+import { AMOUNT_SCALE } from '@/lib/amount';
 
 interface OptionItem {
   key: string;
@@ -33,8 +34,9 @@ interface ModelPrice {
 const MODEL_RATIO_KEY = 'ModelRatio';
 const COMPLETION_RATIO_KEY = 'CompletionRatio';
 const MODEL_PRICE_KEY = 'ModelPrice';
-const QUOTA_PER_UNIT_KEY = 'QuotaPerUnit';
-const DEFAULT_QUOTA_PER_UNIT = 500000;
+const AMOUNT_PER_UNIT_KEY = 'AmountPerUnit';
+const LEGACY_QUOTA_PER_UNIT_KEY = 'QuotaPerUnit';
+const DEFAULT_AMOUNT_PER_UNIT = AMOUNT_SCALE;
 const MTOK = 1_000_000;
 
 function optionValue(options: OptionItem[] | undefined, key: string, fallback = '') {
@@ -81,9 +83,14 @@ function parseModelPriceMap(value: string): Record<string, ModelPrice> {
   }
 }
 
-function quotaPerUnitFromOptions(options: OptionItem[] | undefined) {
-  const parsed = Number(optionValue(options, QUOTA_PER_UNIT_KEY, String(DEFAULT_QUOTA_PER_UNIT)));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_QUOTA_PER_UNIT;
+function amountPerUnitFromOptions(options: OptionItem[] | undefined) {
+  const raw = optionValue(
+    options,
+    AMOUNT_PER_UNIT_KEY,
+    optionValue(options, LEGACY_QUOTA_PER_UNIT_KEY, String(DEFAULT_AMOUNT_PER_UNIT)),
+  );
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_AMOUNT_PER_UNIT;
 }
 
 function perTokenToMTok(value: number | undefined) {
@@ -97,16 +104,16 @@ function mTokToPerToken(value: string) {
   return Number((parsed / MTOK).toPrecision(10));
 }
 
-function ratioToMTokPrice(ratio: number | undefined, quotaPerUnit: number) {
+function ratioToMTokPrice(ratio: number | undefined, amountPerUnit: number) {
   if (ratio === undefined) return '';
-  return String(Number(((ratio / quotaPerUnit) * MTOK).toPrecision(10)));
+  return String(Number(((ratio / amountPerUnit) * MTOK).toPrecision(10)));
 }
 
 function rowsFromPricing(
   modelPrice: Record<string, ModelPrice>,
   modelRatio: Record<string, number>,
   completionRatio: Record<string, number>,
-  quotaPerUnit: number,
+  amountPerUnit: number,
 ): PricingRow[] {
   const models = Array.from(
     new Set([...Object.keys(modelPrice), ...Object.keys(modelRatio), ...Object.keys(completionRatio)]),
@@ -117,13 +124,13 @@ function rowsFromPricing(
     inputPrice:
       modelPrice[model]?.input_price !== undefined
         ? perTokenToMTok(modelPrice[model].input_price)
-        : ratioToMTokPrice(modelRatio[model], quotaPerUnit),
+        : ratioToMTokPrice(modelRatio[model], amountPerUnit),
     outputPrice:
       modelPrice[model]?.output_price !== undefined
         ? perTokenToMTok(modelPrice[model].output_price)
         : ratioToMTokPrice(
             modelRatio[model] === undefined ? undefined : modelRatio[model] * (completionRatio[model] ?? 1),
-            quotaPerUnit,
+            amountPerUnit,
           ),
     cacheReadPrice:
       modelPrice[model]?.cache_read_price !== undefined ? perTokenToMTok(modelPrice[model].cache_read_price) : '',
@@ -149,7 +156,7 @@ function modelPriceMapFromRows(rows: PricingRow[]) {
   return map;
 }
 
-function legacyRatioMapsFromRows(rows: PricingRow[], quotaPerUnit: number) {
+function legacyRatioMapsFromRows(rows: PricingRow[], amountPerUnit: number) {
   const modelRatio: Record<string, number> = {};
   const completionRatio: Record<string, number> = {};
   rows.forEach((row) => {
@@ -157,7 +164,7 @@ function legacyRatioMapsFromRows(rows: PricingRow[], quotaPerUnit: number) {
     const inputPrice = mTokToPerToken(row.inputPrice);
     const outputPrice = mTokToPerToken(row.outputPrice);
     if (!model || inputPrice === undefined || inputPrice <= 0) return;
-    modelRatio[model] = Number((inputPrice * quotaPerUnit).toPrecision(10));
+    modelRatio[model] = Number((inputPrice * amountPerUnit).toPrecision(10));
     if (outputPrice !== undefined) {
       completionRatio[model] = Number((outputPrice / inputPrice).toPrecision(10));
     }
@@ -201,7 +208,7 @@ export function AdminPricingPage() {
     const modelPrice = parseModelPriceMap(optionValue(options, MODEL_PRICE_KEY, '{}'));
     const modelRatio = parseRatioMap(optionValue(options, MODEL_RATIO_KEY, '{}'));
     const completionRatio = parseRatioMap(optionValue(options, COMPLETION_RATIO_KEY, '{}'));
-    return rowsFromPricing(modelPrice, modelRatio, completionRatio, quotaPerUnitFromOptions(options));
+    return rowsFromPricing(modelPrice, modelRatio, completionRatio, amountPerUnitFromOptions(options));
   }, [options]);
 
   const rows = draftRows ?? savedRows;
@@ -234,8 +241,8 @@ export function AdminPricingPage() {
           }
         }
       }
-      const quotaPerUnit = quotaPerUnitFromOptions(options);
-      const legacyRatios = legacyRatioMapsFromRows(normalizedRows, quotaPerUnit);
+      const amountPerUnit = amountPerUnitFromOptions(options);
+      const legacyRatios = legacyRatioMapsFromRows(normalizedRows, amountPerUnit);
       const payloads: OptionItem[] = [
         { key: MODEL_PRICE_KEY, value: formatJSON(modelPriceMapFromRows(normalizedRows)) },
         { key: MODEL_RATIO_KEY, value: formatJSON(legacyRatios.modelRatio) },

@@ -5,6 +5,7 @@ import { apiClient } from '@/lib/api';
 import { getApiErrorMessage } from '@/lib/api-error';
 import { unwrapApiData } from '@/lib/api-response';
 import { bindableOAuthProviders, redirectToURL } from '@/lib/oauth';
+import { formatUSD } from '@/lib/amount';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -29,8 +30,8 @@ const ROLE_LABELS: Record<number, string> = {
   100: '超级管理员',
 };
 
-function formatQuota(q: number) {
-  return `US$${(q / 500000).toFixed(2)}`;
+function formatAmount(q: number) {
+  return formatUSD(q);
 }
 
 export function ProfilePage() {
@@ -52,7 +53,7 @@ export function ProfilePage() {
     queryKey: ['dashboard-summary'],
     queryFn: async () => {
       const res = await apiClient.get('/user/dashboard');
-      return unwrapApiData<{ quota?: number; used_quota?: number }>(res.data);
+      return unwrapApiData<{ balance?: number; used_amount?: number }>(res.data);
     },
   });
 
@@ -327,15 +328,15 @@ export function ProfilePage() {
             </CardHeader>
             <CardContent className="p-6 space-y-4">
               <div>
-                <div className="text-xs font-bold text-slate-400">剩余额度</div>
+                <div className="text-xs font-bold text-slate-400">钱包余额</div>
                 <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
-                  {formatQuota(dashboard?.quota ?? 0)}
+                  {formatAmount(dashboard?.balance ?? 0)}
                 </div>
               </div>
               <div>
-                <div className="text-xs font-bold text-slate-400">已用额度</div>
+                <div className="text-xs font-bold text-slate-400">已用金额</div>
                 <div className="text-lg font-black text-slate-700 dark:text-slate-200">
-                  {formatQuota(dashboard?.used_quota ?? 0)}
+                  {formatAmount(dashboard?.used_amount ?? 0)}
                 </div>
               </div>
               <div>

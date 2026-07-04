@@ -13,6 +13,7 @@ service BillingService {
   rpc ReleaseQuota(ReleaseQuotaRequest) returns (ReleaseQuotaResponse);
   rpc GetAccountSnapshot(GetAccountSnapshotRequest) returns (GetAccountSnapshotResponse);
   rpc TopUpQuota(TopUpQuotaRequest) returns (TopUpQuotaResponse);
+  rpc PurchaseSubscription(PurchaseSubscriptionRequest) returns (PurchaseSubscriptionResponse);
   rpc CreateRedeemCode(CreateRedeemCodeRequest) returns (CreateRedeemCodeResponse);
   rpc CreateRedeemCodesBatch(CreateRedeemCodesBatchRequest) returns (CreateRedeemCodesBatchResponse);
   rpc RedeemCode(RedeemCodeRequest) returns (RedeemCodeResponse);
@@ -49,6 +50,14 @@ message ReserveQuotaResponse {
   string reservation_id = 2;
   int64 reserved_amount = 3;
   string error_message = 4;
+  // Dual-track pre-deduction (subscription priority deduction): the
+  // reservation can be split between the subscription and the wallet.
+  // When the user's subscription absorbs the full cost, the wallet
+  // portion is zero and the relay can keep serving the request even
+  // when the wallet would otherwise have refused the deduction.
+  int64 subscription_amount_usd = 5;   // USD absorbed by the subscription (original, un-multiplied)
+  int64 balance_amount_quota = 6;      // quota pre-deducted from the wallet
+  int64 subscription_id = 7;           // 0 when the reservation was created via the legacy balance-only path
 }
 
 message CommitQuotaRequest {
@@ -74,6 +83,31 @@ message CommitQuotaResponse {
   int64 committed_amount = 2;
   int64 refund_amount = 3;
   string error_message = 4;
+  // Cost-dimension split of the actual settlement. The sum of
+  // subscription_cost + balance_cost equals committed_amount in the
+  // dual-track flow; the values are zero on the legacy balance-only
+  // path so callers can detect the new flow.
+  int64 subscription_cost = 5;   // quota-equivalent share absorbed by the subscription
+  int64 balance_cost = 6;        // quota-equivalent share paid out of the wallet
+}
+
+// LedgerEntry is the wire-side view of a billing_ledgers row. The
+// cost_source / subscription_cost / balance_cost fields power the
+// dual-track reconciliation flow.
+message LedgerEntry {
+  int64 id = 1;
+  string user_id = 2;
+  int64 amount = 3;
+  int64 upstream_cost = 4;
+  int64 balance_after = 5;
+  string type = 6;
+  string reference_id = 7;
+  string remark = 8;
+  string cost_source = 9;          // subscription / balance / mixed
+  int64 subscription_cost = 10;
+  int64 balance_cost = 11;
+  string ledger_dedupe_key = 12;   // unique idempotency key
+  int64 created_at = 13;
 }
 
 message ReleaseQuotaRequest {
@@ -116,7 +150,24 @@ message TopUpQuotaRequest {
 
 message TopUpQuotaResponse {
   bool success = 1;
-  int64 new_quota = 2;
+  int64 new_balance = 2;
+  string error_message = 3;
+}
+
+// PurchaseSubscription atomically deducts price_amount from the user's wallet and
+// records a "subscription" ledger entry. It does NOT create the subscription row
+// itself — the caller (admin-api) creates the subscription and, on failure,
+// compensates by topping the balance back up.
+message PurchaseSubscriptionRequest {
+  string user_id = 1;
+  int64 price_amount = 2;
+  int64 group_id = 3;
+  string remark = 4;
+}
+
+message PurchaseSubscriptionResponse {
+  bool success = 1;
+  int64 new_balance = 2;
   string error_message = 3;
 }
 
@@ -157,7 +208,7 @@ message RedeemCodeRequest {
 message RedeemCodeResponse {
   bool success = 1;
   int64 amount = 2;
-  int64 new_quota = 3;
+  int64 new_balance = 3;
   string error_message = 4;
 }
 
@@ -242,9 +293,10 @@ message PaymentOrder {
   string provider_payload = 11;
   string pay_url = 12;
   string asset_issue_status = 13;
-  google.protobuf.Timestamp paid_at = 14;
-  google.protobuf.Timestamp created_at = 15;
-  google.protobuf.Timestamp updated_at = 16;
+  int64 group_id = 14;  // Subscription group ID for auto-assignment after payment
+  google.protobuf.Timestamp paid_at = 15;
+  google.protobuf.Timestamp created_at = 16;
+  google.protobuf.Timestamp updated_at = 17;
 }
 
 message CreatePaymentOrderRequest {
@@ -254,6 +306,7 @@ message CreatePaymentOrderRequest {
   int64 asset_amount = 4;
   int64 money_cents = 5;
   string currency = 6;
+  int64 group_id = 7;  // Optional: subscription group ID for auto-assignment after payment
 }
 
 message GetPaymentOrderByTradeNoRequest {

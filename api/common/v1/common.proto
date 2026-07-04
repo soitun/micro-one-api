@@ -15,9 +15,9 @@ message UserInfo {
   string email = 4;
   string group = 5;
   int32 status = 6;
-  int64 quota = 7;
-  int64 used_quota = 8;
-  int64 frozen_quota = 9;
+  int64 balance = 7;
+  int64 used_amount = 8;
+  int64 frozen_amount = 9;
   int64 created_at = 10;
   int64 last_login_at = 11;
   // 0=guest, 1=common, 10=admin, 100=root. See biz.Role* constants.
@@ -111,6 +111,7 @@ message SubscriptionAccountInfo {
   string metadata = 15;
   int64 created_at = 16;
   int64 updated_at = 17;
+  int32 concurrency = 18;             // 最大并发请求数(0 表示不限制)
 }
 
 message SubscriptionAccountSummary {
@@ -130,18 +131,27 @@ message SubscriptionAccountSummary {
   float quota_used_percent = 14;      // 上游订阅配额使用百分比（0-100）
   int64 quota_reset_at = 15;          // 订阅配额窗口重置的 unix 时间
   int32 concurrency = 16;             // 最大并发请求数
+  optional double primary_quota_used_percent = 17;       // 主配额窗口使用百分比（Codex: 5h）
+  optional int32 primary_quota_reset_after_seconds = 18; // 主配额窗口剩余重置秒数
+  optional int32 primary_quota_window_minutes = 19;      // 主配额窗口分钟数
+  optional double secondary_quota_used_percent = 20;     // 次配额窗口使用百分比（Codex: 7d）
+  optional int32 secondary_quota_reset_after_seconds = 21;
+  optional int32 secondary_quota_window_minutes = 22;
+  optional double primary_over_secondary_percent = 23;   // 主窗口相对次窗口使用百分比
+  int64 quota_snapshot_updated_at = 24;                  // 快照采样时间（unix）
+  bool quota_snapshot_paused = 25;                       // 快照采样时是否触发暂停
 }
 
 // ========== 账户快照 ==========
 
 message AccountSnapshot {
   string user_id = 1;
-  int64 quota = 2;
-  int64 used_quota = 3;
+  int64 balance = 2;
+  int64 used_amount = 3;
   int64 request_count = 4;
   string group = 5;
   double group_ratio = 6;
-  int64 frozen_quota = 7;
+  int64 frozen_amount = 7;
 }
 
 // ========== 账户信息（管理端视图）==========
@@ -151,10 +161,10 @@ message AccountInfo {
   string username = 2;
   string display_name = 3;
   string group = 4;
-  int64 quota = 5;
-  int64 used_quota = 6;
+  int64 balance = 5;
+  int64 used_amount = 6;
   int64 request_count = 7;
-  int64 frozen_quota = 8;
+  int64 frozen_amount = 8;
   int32 status = 9;
 }
 
@@ -205,6 +215,10 @@ message LedgerEntry {
   string endpoint = 17;
   int64 cache_read_tokens = 18;
   int64 subscription_account_id = 19;  // 订阅账号 ID（0 = 非订阅账号请求）
+  string cost_source = 20;             // subscription / balance / mixed
+  int64 subscription_cost = 21;         // 订阅额度承担的 quota
+  int64 balance_cost = 22;              // 余额承担的 quota
+  string ledger_dedupe_key = 23;        // 幂等写入键
 }
 
 // ========== 流水信息（管理端视图）==========

@@ -29,10 +29,10 @@ func (r *reconciliationRepo) ListAllAccounts(ctx context.Context) ([]*biz.Accoun
 			Username:     m.Username,
 			DisplayName:  m.DisplayName,
 			Group:        m.Group,
-			Quota:        m.Quota,
-			UsedQuota:    m.UsedQuota,
+			Balance:      m.Balance,
+			UsedAmount:   m.UsedAmount,
 			RequestCount: m.RequestCount,
-			FrozenQuota:  m.FrozenQuota,
+			FrozenAmount: m.FrozenAmount,
 			Status:       m.Status,
 		}
 	}
@@ -156,4 +156,66 @@ func (r *reconciliationRepo) ListReservationsByStatus(ctx context.Context, statu
 		}
 	}
 	return reservations, nil
+}
+
+// subscriptionRow is the bare-bones read of the subscription table. The
+// billing domain only needs the per-window usage columns for
+// reconciliation; it never writes to the subscription table. The struct
+// intentionally mirrors the columns we care about, not the entire
+// subscription model (which lives in the subscription domain).
+type subscriptionRow struct {
+	ID               int64   `gorm:"column:id"`
+	UserID           int64   `gorm:"column:user_id"`
+	GroupID          int64   `gorm:"column:group_id"`
+	Status           string  `gorm:"column:status"`
+	DailyUsageUSD    float64 `gorm:"column:daily_usage_usd"`
+	WeeklyUsageUSD   float64 `gorm:"column:weekly_usage_usd"`
+	MonthlyUsageUSD  float64 `gorm:"column:monthly_usage_usd"`
+}
+
+func (subscriptionRow) TableName() string { return "user_subscriptions" }
+
+func (r *reconciliationRepo) ListActiveSubscriptions(ctx context.Context) ([]*biz.SubscriptionUsageSnapshot, error) {
+	var rows []subscriptionRow
+	if err := r.data.db.WithContext(ctx).
+		Where("status = ?", "active").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*biz.SubscriptionUsageSnapshot, len(rows))
+	for i, row := range rows {
+		out[i] = &biz.SubscriptionUsageSnapshot{
+			UserID:          row.UserID,
+			GroupID:         row.GroupID,
+			Status:          row.Status,
+			DailyUsageUSD:   row.DailyUsageUSD,
+			WeeklyUsageUSD:  row.WeeklyUsageUSD,
+			MonthlyUsageUSD: row.MonthlyUsageUSD,
+		}
+	}
+	return out, nil
+}
+
+func (r *reconciliationRepo) SumPendingReceivables(ctx context.Context) (int64, error) {
+	var total int64
+	if err := r.data.db.WithContext(ctx).
+		Model(&accountReceivableModel{}).
+		Where("status = ?", biz.ReceivableStatusPending).
+		Select("COALESCE(SUM(overdue_quota), 0)").
+		Scan(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (r *reconciliationRepo) SumOverdraftBalances(ctx context.Context) (int64, error) {
+	var total int64
+	if err := r.data.db.WithContext(ctx).
+		Table("users").
+		Where("balance < 0").
+		Select("COALESCE(SUM(-balance), 0)").
+		Scan(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
 }

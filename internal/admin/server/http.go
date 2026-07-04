@@ -88,7 +88,9 @@ func newAdminGuard(svc *service.AdminService) func(http.HandlerFunc) http.Handle
 func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *khttp.Server {
 	srv := khttp.NewServer(xhttp.SafeKratosServerOptions(khttp.Address(addr))...)
 	identityProxy := newServiceReverseProxy(optionString(options, 0))
+	billingHTTPProxy := newBillingHTTPProxy()
 	notifyWorkerProxy := newNotifyWorkerProxy()
+	channelHTTPProxy := newChannelHTTPProxy()
 	webAssets := newAdminWebAssets(optionString(options, 1))
 	handlePage := webAssets.handlePage
 	adminAuth := newAdminGuard(svc)
@@ -108,6 +110,7 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandleFunc("/redeem", handlePage)
 	srv.HandleFunc("/orders", handlePage)
 	srv.HandleFunc("/profile", handlePage)
+	srv.HandleFunc("/subscriptions", handlePage)
 	srv.HandleFunc("/admin/users", handlePage)
 	srv.HandleFunc("/admin/channels", handlePage)
 	srv.HandleFunc("/admin/channel-health", handlePage)
@@ -119,6 +122,8 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandleFunc("/admin/redemptions", handlePage)
 	srv.HandleFunc("/admin/options", handlePage)
 	srv.HandleFunc("/admin/subscription-accounts", handlePage)
+	srv.HandleFunc("/admin/subscription-groups", handlePage)
+	srv.HandleFunc("/admin/subscriptions", handlePage)
 	// Static assets bundled by Vite
 	srv.HandlePrefix("/assets/", http.HandlerFunc(handlePage))
 	srv.HandleFunc("/favicon.svg", handlePage)
@@ -131,6 +136,17 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 	srv.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && billingHTTPProxy != nil {
+			proxyReq := r.Clone(r.Context())
+			proxyReq.URL.Path = "/api/v1/user/payments/alipay/notify"
+			proxyReq.URL.RawPath = ""
+			billingHTTPProxy.ServeHTTP(w, proxyReq)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": true,
 			"message": "",
@@ -256,6 +272,10 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 		srv.HandleFunc("/api/token", identityProxy.ServeHTTP)
 		srv.HandlePrefix("/api/token/", identityProxy)
 	}
+	if billingHTTPProxy != nil {
+		srv.HandleFunc("/api/v1/user/payments/alipay/notify", billingHTTPProxy.ServeHTTP)
+		srv.HandleFunc("/api/user/payments/alipay/notify", billingHTTPProxy.ServeHTTP)
+	}
 	srv.HandlePrefix("/api/group", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleGroupManagement(w, r, svc)
 	}))
@@ -263,6 +283,46 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandleFunc("/api/admin/summary", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleAdminSummary(w, r, svc)
 	}))
+	srv.HandleFunc("/api/v1/subscriptions/progress", func(w http.ResponseWriter, r *http.Request) {
+		handleCurrentSubscriptionProgress(w, r, svc)
+	})
+	// User-facing self-purchase: the buyer is resolved from the bearer token
+	// inside the handlers, so these are intentionally not behind adminAuth.
+	srv.HandleFunc("/api/v1/subscriptions/groups", func(w http.ResponseWriter, r *http.Request) {
+		handlePurchasableSubscriptionGroups(w, r, svc)
+	})
+	srv.HandleFunc("/api/v1/subscriptions/purchase", func(w http.ResponseWriter, r *http.Request) {
+		handlePurchaseSubscription(w, r, svc)
+	})
+	srv.HandleFunc("/api/v1/subscriptions/purchase/payment", func(w http.ResponseWriter, r *http.Request) {
+		handlePurchaseSubscriptionWithPayment(w, r, svc)
+	})
+	srv.HandleFunc("/api/v1/subscriptions/purchase/complete", func(w http.ResponseWriter, r *http.Request) {
+		handleCompleteSubscriptionPurchase(w, r, svc)
+	})
+	srv.HandleFunc("/api/v1/admin/subscriptions", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleUserSubscriptions(w, r, svc)
+	}))
+	srv.HandleFunc("/api/v1/admin/subscriptions/assign", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleAssignSubscription(w, r, svc)
+	}))
+	srv.HandlePrefix("/api/v1/admin/subscriptions/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleSubscriptionByID(w, r, svc)
+	}))
+	srv.HandleFunc("/api/v1/admin/subscription-groups", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleSubscriptionGroups(w, r, svc)
+	}))
+	srv.HandlePrefix("/api/v1/admin/subscription-groups/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleSubscriptionGroupByID(w, r, svc)
+	}))
+	// Subscription-account OAuth authorization-code binding lives only on
+	// channel-service HTTP; proxy the SPA's requests through so the admin UI can
+	// reach auth-url/exchange. Guarded by adminAuth like the routes above.
+	if channelHTTPProxy != nil {
+		srv.HandlePrefix("/api/v1/admin/accounts/subscription/oauth/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+			channelHTTPProxy.ServeHTTP(w, r)
+		}))
+	}
 
 	// Protected admin endpoints
 	srv.HandlePrefix("/api/user/disable/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -611,23 +671,23 @@ func handleAdminSummary(w http.ResponseWriter, r *http.Request, svc *service.Adm
 			"subscription_accounts":        subscriptionAccounts.GetTotal(),
 			"active_subscription_accounts": activeSubscriptionAccounts.GetTotal(),
 		},
-		"recent_users":          users.GetUsers(),
-		"channels":              channels.GetChannels(),
-		"subscription_accounts": subscriptionAccounts.GetAccounts(),
-		"recent_logs":           recentLogs,
-		"payment_orders":        paymentOrders.GetOrders(),
-		"usage_stats":           stats,
-		"cost_analysis":         costAnalysisSummary(quotaUsed, upstreamCost, grossProfit),
-		"top_models":            usageAggregateViewsToMaps(topModels),
-		"top_channels":          enrichChannelUsage(topChannels, channels.GetChannels()),
-		"top_users":             usageAggregateViewsToMaps(topUsers),
-		"top_tokens":            usageAggregateViewsToMaps(topTokens),
+		"recent_users":              users.GetUsers(),
+		"channels":                  channels.GetChannels(),
+		"subscription_accounts":     subscriptionAccounts.GetAccounts(),
+		"recent_logs":               recentLogs,
+		"payment_orders":            paymentOrders.GetOrders(),
+		"usage_stats":               stats,
+		"cost_analysis":             costAnalysisSummary(quotaUsed, upstreamCost, grossProfit),
+		"top_models":                usageAggregateViewsToMaps(topModels),
+		"top_channels":              enrichChannelUsage(topChannels, channels.GetChannels()),
+		"top_users":                 usageAggregateViewsToMaps(topUsers),
+		"top_tokens":                usageAggregateViewsToMaps(topTokens),
 		"top_subscription_accounts": enrichSubscriptionAccountUsage(topSubscriptionAccounts, subscriptionAccounts.GetAccounts()),
-		"alerts":                adminSummaryAlerts(channels.GetChannels(), topChannels, reconciliation),
-		"latest_reconciliation": latestReconciliationRun(reconciliation),
-		"model_catalog":         oneAPIChannelModelCatalog(),
-		"pricing_options":       optionsByKey(options, "ModelRatio", "CompletionRatio", "ModelPrice", "GroupRatio", "QuotaPerUnit"),
-		"payment_summary":       paymentSummaryFromOrders(paymentOrders),
+		"alerts":                    adminSummaryAlerts(channels.GetChannels(), topChannels, reconciliation),
+		"latest_reconciliation":     latestReconciliationRun(reconciliation),
+		"model_catalog":             oneAPIChannelModelCatalog(),
+		"pricing_options":           optionsByKey(options, "ModelRatio", "CompletionRatio", "ModelPrice", "GroupRatio", "AmountPerUnit"),
+		"payment_summary":           paymentSummaryFromOrders(paymentOrders),
 	}))
 }
 
@@ -655,21 +715,21 @@ func usageAggregateViewsToMaps(items []service.UsageAggregateView) []map[string]
 
 func usageAggregateViewToMap(item service.UsageAggregateView) map[string]interface{} {
 	return map[string]interface{}{
-		"key":               item.Key,
-		"user_id":           item.UserID,
-		"channel_id":             item.ChannelID,
+		"key":                     item.Key,
+		"user_id":                 item.UserID,
+		"channel_id":              item.ChannelID,
 		"subscription_account_id": item.SubscriptionAccountID,
-		"model":                  item.Model,
-		"token_name":        item.TokenName,
-		"type":              item.Type,
-		"quota":             item.Quota,
-		"upstream_cost":     item.UpstreamCost,
-		"gross_profit":      item.GrossProfit,
-		"prompt_tokens":     item.PromptTokens,
-		"completion_tokens": item.CompletionTokens,
-		"cache_read_tokens": item.CacheReadTokens,
-		"count":             item.Count,
-		"elapsed_time":      item.ElapsedTime,
+		"model":                   item.Model,
+		"token_name":              item.TokenName,
+		"type":                    item.Type,
+		"quota":                   item.Quota,
+		"upstream_cost":           item.UpstreamCost,
+		"gross_profit":            item.GrossProfit,
+		"prompt_tokens":           item.PromptTokens,
+		"completion_tokens":       item.CompletionTokens,
+		"cache_read_tokens":       item.CacheReadTokens,
+		"count":                   item.Count,
+		"elapsed_time":            item.ElapsedTime,
 	}
 }
 
@@ -843,7 +903,10 @@ type readonlyModelPrice struct {
 	CacheReadPrice *float64 `json:"cache_read_price"`
 }
 
-const readonlyPricingMTok = 1000000
+const (
+	readonlyPricingMTok      = 1000000
+	readonlyPricingUnitScale = 10000
+)
 
 func handleReadonlyPricing(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	if r.Method != http.MethodGet {
@@ -855,9 +918,9 @@ func handleReadonlyPricing(w http.ResponseWriter, r *http.Request, svc *service.
 			"success": true,
 			"message": "",
 			"data": map[string]interface{}{
-				"prices":         []readonlyPricingRow{},
-				"quota_per_unit": float64(500000),
-				"unit":           "1M tokens",
+				"prices":          []readonlyPricingRow{},
+				"amount_per_unit": float64(readonlyPricingUnitScale),
+				"unit":            "1M tokens",
 			},
 		})
 		return
@@ -867,19 +930,19 @@ func handleReadonlyPricing(w http.ResponseWriter, r *http.Request, svc *service.
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
-	optionMap := optionsByKey(options, "ModelPrice", "ModelRatio", "CompletionRatio", "QuotaPerUnit")
-	quotaPerUnit := parseReadonlyFloatOption(optionMap["QuotaPerUnit"])
-	if quotaPerUnit <= 0 {
-		quotaPerUnit = 500000
+	optionMap := optionsByKey(options, "ModelPrice", "ModelRatio", "CompletionRatio", "AmountPerUnit")
+	amountPerUnit := parseReadonlyFloatOption(optionMap["AmountPerUnit"])
+	if amountPerUnit <= 0 {
+		amountPerUnit = readonlyPricingUnitScale
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "",
 		"data": map[string]interface{}{
-			"prices":         readonlyPricingRows(optionMap, quotaPerUnit),
-			"quota_per_unit": quotaPerUnit,
-			"unit":           "1M tokens",
+			"prices":          readonlyPricingRows(optionMap, amountPerUnit),
+			"amount_per_unit": amountPerUnit,
+			"unit":            "1M tokens",
 		},
 	})
 }
@@ -1012,7 +1075,7 @@ func paymentSummaryFromOrders(resp *billingv1.ListPaymentOrdersResponse) map[str
 	}
 }
 
-func userInfoToMap(u *commonv1.UserInfo, quota, usedQuota int64) map[string]interface{} {
+func userInfoToMap(u *commonv1.UserInfo, balance, usedAmount int64) map[string]interface{} {
 	return map[string]interface{}{
 		"id":          u.GetId(),
 		"username":    u.GetUsername(),
@@ -1021,8 +1084,8 @@ func userInfoToMap(u *commonv1.UserInfo, quota, usedQuota int64) map[string]inte
 		"group":       u.GetGroup(),
 		"status":      u.GetStatus(),
 		"role":        u.GetRole(),
-		"quota":       strconv.FormatInt(quota, 10),
-		"usedQuota":   strconv.FormatInt(usedQuota, 10),
+		"balance":     strconv.FormatInt(balance, 10),
+		"usedAmount":  strconv.FormatInt(usedAmount, 10),
 		"createdAt":   strconv.FormatInt(u.GetCreatedAt(), 10),
 	}
 }
@@ -1083,15 +1146,15 @@ func enrichUsersWithBilling(ctx context.Context, svc *service.AdminService, user
 
 	// Build result with enriched data
 	for _, u := range users {
-		var quota, usedQuota int64
+		var balance, usedAmount int64
 		if accounts != nil {
 			userID := strconv.FormatInt(u.GetId(), 10)
 			if acc, ok := accounts[userID]; ok {
-				quota = acc.GetQuota()
-				usedQuota = acc.GetUsedQuota()
+				balance = acc.GetBalance()
+				usedAmount = acc.GetUsedAmount()
 			}
 		}
-		result = append(result, userInfoToMap(u, quota, usedQuota))
+		result = append(result, userInfoToMap(u, balance, usedAmount))
 	}
 	return result
 }
@@ -1150,7 +1213,10 @@ func (a adminWebAssets) handlePage(w http.ResponseWriter, r *http.Request) {
 	// SPA fallback: any path without a file extension serves index.html so
 	// client-side routes (/login, /dashboard, /tokens) load the React shell.
 	path := strings.TrimPrefix(r.URL.Path, "/")
-	if path == "" || !strings.Contains(path, ".") {
+	if path == "" || path == "index.html" || !strings.Contains(path, ".") {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/"
 		http.FileServer(http.FS(a.root)).ServeHTTP(w, r2)
@@ -1658,12 +1724,12 @@ func handleOneAPIExportUsers(w http.ResponseWriter, r *http.Request, svc *servic
 			user.GetDisplayName(),
 			user.GetEmail(),
 			user.GetGroup(),
-			strconv.FormatInt(user.GetQuota(), 10),
-			strconv.FormatInt(user.GetUsedQuota(), 10),
+			strconv.FormatInt(user.GetBalance(), 10),
+			strconv.FormatInt(user.GetUsedAmount(), 10),
 			strconv.FormatInt(int64(user.GetStatus()), 10),
 		})
 	}
-	writeCSV(w, "admin-users.csv", []string{"id", "username", "display_name", "email", "group", "quota", "used_quota", "status"}, rows)
+	writeCSV(w, "admin-users.csv", []string{"id", "username", "display_name", "email", "group", "balance", "used_amount", "status"}, rows)
 }
 
 func handleOneAPISearchUsers(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
@@ -3053,6 +3119,37 @@ func newNotifyWorkerProxy() *httputil.ReverseProxy {
 	if endpoint == "" {
 		// Default to notify-worker's HTTP port
 		endpoint = "http://notify-worker:8008"
+	}
+	target, err := parseReverseProxyTarget(endpoint)
+	if err != nil {
+		return nil
+	}
+	return httputil.NewSingleHostReverseProxy(target) // #nosec G704 -- endpoint is configured by operators and validated by parseReverseProxyTarget.
+}
+
+// newChannelHTTPProxy builds a reverse proxy to channel-service's HTTP port.
+// The subscription-account OAuth authorization-code endpoints live only on
+// channel-service HTTP (not the gRPC surface admin-api normally speaks), so the
+// SPA cannot reach them through the /api gateway without this proxy.
+func newChannelHTTPProxy() *httputil.ReverseProxy {
+	endpoint := os.Getenv("CHANNEL_HTTP_ENDPOINT")
+	if endpoint == "" {
+		// Default to channel-service's HTTP port (see configs/channel-service.yaml).
+		endpoint = "http://channel-service:8002"
+	}
+	target, err := parseReverseProxyTarget(endpoint)
+	if err != nil {
+		return nil
+	}
+	return httputil.NewSingleHostReverseProxy(target) // #nosec G704 -- endpoint is configured by operators and validated by parseReverseProxyTarget.
+}
+
+// newBillingHTTPProxy builds a reverse proxy to billing-service's HTTP port.
+// It is used only for unauthenticated provider callbacks such as Alipay notify.
+func newBillingHTTPProxy() *httputil.ReverseProxy {
+	endpoint := os.Getenv("BILLING_HTTP_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://billing-service:8004"
 	}
 	target, err := parseReverseProxyTarget(endpoint)
 	if err != nil {

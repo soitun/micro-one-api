@@ -27,6 +27,8 @@ import (
 	applogger "micro-one-api/internal/pkg/logger"
 	appregistry "micro-one-api/internal/pkg/registry"
 	"micro-one-api/internal/pkg/xconfig"
+	subscriptionbiz "micro-one-api/internal/subscription/biz"
+	subscriptiondata "micro-one-api/internal/subscription/data"
 )
 
 func loadConfig(confPath string) (*bcfg.Config, error) {
@@ -64,6 +66,8 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	if len(pricing.GroupRatios) == 0 {
 		pricing.GroupRatios = biz.DefaultGroupRatios()
 	}
+	subscriptionRepo := subscriptiondata.NewRepository(d.DB(), d.Redis())
+	subscriptionUc := subscriptionbiz.NewSubscriptionUsecase(subscriptionRepo, subscriptionRepo)
 	uc := biz.NewBillingUsecaseWithPricing(
 		d.AccountRepo(),
 		d.ReservationRepo(),
@@ -71,6 +75,8 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 		d.RedeemRepo(),
 		pricing,
 	)
+	uc.SetSubscriptionPrimatives(subscriptionUc)
+	uc.SetReceivableRepo(d.ReceivableRepo())
 	var asyncBilling *biz.AsyncBillingUsecase
 	if cfg.Billing.Async.Enabled {
 		asyncBilling = biz.NewAsyncBillingUsecase(
@@ -89,7 +95,8 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	)
 	paymentProvider := biz.NewConfiguredPaymentProvider(cfg.Payment)
 	paymentAssetIssuer := biz.NewPaymentAssetIssuer(uc)
-	paymentUc := biz.NewPaymentUsecase(d.PaymentRepo(), paymentProvider, paymentAssetIssuer)
+	paymentSubscriptionAssigner := biz.NewPaymentSubscriptionAssigner(subscriptionUc, subscriptionRepo)
+	paymentUc := biz.NewPaymentUsecaseWithAssigner(d.PaymentRepo(), paymentProvider, paymentAssetIssuer, paymentSubscriptionAssigner)
 	alipayVerifier := biz.NewAlipayPaymentProvider(cfg.Payment.Alipay)
 	svc := service.NewBillingService(uc, reconUc, paymentUc, alipayVerifier)
 

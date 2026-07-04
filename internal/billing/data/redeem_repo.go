@@ -162,12 +162,12 @@ func (r *redeemRepo) DeleteRedeemCode(ctx context.Context, code string) error {
 
 func (r *redeemRepo) CreateRedeemRecord(ctx context.Context, record *biz.RedeemRecord) error {
 	model := &redeemRecordModel{
-		UserID:      record.UserID,
-		Code:        record.Code,
-		Amount:      record.Amount,
-		QuotaBefore: record.QuotaBefore,
-		QuotaAfter:  record.QuotaAfter,
-		CreatedAt:   time.Now(),
+		UserID:        record.UserID,
+		Code:          record.Code,
+		Amount:        record.Amount,
+		BalanceBefore: record.BalanceBefore,
+		BalanceAfter:  record.BalanceAfter,
+		CreatedAt:     time.Now(),
 	}
 
 	return r.data.db.WithContext(ctx).Create(model).Error

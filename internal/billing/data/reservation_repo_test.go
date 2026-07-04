@@ -28,6 +28,12 @@ func setupReservationTestDB(t *testing.T) *gorm.DB {
 			model TEXT,
 			channel_id TEXT,
 			subscription_account_id TEXT,
+			subscription_id INTEGER NOT NULL DEFAULT 0,
+			subscription_amount_usd REAL NOT NULL DEFAULT 0,
+			subscription_daily_window_start INTEGER NOT NULL DEFAULT 0,
+			subscription_weekly_window_start INTEGER NOT NULL DEFAULT 0,
+			subscription_monthly_window_start INTEGER NOT NULL DEFAULT 0,
+			balance_amount_quota INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME,
 			updated_at DATETIME,
 			expired_at DATETIME

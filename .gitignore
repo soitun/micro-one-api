@@ -79,3 +79,5 @@ dist/
 subscription-account.*.payload.json
 
 *.tar
+
+.workbuddy

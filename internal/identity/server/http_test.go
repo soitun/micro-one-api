@@ -104,7 +104,7 @@ func TestIdentityHTTPAffTransferReturnsDisabledCompatibilityResponse(t *testing.
 	_, authToken := registerAndLoginForHTTPTest(t, uc)
 	srv := NewHTTPServer(":0", uc, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/user/aff_transfer", strings.NewReader(`{"quota":500000}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/user/aff_transfer", strings.NewReader(`{"quota":1000000}`))
 	req.Header.Set("Authorization", "Bearer "+authToken)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -146,8 +146,8 @@ func TestIdentityHTTPRegisterAcceptsAffCode(t *testing.T) {
 }
 
 func TestIdentityHTTPRegisterWithAffCodeCreditsInvitationBonusViaBilling(t *testing.T) {
-	t.Setenv("INVITEE_BONUS_QUOTA", "25")
-	t.Setenv("INVITER_BONUS_QUOTA", "50")
+	t.Setenv("INVITEE_BONUS_AMOUNT", "25")
+	t.Setenv("INVITER_BONUS_AMOUNT", "50")
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)
 	inviter, err := uc.Register(context.Background(), "alice", "password123", "alice@example.com", "default")
@@ -182,9 +182,36 @@ func TestIdentityHTTPRegisterWithAffCodeCreditsInvitationBonusViaBilling(t *test
 	}
 }
 
+func TestIdentityHTTPRegisterWithAffCodeCreditsLegacyInvitationBonusEnv(t *testing.T) {
+	t.Setenv("INVITEE_BONUS_QUOTA", "25")
+	t.Setenv("INVITER_BONUS_QUOTA", "50")
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	inviter, err := uc.Register(context.Background(), "alice", "password123", "alice@example.com", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	billingClient := &identityHTTPBillingClient{}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/user/register", strings.NewReader(`{"username":"bob","password":"password123","email":"bob@example.com","aff_code":"`+inviter.AffCode+`"}`))
+	registerRec := httptest.NewRecorder()
+	srv.ServeHTTP(registerRec, registerReq)
+
+	if registerRec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	if len(billingClient.topUpCalls) != 2 {
+		t.Fatalf("topup calls = %d, want 2: %#v", len(billingClient.topUpCalls), billingClient.topUpCalls)
+	}
+	if billingClient.topUpCalls[0].Amount != 25 || billingClient.topUpCalls[1].Amount != 50 {
+		t.Fatalf("legacy invitation credits = %#v", billingClient.topUpCalls)
+	}
+}
+
 func TestIdentityHTTPRegisterWithAffCodeSkipsCreditWhenBonusesZero(t *testing.T) {
-	t.Setenv("INVITEE_BONUS_QUOTA", "")
-	t.Setenv("INVITER_BONUS_QUOTA", "0")
+	t.Setenv("INVITEE_BONUS_AMOUNT", "")
+	t.Setenv("INVITER_BONUS_AMOUNT", "0")
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)
 	inviter, err := uc.Register(context.Background(), "alice", "password123", "alice@example.com", "default")
@@ -207,8 +234,8 @@ func TestIdentityHTTPRegisterWithAffCodeSkipsCreditWhenBonusesZero(t *testing.T)
 }
 
 func TestIdentityHTTPRegisterWithoutAffCodeSkipsBillingCredit(t *testing.T) {
-	t.Setenv("INVITEE_BONUS_QUOTA", "25")
-	t.Setenv("INVITER_BONUS_QUOTA", "50")
+	t.Setenv("INVITEE_BONUS_AMOUNT", "25")
+	t.Setenv("INVITER_BONUS_AMOUNT", "50")
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)
 	billingClient := &identityHTTPBillingClient{}
@@ -571,12 +598,12 @@ func TestIdentityHTTPDashboardReturnsAccountSnapshot(t *testing.T) {
 	_, authToken := registerAndLoginForHTTPTest(t, uc)
 	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
 		snapshot: &commonv1.AccountSnapshot{
-			Quota:        1000,
-			UsedQuota:    100,
+			Balance:      1000,
+			UsedAmount:   100,
 			RequestCount: 10,
 			Group:        "default",
 			GroupRatio:   1,
-			FrozenQuota:  0,
+			FrozenAmount: 0,
 		},
 	})
 
@@ -591,12 +618,12 @@ func TestIdentityHTTPDashboardReturnsAccountSnapshot(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`"success":true`,
-		`"quota":1000`,
-		`"used_quota":100`,
+		`"balance":1000`,
+		`"used_amount":100`,
 		`"request_count":10`,
 		`"group":"default"`,
 		`"group_ratio":1`,
-		`"frozen_quota":0`,
+		`"frozen_amount":0`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("dashboard response missing %s: %s", want, body)
@@ -604,24 +631,24 @@ func TestIdentityHTTPDashboardReturnsAccountSnapshot(t *testing.T) {
 	}
 }
 
-// TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota verifies that the dashboard
-// sums |ledger.amount| (actual quota cost) rather than ledger.quota (raw token count)
-// for today_quota and the 7-day usage chart. This is a regression test for the bug
+// TestIdentityHTTPDashboardTodayAmountUsesLedgerAmount verifies that the dashboard
+// sums |ledger.amount| (actual cost) rather than ledger.quota (raw token count)
+// for today_amount and the 7-day usage chart. This is a regression test for the bug
 // where models with per-token pricing (ModelPrices) showed inflated "today consumption"
 // because raw token counts were displayed as dollar amounts.
-func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
+func TestIdentityHTTPDashboardTodayAmountUsesLedgerAmount(t *testing.T) {
 	repo := identitydata.NewMemoryRepositoryForTest()
 	uc := biz.NewIdentityUsecase(repo)
 	_, authToken := registerAndLoginForHTTPTest(t, uc)
 
 	// Simulate mimo-v2.5-pro pricing: 1M input-only tokens at $0.435/1M tokens.
-	// 1000000 * $0.435/1000000 = $0.435 → 0.435 * 500000 = 217500 quota units.
-	// The aggregate RPC returns |amount| (217500) directly, not raw token count (1000000).
+	// 1000000 * $0.435/1000000 = $0.435 -> 0.435 * 10000 = 4350 amount units.
+	// The aggregate RPC returns |amount| (4350) directly, not raw token count (1000000).
 	todayStr := time.Now().Format("2006-01-02")
 	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
 		snapshot: &commonv1.AccountSnapshot{
-			Quota:        5000000,
-			UsedQuota:    217500,
+			Balance:      100000,
+			UsedAmount:   4350,
 			RequestCount: 1,
 			Group:        "default",
 			GroupRatio:   1,
@@ -630,7 +657,7 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 			Daily: []*billingv1.DailyUsage{
 				{
 					Date:             todayStr,
-					Quota:            217500,
+					Quota:            4350,
 					PromptTokens:     1000000,
 					CompletionTokens: 0,
 					CacheReadTokens:  250000,
@@ -641,7 +668,7 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 			Models: []*billingv1.ModelUsage{
 				{Model: "mimo-v2.5-pro", Tokens: 1000000},
 			},
-			TotalQuota:            217500,
+			TotalQuota:            4350,
 			TotalPromptTokens:     1000000,
 			TotalCompletionTokens: 0,
 			TotalCount:            1,
@@ -659,14 +686,14 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 
 	var resp struct {
 		Data struct {
-			UsedQuota             int64 `json:"used_quota"`
-			TodayQuota            int64 `json:"today_quota"`
+			UsedAmount            int64 `json:"used_amount"`
+			TodayAmount           int64 `json:"today_amount"`
 			TodayPromptTokens     int64 `json:"today_prompt_tokens"`
 			TodayCompletionTokens int64 `json:"today_completion_tokens"`
 			TodayCacheReadTokens  int64 `json:"today_cache_read_tokens"`
 			Usage                 []struct {
 				Date             string `json:"date"`
-				Quota            int64  `json:"quota"`
+				Amount           int64  `json:"amount"`
 				PromptTokens     int64  `json:"prompt_tokens"`
 				CompletionTokens int64  `json:"completion_tokens"`
 				CacheReadTokens  int64  `json:"cache_read_tokens"`
@@ -678,13 +705,13 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 	}
 	d := resp.Data
 
-	// today_quota must be |amount| (217500), NOT quota (1000000)
-	if d.TodayQuota != 217500 {
-		t.Errorf("today_quota = %d, want 217500 (|amount|)", d.TodayQuota)
+	// today_amount must be |amount| (4350), NOT quota (1000000)
+	if d.TodayAmount != 4350 {
+		t.Errorf("today_amount = %d, want 4350 (|amount|)", d.TodayAmount)
 	}
-	// used_quota from account snapshot should match
-	if d.UsedQuota != 217500 {
-		t.Errorf("used_quota = %d, want 217500", d.UsedQuota)
+	// used_amount from account snapshot should match
+	if d.UsedAmount != 4350 {
+		t.Errorf("used_amount = %d, want 4350", d.UsedAmount)
 	}
 	// Token counts should still reflect raw values
 	if d.TodayPromptTokens != 1000000 {
@@ -700,8 +727,8 @@ func TestIdentityHTTPDashboardTodayQuotaUsesAmountNotQuota(t *testing.T) {
 	// Verify 7-day usage chart also uses |amount|, not quota
 	for _, u := range d.Usage {
 		if u.Date == todayStr {
-			if u.Quota != 217500 {
-				t.Errorf("usage[%s].quota = %d, want 217500 (|amount|), not 1000000 (raw tokens)", todayStr, u.Quota)
+			if u.Amount != 4350 {
+				t.Errorf("usage[%s].amount = %d, want 4350 (|amount|), not 1000000 (raw tokens)", todayStr, u.Amount)
 			}
 			if u.PromptTokens != 1000000 {
 				t.Errorf("usage[%s].prompt_tokens = %d, want 1000000", todayStr, u.PromptTokens)
@@ -719,12 +746,12 @@ func TestIdentityHTTPUserReadOnlyCompatibilityAliases(t *testing.T) {
 	_, authToken := registerAndLoginForHTTPTest(t, uc)
 	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
 		snapshot: &commonv1.AccountSnapshot{
-			Quota:        1000,
-			UsedQuota:    100,
+			Balance:      1000,
+			UsedAmount:   100,
 			RequestCount: 10,
 			Group:        "default",
 			GroupRatio:   1,
-			FrozenQuota:  0,
+			FrozenAmount: 0,
 		},
 	})
 
@@ -732,7 +759,7 @@ func TestIdentityHTTPUserReadOnlyCompatibilityAliases(t *testing.T) {
 		path string
 		want string
 	}{
-		{"/api/user/quota", `"quota":1000`},
+		{"/api/user/quota", `"balance":1000`},
 		{"/api/user/models", `"data"`},
 		{"/api/user/invitation", `"success":true`},
 	}
@@ -792,8 +819,8 @@ func TestIdentityHTTPDashboardBillingUsageReturnsOpenAIShape(t *testing.T) {
 	_, authToken := registerAndLoginForHTTPTest(t, uc)
 	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
 		snapshot: &commonv1.AccountSnapshot{
-			Quota:     1000,
-			UsedQuota: 123,
+			Balance:    1000,
+			UsedAmount: 123,
 		},
 	})
 
@@ -824,8 +851,8 @@ func TestIdentityHTTPDashboardBillingSubscriptionReturnsOpenAIShape(t *testing.T
 	_, authToken := registerAndLoginForHTTPTest(t, uc)
 	srv := NewHTTPServer(":0", uc, nil, &identityHTTPBillingClient{
 		snapshot: &commonv1.AccountSnapshot{
-			Quota:     1000,
-			UsedQuota: 123,
+			Balance:    1000,
+			UsedAmount: 123,
 		},
 	})
 
@@ -908,7 +935,7 @@ func TestIdentityHTTPTopUpReturnsRedeemedAmount(t *testing.T) {
 	uc := biz.NewIdentityUsecase(repo)
 	_, authToken := registerAndLoginForHTTPTest(t, uc)
 	billingClient := &identityHTTPBillingClient{
-		redeemResponse: &billingv1.RedeemCodeResponse{Success: true, Amount: 1000, NewQuota: 2000},
+		redeemResponse: &billingv1.RedeemCodeResponse{Success: true, Amount: 1000, NewBalance: 2000},
 	}
 	srv := NewHTTPServer(":0", uc, nil, billingClient)
 
@@ -959,7 +986,7 @@ func TestIdentityHTTPOnlinePaymentCompatibilityRoutesAreDisabled(t *testing.T) {
 			Order: &billingv1.PaymentOrder{
 				TradeNo:   "PAY-TEST",
 				PayUrl:    "mock://payment/PAY-TEST",
-				AssetType: "quota",
+				AssetType: "balance",
 			},
 		},
 	}
@@ -988,15 +1015,46 @@ func TestIdentityHTTPOnlinePaymentCompatibilityRoutesAreDisabled(t *testing.T) {
 		t.Fatalf("CreatePaymentOrder calls = %d, want 2", len(billingClient.createOrderCalls))
 	}
 	for _, call := range billingClient.createOrderCalls {
-		if call.GetChannel() != "alipay" || call.GetAssetType() != "quota" || call.GetCurrency() != "CNY" {
+		if call.GetChannel() != "alipay" || call.GetAssetType() != "balance" || call.GetCurrency() != "CNY" {
 			t.Fatalf("payment order request mismatch: %+v", call)
 		}
 		if call.GetMoneyCents() != 1000 {
 			t.Fatalf("money cents = %d, want 1000", call.GetMoneyCents())
 		}
-		if call.GetAssetAmount() != 50000000 {
-			t.Fatalf("asset amount = %d, want 50000000", call.GetAssetAmount())
+		if call.GetAssetAmount() != 1000000 {
+			t.Fatalf("asset amount = %d, want 1000000", call.GetAssetAmount())
 		}
+	}
+}
+
+func TestIdentityHTTPCreatePaymentOrderUsesRechargeMultiplier(t *testing.T) {
+	t.Setenv("RECHARGE_AMOUNT_MULTIPLIER", "3")
+	repo := identitydata.NewMemoryRepositoryForTest()
+	uc := biz.NewIdentityUsecase(repo)
+	_, authToken := registerAndLoginForHTTPTest(t, uc)
+	billingClient := &identityHTTPBillingClient{}
+	srv := NewHTTPServer(":0", uc, nil, billingClient)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/user/pay", strings.NewReader(`{"amount":10,"payment_method":"alipay"}`))
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"success":true`) {
+		t.Fatalf("payment response mismatch: %s", rec.Body.String())
+	}
+	if len(billingClient.createOrderCalls) != 1 {
+		t.Fatalf("CreatePaymentOrder calls = %d, want 1", len(billingClient.createOrderCalls))
+	}
+	call := billingClient.createOrderCalls[0]
+	if call.GetMoneyCents() != 1000 {
+		t.Fatalf("money cents = %d, want 1000", call.GetMoneyCents())
+	}
+	if call.GetAssetAmount() != 300000 {
+		t.Fatalf("asset amount = %d, want 300000", call.GetAssetAmount())
 	}
 }
 
@@ -1076,7 +1134,7 @@ func TestIdentityHTTPUserPaymentOrderDetailRefreshesAndScopesOrder(t *testing.T)
 				UserId:           strconv.FormatInt(user.ID, 10),
 				TradeNo:          "PAY-DETAIL",
 				Channel:          "alipay",
-				AssetAmount:      50000000,
+				AssetAmount:      1000000,
 				MoneyCents:       1000,
 				Currency:         "CNY",
 				Status:           "paid",
@@ -1720,8 +1778,8 @@ func (c *identityHTTPBillingClient) GetPaymentOrderByTradeNo(ctx context.Context
 			UserId:           "1",
 			TradeNo:          req.GetTradeNo(),
 			Channel:          "alipay",
-			AssetType:        "quota",
-			AssetAmount:      50000000,
+			AssetType:        "balance",
+			AssetAmount:      1000000,
 			MoneyCents:       1000,
 			Currency:         "CNY",
 			Status:           "paid",
@@ -1744,8 +1802,8 @@ func (c *identityHTTPBillingClient) ListPaymentOrders(ctx context.Context, req *
 				UserId:           req.GetUserId(),
 				TradeNo:          "PAY-USER",
 				Channel:          "alipay",
-				AssetType:        "quota",
-				AssetAmount:      50000000,
+				AssetType:        "balance",
+				AssetAmount:      1000000,
 				MoneyCents:       1000,
 				Currency:         "CNY",
 				Status:           "paid",
@@ -1764,7 +1822,7 @@ func (c *identityHTTPBillingClient) TopUpQuota(ctx context.Context, req *billing
 		OperatorID: req.GetOperatorId(),
 		Remark:     req.GetRemark(),
 	})
-	return &billingv1.TopUpQuotaResponse{Success: true, NewQuota: req.GetAmount()}, nil
+	return &billingv1.TopUpQuotaResponse{Success: true, NewBalance: req.GetAmount()}, nil
 }
 
 func (c *identityHTTPBillingClient) ListLedger(ctx context.Context, req *billingv1.ListLedgerRequest, opts ...grpc.CallOption) (*billingv1.ListLedgerResponse, error) {

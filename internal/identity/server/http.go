@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,7 +26,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const paymentQuotaPerCNY = int64(5000000)
+const (
+	amountScale                         = int64(10000)
+	defaultRechargeAmountMultiplier     = 10
+	rechargeAmountMultiplierEnvVariable = "RECHARGE_AMOUNT_MULTIPLIER"
+)
 
 type TurnstileVerifier interface {
 	VerifyTurnstile(ctx context.Context, secret, token, remoteIP string) error
@@ -286,7 +291,7 @@ func creditInvitationBonus(ctx context.Context, user *biz.User, billingClient bi
 	if user == nil || user.InviterID == 0 || billingClient == nil {
 		return
 	}
-	if bonus := positiveEnvInt64("INVITEE_BONUS_QUOTA"); bonus > 0 {
+	if bonus := positiveEnvInt64("INVITEE_BONUS_AMOUNT", "INVITEE_BONUS_QUOTA"); bonus > 0 {
 		_, _ = billingClient.TopUpQuota(ctx, &billingv1.TopUpQuotaRequest{
 			UserId:     strconv.FormatInt(user.ID, 10),
 			Amount:     bonus,
@@ -294,7 +299,7 @@ func creditInvitationBonus(ctx context.Context, user *biz.User, billingClient bi
 			Remark:     "invitation invitee bonus",
 		})
 	}
-	if bonus := positiveEnvInt64("INVITER_BONUS_QUOTA"); bonus > 0 {
+	if bonus := positiveEnvInt64("INVITER_BONUS_AMOUNT", "INVITER_BONUS_QUOTA"); bonus > 0 {
 		_, _ = billingClient.TopUpQuota(ctx, &billingv1.TopUpQuotaRequest{
 			UserId:     strconv.FormatInt(user.InviterID, 10),
 			Amount:     bonus,
@@ -304,12 +309,19 @@ func creditInvitationBonus(ctx context.Context, user *biz.User, billingClient bi
 	}
 }
 
-func positiveEnvInt64(key string) int64 {
-	value, err := strconv.ParseInt(os.Getenv(key), 10, 64)
-	if err != nil || value < 0 {
-		return 0
+func positiveEnvInt64(keys ...string) int64 {
+	for _, key := range keys {
+		raw, ok := os.LookupEnv(key)
+		if !ok {
+			continue
+		}
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			return 0
+		}
+		return value
 	}
-	return value
+	return 0
 }
 
 func emailDomainAllowed(email string, whitelist []string) bool {
@@ -489,7 +501,7 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 		dayMap[d.Format("2006-01-02")] = &dailyUsage{}
 	}
 
-	var todayQuota, todayPromptTokens, todayCompletionTokens, todayCacheReadTokens int64
+	var todayAmount, todayPromptTokens, todayCompletionTokens, todayCacheReadTokens int64
 	var totalElapsedTime, consumeCount int64
 
 	if aggResp != nil {
@@ -503,7 +515,7 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 				day.ElapsedTime = d.GetElapsedTime()
 			}
 			if d.GetDate() == startOfDay.Format("2006-01-02") {
-				todayQuota = d.GetQuota()
+				todayAmount = d.GetQuota()
 				todayPromptTokens = d.GetPromptTokens()
 				todayCompletionTokens = d.GetCompletionTokens()
 				todayCacheReadTokens = d.GetCacheReadTokens()
@@ -521,7 +533,7 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 		usageArr = append(usageArr, map[string]interface{}{
 			"date":              key,
 			"count":             day.Count,
-			"quota":             day.Quota,
+			"amount":            day.Quota,
 			"prompt_tokens":     day.PromptTokens,
 			"completion_tokens": day.CompletionTokens,
 			"cache_read_tokens": day.CacheReadTokens,
@@ -552,14 +564,14 @@ func handleUserDashboard(w http.ResponseWriter, r *http.Request, uc *biz.Identit
 	}
 
 	writeJSON(w, http.StatusOK, apiResponse{Success: true, Message: "", Data: map[string]interface{}{
-		"quota":                   account.GetQuota(),
-		"used_quota":              account.GetUsedQuota(),
+		"balance":                 account.GetBalance(),
+		"used_amount":             account.GetUsedAmount(),
 		"request_count":           account.GetRequestCount(),
 		"group":                   account.GetGroup(),
 		"group_ratio":             account.GetGroupRatio(),
-		"frozen_quota":            account.GetFrozenQuota(),
+		"frozen_amount":           account.GetFrozenAmount(),
 		"usage":                   usageArr,
-		"today_quota":             todayQuota,
+		"today_amount":            todayAmount,
 		"today_prompt_tokens":     todayPromptTokens,
 		"today_completion_tokens": todayCompletionTokens,
 		"today_cache_read_tokens": todayCacheReadTokens,
@@ -637,6 +649,10 @@ func ledgerEntryToMap(entry *commonv1.LedgerEntry) map[string]interface{} {
 		"elapsed_time":      entry.GetElapsedTime(),
 		"is_stream":         entry.GetIsStream(),
 		"endpoint":          entry.GetEndpoint(),
+		"cost_source":       entry.GetCostSource(),
+		"subscription_cost": entry.GetSubscriptionCost(),
+		"balance_cost":      entry.GetBalanceCost(),
+		"ledger_dedupe_key": entry.GetLedgerDedupeKey(),
 	}
 }
 
@@ -663,7 +679,7 @@ func handleDashboardBillingUsage(w http.ResponseWriter, r *http.Request, uc *biz
 	}
 	usedQuota := int64(0)
 	if resp.GetSnapshot() != nil {
-		usedQuota = resp.GetSnapshot().GetUsedQuota()
+		usedQuota = resp.GetSnapshot().GetUsedAmount()
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"object":      "list",
@@ -694,7 +710,7 @@ func handleDashboardBillingSubscription(w http.ResponseWriter, r *http.Request, 
 	}
 	limit := int64(0)
 	if resp.GetSnapshot() != nil {
-		limit = resp.GetSnapshot().GetQuota()
+		limit = resp.GetSnapshot().GetBalance()
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"object":                "billing_subscription",
@@ -789,12 +805,12 @@ func handleCreatePaymentOrder(w http.ResponseWriter, r *http.Request, uc *biz.Id
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "invalid payment_method"})
 		return
 	}
-	assetAmount := int64(req.Amount * float64(paymentQuotaPerCNY))
+	assetAmount := int64(math.Round(req.Amount * rechargeAmountMultiplier() * float64(amountScale)))
 	if assetAmount <= 0 {
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "amount too small"})
 		return
 	}
-	moneyCents := int64(req.Amount * 100)
+	moneyCents := int64(math.Round(req.Amount * 100))
 	if moneyCents <= 0 {
 		writeJSON(w, http.StatusOK, apiResponse{Success: false, Message: "amount too small"})
 		return
@@ -802,7 +818,7 @@ func handleCreatePaymentOrder(w http.ResponseWriter, r *http.Request, uc *biz.Id
 	resp, err := billingClient.CreatePaymentOrder(r.Context(), &billingv1.CreatePaymentOrderRequest{
 		UserId:      strconv.FormatInt(snapshot.UserID, 10),
 		Channel:     req.PaymentMethod,
-		AssetType:   "quota",
+		AssetType:   "balance",
 		AssetAmount: assetAmount,
 		MoneyCents:  moneyCents,
 		Currency:    "CNY",
@@ -829,6 +845,18 @@ func handleCreatePaymentOrder(w http.ResponseWriter, r *http.Request, uc *biz.Id
 			"asset_type": resp.GetOrder().GetAssetType(),
 		},
 	})
+}
+
+func rechargeAmountMultiplier() float64 {
+	raw := strings.TrimSpace(os.Getenv(rechargeAmountMultiplierEnvVariable))
+	if raw == "" {
+		return defaultRechargeAmountMultiplier
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value <= 0 {
+		return defaultRechargeAmountMultiplier
+	}
+	return value
 }
 
 func handleUserPaymentOrders(w http.ResponseWriter, r *http.Request, uc *biz.IdentityUsecase, billingClient billingv1.BillingServiceClient) {

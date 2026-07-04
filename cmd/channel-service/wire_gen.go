@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -54,13 +55,23 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 
 	eventBus := events.NewConfiguredEventBus(repo.Redis(), "channel-service")
 	uc := biz.NewChannelUsecase(repo, eventBus)
+	var stopEventBus func()
+	if probe := service.NewCodexModelProbeService(repo); probe != nil {
+		eventBus.Subscribe(events.TopicChannelChanged, probe.HandleSubscriptionAccountEvent)
+		probe.SyncExistingCodexAccounts(context.Background(), repo)
+	}
+	if streamBus, ok := eventBus.(interface {
+		StartListening(context.Context) func()
+	}); ok {
+		stopEventBus = streamBus.StartListening(context.Background())
+	}
 	notifyConn, err := configureHealthAlert(uc)
 	if err != nil {
 		return nil, nil, err
 	}
 	svc := service.NewChannelService(uc)
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr)
+	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, uc)
 
 	registrar, rErr := appregistry.NewRegistrar(cfg.Registry)
 	if rErr != nil {
@@ -77,6 +88,9 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	app := kratos.New(kratosOpts...)
 
 	return app, func() {
+		if stopEventBus != nil {
+			stopEventBus()
+		}
 		if notifyConn != nil {
 			_ = notifyConn.Close()
 		}

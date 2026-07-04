@@ -14,6 +14,9 @@ const OrdersPage = lazy(() => import('@/pages/OrdersPage').then((m) => ({ defaul
 const RechargePage = lazy(() => import('@/pages/RechargePage').then((m) => ({ default: m.RechargePage })));
 const RedeemPage = lazy(() => import('@/pages/RedeemPage').then((m) => ({ default: m.RedeemPage })));
 const ProfilePage = lazy(() => import('@/pages/ProfilePage').then((m) => ({ default: m.ProfilePage })));
+const SubscriptionsPage = lazy(() =>
+  import('@/pages/SubscriptionsPage').then((m) => ({ default: m.SubscriptionsPage }))
+);
 const AdminOverviewPage = lazy(() =>
   import('@/pages/admin/OverviewPage').then((m) => ({ default: m.AdminOverviewPage }))
 );
@@ -23,6 +26,12 @@ const AdminChannelsPage = lazy(() =>
 );
 const AdminSubscriptionAccountsPage = lazy(() =>
   import('@/pages/admin/SubscriptionAccountsPage').then((m) => ({ default: m.AdminSubscriptionAccountsPage }))
+);
+const AdminSubscriptionGroupsPage = lazy(() =>
+  import('@/pages/admin/SubscriptionGroupsPage').then((m) => ({ default: m.AdminSubscriptionGroupsPage }))
+);
+const AdminSubscriptionsPage = lazy(() =>
+  import('@/pages/admin/SubscriptionsAdminPage').then((m) => ({ default: m.AdminSubscriptionsPage }))
 );
 const AdminPricingPage = lazy(() =>
   import('@/pages/admin/PricingPage').then((m) => ({ default: m.AdminPricingPage }))
@@ -101,6 +110,10 @@ export const router = createBrowserRouter([
         element: withSuspense(<ProfilePage />),
       },
       {
+        path: 'subscriptions',
+        element: withSuspense(<SubscriptionsPage />),
+      },
+      {
         path: 'admin',
         element: <AdminRoute />,
         children: [
@@ -119,6 +132,14 @@ export const router = createBrowserRouter([
           {
             path: 'subscription-accounts',
             element: withSuspense(<AdminSubscriptionAccountsPage />),
+          },
+          {
+            path: 'subscription-groups',
+            element: withSuspense(<AdminSubscriptionGroupsPage />),
+          },
+          {
+            path: 'subscriptions',
+            element: withSuspense(<AdminSubscriptionsPage />),
           },
           {
             path: 'channel-health',

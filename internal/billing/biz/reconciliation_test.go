@@ -65,8 +65,20 @@ func (m *mockReconRepo) ListReservationsByStatus(ctx context.Context, status str
 	return result, nil
 }
 
+func (m *mockReconRepo) ListActiveSubscriptions(ctx context.Context) ([]*SubscriptionUsageSnapshot, error) {
+	return nil, nil
+}
+
+func (m *mockReconRepo) SumPendingReceivables(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockReconRepo) SumOverdraftBalances(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
 func TestRunReconciliation_ExpiredReservations(t *testing.T) {
-	account := &Account{UserID: "user1", Quota: 900, FrozenQuota: 100, Group: "default"}
+	account := &Account{UserID: "user1", Balance: 900, FrozenAmount: 100, Group: "default"}
 	expiredRes := &Reservation{
 		ReservationID: "res1",
 		UserID:        "user1",
@@ -89,11 +101,11 @@ func TestRunReconciliation_ExpiredReservations(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.ExpiredCleaned)
 	assert.Equal(t, ReservationStatusExpired, expiredRes.Status)
-	assert.Equal(t, int64(0), account.FrozenQuota)
+	assert.Equal(t, int64(0), account.FrozenAmount)
 }
 
 func TestRunReconciliation_QuotaConsistency(t *testing.T) {
-	account := &Account{UserID: "user1", Quota: 1000, FrozenQuota: 0, Group: "default"}
+	account := &Account{UserID: "user1", Balance: 1000, FrozenAmount: 0, Group: "default"}
 
 	accountRepo := &mockAccountRepo{account: account}
 	reservationRepo := &mockReservationRepo{reservations: make(map[string]*Reservation)}
@@ -113,7 +125,7 @@ func TestRunReconciliation_QuotaConsistency(t *testing.T) {
 }
 
 func TestRunReconciliation_NoInconsistencies(t *testing.T) {
-	account := &Account{UserID: "user1", Quota: 1000, FrozenQuota: 0, Group: "default"}
+	account := &Account{UserID: "user1", Balance: 1000, FrozenAmount: 0, Group: "default"}
 
 	accountRepo := &mockAccountRepo{account: account}
 	reservationRepo := &mockReservationRepo{reservations: make(map[string]*Reservation)}
@@ -131,7 +143,7 @@ func TestRunReconciliation_NoInconsistencies(t *testing.T) {
 }
 
 func TestRunReconciliation_RecordsMetrics(t *testing.T) {
-	account := &Account{UserID: "user1", Quota: 1000, FrozenQuota: 0, Group: "default"}
+	account := &Account{UserID: "user1", Balance: 1000, FrozenAmount: 0, Group: "default"}
 	reconRepo := &mockReconRepo{
 		accounts:   []*Account{account},
 		ledgerSums: map[string]int64{"user1": 500},
@@ -153,7 +165,7 @@ func TestRunReconciliation_RecordsMetrics(t *testing.T) {
 }
 
 func TestRunReconciliation_ChannelUsageConsistency(t *testing.T) {
-	account := &Account{UserID: "user1", Quota: 1000, FrozenQuota: 0, Group: "default"}
+	account := &Account{UserID: "user1", Balance: 1000, FrozenAmount: 0, Group: "default"}
 	reconRepo := &mockReconRepo{
 		accounts:   []*Account{account},
 		ledgerSums: map[string]int64{"user1": 1000},
@@ -183,7 +195,7 @@ func TestRunReconciliation_ChannelUsageConsistency(t *testing.T) {
 }
 
 func TestRunReconciliation_LogLedgerConsistency(t *testing.T) {
-	account := &Account{UserID: "user1", Quota: 1000, FrozenQuota: 0, Group: "default"}
+	account := &Account{UserID: "user1", Balance: 1000, FrozenAmount: 0, Group: "default"}
 	reconRepo := &mockReconRepo{
 		accounts:             []*Account{account},
 		ledgerSums:           map[string]int64{"user1": 1000},

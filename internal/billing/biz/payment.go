@@ -17,7 +17,8 @@ const (
 	PaymentAssetIssueStatusPending = "pending"
 	PaymentAssetIssueStatusIssued  = "issued"
 
-	PaymentAssetTypeQuota = "quota"
+	PaymentAssetTypeBalance      = "balance"
+	PaymentAssetTypeSubscription = "subscription"
 
 	PaymentChannelMock   = "mock"
 	PaymentChannelAlipay = "alipay"
@@ -37,6 +38,7 @@ type PaymentOrder struct {
 	ProviderPayload  string
 	PayURL           string
 	AssetIssueStatus string
+	GroupID          int64 // Subscription group ID for auto-assignment after payment
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	PaidAt           *time.Time
@@ -49,6 +51,7 @@ type CreatePaymentOrderRequest struct {
 	AssetAmount int64
 	MoneyCents  int64
 	Currency    string
+	GroupID     int64 // Optional: subscription group ID for auto-assignment
 }
 
 type ListPaymentOrdersRequest struct {
@@ -108,14 +111,26 @@ type PaymentUsecase struct {
 	repo     PaymentRepo
 	provider PaymentProvider
 	issuer   PaymentAssetIssuer
+	assigner SubscriptionAssigner // Optional: assigns subscription after payment
 }
 
 type PaymentAssetIssuer interface {
-	IssueQuota(ctx context.Context, order *PaymentOrder) error
+	IssueBalance(ctx context.Context, order *PaymentOrder) error
+}
+
+// SubscriptionAssigner is an optional interface that payment issuers can
+// implement to automatically assign subscriptions after payment.
+type SubscriptionAssigner interface {
+	AssignSubscriptionAfterPayment(ctx context.Context, order *PaymentOrder) error
 }
 
 func NewPaymentUsecase(repo PaymentRepo, provider PaymentProvider, issuer PaymentAssetIssuer) *PaymentUsecase {
 	return &PaymentUsecase{repo: repo, provider: provider, issuer: issuer}
+}
+
+// NewPaymentUsecaseWithAssigner creates a PaymentUsecase with subscription assignment support.
+func NewPaymentUsecaseWithAssigner(repo PaymentRepo, provider PaymentProvider, issuer PaymentAssetIssuer, assigner SubscriptionAssigner) *PaymentUsecase {
+	return &PaymentUsecase{repo: repo, provider: provider, issuer: issuer, assigner: assigner}
 }
 
 func (uc *PaymentUsecase) CreateOrder(ctx context.Context, req CreatePaymentOrderRequest) (*PaymentOrder, error) {
@@ -136,6 +151,7 @@ func (uc *PaymentUsecase) CreateOrder(ctx context.Context, req CreatePaymentOrde
 		Currency:         currency,
 		Status:           PaymentOrderStatusPending,
 		AssetIssueStatus: PaymentAssetIssueStatusPending,
+		GroupID:          req.GroupID,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
@@ -180,7 +196,23 @@ func (uc *PaymentUsecase) MarkOrderPaid(ctx context.Context, tradeNo, providerTr
 		return nil, errors.New("trade_no is required")
 	}
 	order, _, err := uc.repo.MarkOrderPaid(ctx, tradeNo, providerTradeNo, func(order *PaymentOrder) error {
-		return uc.issuer.IssueQuota(ctx, order)
+		if order.AssetType == PaymentAssetTypeBalance {
+			if err := uc.issuer.IssueBalance(ctx, order); err != nil {
+				return err
+			}
+		}
+		if order.AssetType == PaymentAssetTypeSubscription {
+			if order.GroupID <= 0 {
+				return errors.New("subscription group_id is required")
+			}
+			if uc.assigner == nil {
+				return errors.New("subscription assigner is not configured")
+			}
+			if err := uc.assigner.AssignSubscriptionAfterPayment(ctx, order); err != nil {
+				return fmt.Errorf("assign subscription after payment: %w", err)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -227,7 +259,7 @@ func validateCreatePaymentOrderRequest(req CreatePaymentOrderRequest) error {
 	if req.UserID == "" {
 		return errors.New("user_id is required")
 	}
-	if req.AssetType != PaymentAssetTypeQuota {
+	if req.AssetType != PaymentAssetTypeBalance && req.AssetType != PaymentAssetTypeSubscription {
 		return fmt.Errorf("unsupported payment asset type %q", req.AssetType)
 	}
 	if req.AssetAmount <= 0 {
@@ -252,15 +284,15 @@ func generatePaymentTradeNo(userID string) string {
 	return fmt.Sprintf("PAY%s%s%d", userID, hex.EncodeToString(b[:]), time.Now().Unix())
 }
 
-type quotaPaymentAssetIssuer struct {
+type balancePaymentAssetIssuer struct {
 	billing *BillingUsecase
 }
 
 func NewPaymentAssetIssuer(billing *BillingUsecase) PaymentAssetIssuer {
-	return &quotaPaymentAssetIssuer{billing: billing}
+	return &balancePaymentAssetIssuer{billing: billing}
 }
 
-func (i *quotaPaymentAssetIssuer) IssueQuota(ctx context.Context, order *PaymentOrder) error {
+func (i *balancePaymentAssetIssuer) IssueBalance(ctx context.Context, order *PaymentOrder) error {
 	if i == nil || i.billing == nil {
 		return errors.New("payment asset issuer is not configured")
 	}

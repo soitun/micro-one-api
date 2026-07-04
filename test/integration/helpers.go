@@ -301,12 +301,12 @@ func (m *testIdentityRepo) DeleteUser(ctx context.Context, userID int64) error {
 	return nil
 }
 
-func (m *testIdentityRepo) IncreaseUserQuota(ctx context.Context, userID int64, amount int64) error {
+func (m *testIdentityRepo) IncreaseUserBalance(ctx context.Context, userID int64, amount int64) error {
 	user, ok := m.users[userID]
 	if !ok {
 		return identitybiz.ErrUserNotFound
 	}
-	user.Quota += amount
+	user.Balance += amount
 	return nil
 }
 
@@ -410,6 +410,10 @@ func (m *testChannelRepo) ListSubscriptionAccounts(ctx context.Context, page, pa
 	return nil, 0, nil
 }
 
+func (m *testChannelRepo) ListOAuthRefreshCandidates(ctx context.Context, within time.Duration) ([]int64, error) {
+	return nil, nil
+}
+
 func (m *testChannelRepo) CreateSubscriptionAccount(ctx context.Context, account *channelbiz.SubscriptionAccount) error {
 	return nil
 }
@@ -423,6 +427,30 @@ func (m *testChannelRepo) DeleteSubscriptionAccount(ctx context.Context, account
 }
 
 func (m *testChannelRepo) ChangeSubscriptionAccountStatus(ctx context.Context, accountID int64, status int32) error {
+	return channelbiz.ErrSubscriptionAccountNotFound
+}
+
+func (m *testChannelRepo) SetSubscriptionAccountError(ctx context.Context, accountID int64, message string) error {
+	return channelbiz.ErrSubscriptionAccountNotFound
+}
+
+func (m *testChannelRepo) SetTempUnschedulable(ctx context.Context, accountID int64, until time.Time, reason string) error {
+	return channelbiz.ErrSubscriptionAccountNotFound
+}
+
+func (m *testChannelRepo) ClearTempUnschedulable(ctx context.Context, accountID int64) error {
+	return channelbiz.ErrSubscriptionAccountNotFound
+}
+
+func (m *testChannelRepo) RecordAccountQuotaSnapshot(ctx context.Context, snapshot *channelbiz.AccountQuotaSnapshot) error {
+	return channelbiz.ErrSubscriptionAccountNotFound
+}
+
+func (m *testChannelRepo) GetAccountQuotaSnapshot(ctx context.Context, accountID int64) (*channelbiz.AccountQuotaSnapshot, error) {
+	return nil, channelbiz.ErrSubscriptionAccountNotFound
+}
+
+func (m *testChannelRepo) AutoPauseAccount(ctx context.Context, accountID int64, reason string) error {
 	return channelbiz.ErrSubscriptionAccountNotFound
 }
 

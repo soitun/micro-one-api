@@ -23,6 +23,7 @@ type Data struct {
 	paymentRepo     biz.PaymentRepo
 	reconRepo       biz.ReconciliationRepo
 	reconRunStore   biz.ReconciliationRunStore
+	receivableRepo  biz.ReceivableRepo
 }
 
 func NewData(driver string, dsn ...string) (*Data, error) {
@@ -65,6 +66,7 @@ func NewData(driver string, dsn ...string) (*Data, error) {
 	d.paymentRepo = NewPaymentRepo(d)
 	d.reconRepo = NewReconciliationRepo(d)
 	d.reconRunStore = NewReconciliationRunRepo(d)
+	d.receivableRepo = NewReceivableRepo(d)
 
 	return d, nil
 }
@@ -101,11 +103,8 @@ func (d *Data) ReconciliationRunStore() biz.ReconciliationRunStore {
 	return d.reconRunStore
 }
 
-func (d *Data) Redis() *redis.Client {
-	if d == nil {
-		return nil
-	}
-	return d.redis
+func (d *Data) ReceivableRepo() biz.ReceivableRepo {
+	return d.receivableRepo
 }
 
 func (d *Data) DB() *gorm.DB {
@@ -113,6 +112,13 @@ func (d *Data) DB() *gorm.DB {
 		return nil
 	}
 	return d.db
+}
+
+func (d *Data) Redis() *redis.Client {
+	if d == nil {
+		return nil
+	}
+	return d.redis
 }
 
 func (d *Data) Close() error {
