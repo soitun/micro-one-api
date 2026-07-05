@@ -59,7 +59,7 @@ curl http://localhost:8004/metrics
 
 # 测试 chat completions
 curl http://localhost:8080/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}'
 ```

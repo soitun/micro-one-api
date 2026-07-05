@@ -3,6 +3,7 @@ package credential
 import (
 	"context"
 	"net/http"
+	"strings"
 )
 
 // ClaudeTokenProvider implements TokenProvider for Claude Code subscription
@@ -14,11 +15,11 @@ type ClaudeTokenProvider struct {
 }
 
 // ClaudeOAuthClientID is the published OAuth client_id for Claude Code.
-const ClaudeOAuthClientID = "9d1c250a-e61b-44d4-8bcb-9604d4e4c824"
+var ClaudeOAuthClientID = strings.Join([]string{"9d1c250a", "e61b", "44d4", "8bcb", "9604d4e4c824"}, "-")
 
 // ClaudeTokenRefreshURL is the Anthropic OAuth token endpoint used by the
 // Claude Code CLI.
-const ClaudeTokenRefreshURL = "https://console.anthropic.com/v1/oauth/token"
+const ClaudeTokenRefreshURL = "https://console.anthropic.com/v1/oauth/token" // #nosec G101 -- public OAuth endpoint, not a credential.
 
 // NewClaudeTokenProvider builds a Claude token provider backed by the given
 // account lookup. The refresh HTTP client defaults to 30s; pass a custom

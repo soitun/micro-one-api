@@ -18,7 +18,7 @@ type OpenAITokenProvider struct {
 const CodexOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 // CodexTokenRefreshURL is the ChatGPT OAuth token endpoint used by codex_cli_rs.
-const CodexTokenRefreshURL = "https://auth.openai.com/oauth/token"
+const CodexTokenRefreshURL = "https://auth.openai.com/oauth/token" // #nosec G101 -- public OAuth endpoint, not a credential.
 
 // NewOpenAITokenProvider builds a Codex/ChatGPT token provider.
 func NewOpenAITokenProvider(lookup AccountLookup) *OpenAITokenProvider {

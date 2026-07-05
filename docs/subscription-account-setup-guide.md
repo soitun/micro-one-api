@@ -312,7 +312,7 @@ python3 scripts/import-subscription-creds.py codex \
 
 ```bash
 curl -s -X POST http://127.0.0.1:3000/v1/subscription-accounts \
-  -H "Authorization: Bearer test-admin-token-123456789" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
   -d @subscription-account.codex.payload.json \
   -w "\nHTTP %{http_code}\n"

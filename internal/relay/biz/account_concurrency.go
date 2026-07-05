@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"micro-one-api/internal/pkg/metrics"
+	"micro-one-api/internal/pkg/safecast"
 )
 
 // AccountConcurrencyLimiter caps the number of in-flight relay requests per
@@ -205,7 +206,7 @@ func (l *RedisAccountConcurrencyLimiter) Inflight(ctx context.Context, accountID
 		metrics.RelayAccountConcurrencyFallbackTotal.WithLabelValues("count_error").Inc()
 		return 0
 	}
-	return int32(n)
+	return safecast.Int64ToInt32Saturating(n)
 }
 
 func (l *RedisAccountConcurrencyLimiter) refreshLease(ctx context.Context, key, member string, done <-chan struct{}) {

@@ -12,6 +12,16 @@ func IntToInt32(v int) (int32, error) {
 	return int32(v), nil // #nosec G115 -- range checked above.
 }
 
+func IntToInt32Saturating(v int) int32 {
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(v) // #nosec G115 -- range checked above.
+}
+
 func Int64ToInt32(v int64) (int32, error) {
 	if v < math.MinInt32 || v > math.MaxInt32 {
 		return 0, fmt.Errorf("value %d overflows int32", v)
@@ -19,11 +29,28 @@ func Int64ToInt32(v int64) (int32, error) {
 	return int32(v), nil // #nosec G115 -- range checked above.
 }
 
+func Int64ToInt32Saturating(v int64) int32 {
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(v) // #nosec G115 -- range checked above.
+}
+
 func Int64ToUint(v int64) (uint, error) {
 	if v < 0 || uint64(v) > uint64(math.MaxUint) {
 		return 0, fmt.Errorf("value %d overflows uint", v)
 	}
 	return uint(v), nil // #nosec G115 -- range checked above.
+}
+
+func Uint64ToInt64Saturating(v uint64) int64 {
+	if v > uint64(math.MaxInt64) {
+		return math.MaxInt64
+	}
+	return int64(v) // #nosec G115 -- range checked above.
 }
 
 func Int32ToInt8(v int32) (int8, error) {
@@ -45,4 +72,18 @@ func UintToUint32(v uint) (uint32, error) {
 		return 0, fmt.Errorf("value %d overflows uint32", v)
 	}
 	return uint32(v), nil // #nosec G115 -- range checked above.
+}
+
+func Uint32ToInt32Saturating(v uint32) int32 {
+	if v > uint32(math.MaxInt32) {
+		return math.MaxInt32
+	}
+	return int32(v) // #nosec G115 -- range checked above.
+}
+
+func Float64ToFloat32(v float64) (float32, error) {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < -math.MaxFloat32 || v > math.MaxFloat32 {
+		return 0, fmt.Errorf("value %g cannot be represented as float32", v)
+	}
+	return float32(v), nil // #nosec G115 -- range checked above.
 }

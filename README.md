@@ -123,7 +123,7 @@ curl http://localhost:8080/healthz
 ### 模型列表
 
 ```bash
-curl -H "Authorization: Bearer YOUR_TOKEN" \
+curl -H "Authorization: Bearer ${API_TOKEN}" \
   http://localhost:8080/v1/models
 ```
 
@@ -132,7 +132,7 @@ curl -H "Authorization: Bearer YOUR_TOKEN" \
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   -d '{
     "model": "gpt-4o-mini",
     "messages": [
@@ -146,7 +146,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   -d '{
     "model": "gpt-4o-mini",
     "messages": [

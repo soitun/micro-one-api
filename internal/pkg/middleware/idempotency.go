@@ -270,7 +270,7 @@ func (im *IdempotencyMiddleware) writeCachedResponse(w http.ResponseWriter, _ *h
 	// Write status code and body
 	w.WriteHeader(resp.StatusCode)
 	if len(resp.Body) > 0 {
-		w.Write(resp.Body)
+		_, _ = w.Write(resp.Body) // #nosec G705 -- exact cached response replay, not template rendering.
 	}
 }
 

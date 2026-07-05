@@ -71,7 +71,15 @@ cleanup
 
 log "Starting docker-compose with test override..."
 cd "$COMPOSE_DIR"
-docker-compose -f "$COMPOSE_FILE" -f "$COMPOSE_TEST" up -d --build 2>&1 | tail -5
+compose_log="$(mktemp)"
+compose_parallel_limit="${COMPOSE_PARALLEL_LIMIT:-2}"
+if ! COMPOSE_PARALLEL_LIMIT="$compose_parallel_limit" docker-compose -f "$COMPOSE_FILE" -f "$COMPOSE_TEST" up -d --build 2>&1 | tee "$compose_log"; then
+	tail -20 "$compose_log"
+	warn "docker-compose startup failed; retrying once after health checks settle..."
+	sleep 5
+	COMPOSE_PARALLEL_LIMIT="$compose_parallel_limit" docker-compose -f "$COMPOSE_FILE" -f "$COMPOSE_TEST" up -d --build 2>&1 | tee "$compose_log"
+fi
+rm -f "$compose_log"
 
 log "Waiting for services to be ready..."
 

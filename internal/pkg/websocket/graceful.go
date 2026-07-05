@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 	applogger "micro-one-api/internal/pkg/logger"
+	"micro-one-api/internal/pkg/safecast"
 )
 
 // ConnectionState represents the current state of a WebSocket connection.
@@ -59,11 +60,11 @@ func DefaultDrainConfig() *DrainConfig {
 
 // drainMetrics holds metrics for drain operations.
 type drainMetrics struct {
-	totalConnections    atomic.Int64
-	closedGracefully    atomic.Int64
-	closedByForce       atomic.Int64
-	drainStartTime      atomic.Int64
-	drainCompleteTime   atomic.Int64
+	totalConnections  atomic.Int64
+	closedGracefully  atomic.Int64
+	closedByForce     atomic.Int64
+	drainStartTime    atomic.Int64
+	drainCompleteTime atomic.Int64
 }
 
 // NewConnectionTracker creates a new connection tracker.
@@ -136,7 +137,7 @@ func (c *Connection) GetState() ConnectionState {
 
 // SetState sets the connection state.
 func (c *Connection) SetState(state ConnectionState) {
-	c.state.Store(int32(state))
+	c.state.Store(safecast.IntToInt32Saturating(int(state)))
 }
 
 // Close closes the connection gracefully.
@@ -323,9 +324,9 @@ func (ct *ConnectionTracker) Metrics() *DrainMetrics {
 		TotalConnections:  ct.metrics.totalConnections.Load(),
 		ClosedGracefully:  ct.metrics.closedGracefully.Load(),
 		ClosedByForce:     ct.metrics.closedByForce.Load(),
-		DrainStartTime:     ct.metrics.drainStartTime.Load(),
-		DrainCompleteTime:  ct.metrics.drainCompleteTime.Load(),
-		ActiveConnections:  int64(ct.ActiveCount()),
+		DrainStartTime:    ct.metrics.drainStartTime.Load(),
+		DrainCompleteTime: ct.metrics.drainCompleteTime.Load(),
+		ActiveConnections: int64(ct.ActiveCount()),
 	}
 }
 

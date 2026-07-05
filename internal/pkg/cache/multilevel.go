@@ -11,6 +11,7 @@ import (
 
 	"micro-one-api/internal/pkg/events"
 	"micro-one-api/internal/pkg/metrics"
+	"micro-one-api/internal/pkg/safecast"
 	"micro-one-api/pkg/jsonx"
 )
 
@@ -311,8 +312,8 @@ func (c *MultiLevelCache[T]) ClearAll() {
 func (c *MultiLevelCache[T]) Size() (l1, l2 int64) {
 	if c.l1 != nil && c.l1.Metrics != nil {
 		// Use the metrics to get approximate size
-		keysAdded := int64(c.l1.Metrics.KeysAdded())
-		keysEvicted := int64(c.l1.Metrics.KeysEvicted())
+		keysAdded := safecast.Uint64ToInt64Saturating(c.l1.Metrics.KeysAdded())
+		keysEvicted := safecast.Uint64ToInt64Saturating(c.l1.Metrics.KeysEvicted())
 		l1 = max(0, keysAdded-keysEvicted)
 	}
 	// L2 size is expensive to compute, skip for now

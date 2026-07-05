@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -415,7 +416,11 @@ func (r *Repository) RecordAccountQuotaSnapshot(ctx context.Context, snapshot *b
 		return biz.ErrSubscriptionAccountNotFound
 	}
 	if snapshot.PrimaryUsedPercent != nil {
-		account.QuotaUsedPercent = float32(*snapshot.PrimaryUsedPercent)
+		usedPercent, err := safecast.Float64ToFloat32(*snapshot.PrimaryUsedPercent)
+		if err != nil {
+			return fmt.Errorf("primary used percent: %w", err)
+		}
+		account.QuotaUsedPercent = usedPercent
 	}
 	resetAt := quotaResetAt(snapshot.UpdatedAt, snapshot.PrimaryResetAfterSeconds, snapshot.SecondaryResetAfterSeconds)
 	if resetAt > 0 {

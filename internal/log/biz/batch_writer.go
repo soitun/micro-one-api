@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"micro-one-api/internal/pkg/metrics"
+	"micro-one-api/internal/pkg/safecast"
 )
 
 // BatchLogWriter batches log entries for efficient database writes.
@@ -187,8 +188,8 @@ func (w *BatchLogWriter) Stats() BatchWriterStats {
 	w.batchMu.Unlock()
 
 	return BatchWriterStats{
-		PendingBatch:  int32(pending),
-		QueuedEntries: int32(queued),
+		PendingBatch:   safecast.IntToInt32Saturating(pending),
+		QueuedEntries:  safecast.IntToInt32Saturating(queued),
 		DroppedEntries: w.droppedEntries,
 	}
 }

@@ -139,7 +139,7 @@ docker compose up -d
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
   -d '{
     "model": "gpt-4o-mini",
     "messages": [

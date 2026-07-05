@@ -9,6 +9,7 @@ import (
 	"time"
 
 	commonv1 "micro-one-api/api/common/v1"
+	"micro-one-api/internal/pkg/safecast"
 )
 
 // WeightedSelector selects channels using a weighted round-robin
@@ -21,7 +22,7 @@ type WeightedSelector struct {
 // channelState holds runtime state for a channel.
 type channelState struct {
 	channel          *commonv1.ChannelInfo
-	weight           uint32          // configured weight
+	weight           int32           // configured weight
 	currentWeight    int32           // smooth WRR current weight
 	recentLatency    *SlidingWindow  // last 100 request latencies
 	recentErrors     *SlidingCounter // last 60s error count
@@ -201,12 +202,12 @@ func (s *WeightedSelector) updateChannelLocked(channel *commonv1.ChannelInfo) {
 	}
 }
 
-func configuredSelectorWeight(channel *commonv1.ChannelInfo) uint32 {
+func configuredSelectorWeight(channel *commonv1.ChannelInfo) int32 {
 	if channel.Weight > 0 {
-		return channel.Weight
+		return safecast.Uint32ToInt32Saturating(channel.Weight)
 	}
 	if channel.Priority > 0 {
-		return uint32(channel.Priority)
+		return safecast.Int64ToInt32Saturating(channel.Priority)
 	}
 	return 1
 }
@@ -265,7 +266,7 @@ func (s *WeightedSelector) Select(ctx context.Context, group string, candidates 
 		}
 
 		// Dynamic weight = static weight × health factor × latency factor
-		dynamicWeight := int32(state.weight) * state.healthFactor() * state.latencyFactor()
+		dynamicWeight := state.weight * state.healthFactor() * state.latencyFactor()
 
 		// Smooth WRR: current += dynamic, track max
 		state.currentWeight += dynamicWeight
@@ -294,7 +295,7 @@ func (s *WeightedSelector) totalWeight(candidates []*commonv1.ChannelInfo) int32
 	var total int32
 	for _, ch := range candidates {
 		if state, ok := s.channels[ch.Id]; ok {
-			total += int32(state.weight)
+			total += state.weight
 		}
 	}
 	return total
@@ -406,7 +407,7 @@ func (s *WeightedSelector) GetStats() map[int64]ChannelStats {
 // ChannelStats holds statistics for a channel.
 type ChannelStats struct {
 	ChannelID     int64
-	Weight        uint32
+	Weight        int32
 	CurrentWeight int32
 	Inflight      int32
 	P95Latency    time.Duration

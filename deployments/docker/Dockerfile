@@ -31,7 +31,23 @@ ENV VITE_RECHARGE_AMOUNT_MULTIPLIER=${VITE_RECHARGE_AMOUNT_MULTIPLIER}
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Stage 2: go-builder
+# Stage 2: go-deps
+# Caches Go modules inside this Dockerfile so CI/buildx jobs are self-contained.
+# A separate Dockerfile.deps may still be used by deployment scripts for
+# coarse-grained prebuild caching, but this image must not require a local tag.
+# ---------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS go-deps
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /deps
+
+COPY go.mod go.sum ./
+
+RUN go mod download && go mod verify
+
+# ---------------------------------------------------------------------------
+# Stage 3: go-builder
 # Builds the Go service binary. This stage runs on the TARGET platform
 # (natively, or emulated via QEMU on an amd64 GitHub runner), NOT on the
 # build platform. That way the CGO toolchain (mattn/go-sqlite3) always
@@ -50,9 +66,10 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-# Copy Go module cache from deps base image
-# Build deps image first: docker build -f deployments/docker/Dockerfile.deps -t micro-one-api/go-deps:latest ../..
-COPY --from=micro-one-api/go-deps:latest /go/pkg/mod /go/pkg/mod
+# Copy Go module cache from the self-contained deps stage. CI builds each
+# service in a fresh buildx job, so relying on a pre-existing local image would
+# make BuildKit try to pull micro-one-api/go-deps from Docker Hub.
+COPY --from=go-deps /go/pkg/mod /go/pkg/mod
 
 COPY . .
 
@@ -80,7 +97,7 @@ RUN CGO_ENABLED=1 go build \
       -o /app/bin/service ./cmd/${SERVICE_NAME}
 
 # ---------------------------------------------------------------------------
-# Stage 3: runtime
+# Stage 4: runtime
 # Minimal alpine image with sqlite-libs (CGO-linked binaries need musl
 # libc + libsqlite3 at runtime). Runs as the unprivileged 65534 user.
 # ---------------------------------------------------------------------------
