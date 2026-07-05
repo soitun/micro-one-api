@@ -9,16 +9,16 @@ import (
 
 func TestUserRPMLimitFromEnv(t *testing.T) {
 	t.Setenv("SUBSCRIPTION_USER_RPM_LIMIT", "")
-	if got := userRPMLimitFromEnv(); got != 3 {
-		t.Fatalf("default user rpm limit = %d, want 3", got)
+	if got := userRPMLimitFromEnv(); got != 0 {
+		t.Fatalf("default user rpm limit = %d, want 0", got)
 	}
 	t.Setenv("SUBSCRIPTION_USER_RPM_LIMIT", "8")
 	if got := userRPMLimitFromEnv(); got != 8 {
 		t.Fatalf("configured user rpm limit = %d, want 8", got)
 	}
 	t.Setenv("SUBSCRIPTION_USER_RPM_LIMIT", "bad")
-	if got := userRPMLimitFromEnv(); got != 3 {
-		t.Fatalf("invalid user rpm limit fallback = %d, want 3", got)
+	if got := userRPMLimitFromEnv(); got != 0 {
+		t.Fatalf("invalid user rpm limit fallback = %d, want 0", got)
 	}
 }
 

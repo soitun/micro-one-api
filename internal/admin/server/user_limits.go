@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const defaultUserRPMLimit = 3
+const defaultUserRPMLimit = 0
 
 func handleUserLimits(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

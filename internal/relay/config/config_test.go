@@ -18,12 +18,16 @@ func TestSubscriptionConfigEnabled(t *testing.T) {
 
 func TestSubscriptionConfigUserRPMLimitDefault(t *testing.T) {
 	var cfg Config
-	if got := cfg.Subscription.GetUserRPMLimit(); got != 3 {
-		t.Fatalf("user rpm limit default = %d, want 3", got)
+	if got := cfg.Subscription.GetUserRPMLimit(); got != 0 {
+		t.Fatalf("user rpm limit default = %d, want 0", got)
 	}
 	cfg.Subscription.UserRPMLimit = 12
 	if got := cfg.Subscription.GetUserRPMLimit(); got != 12 {
 		t.Fatalf("user rpm limit = %d, want 12", got)
+	}
+	cfg.Subscription.UserRPMLimit = -1
+	if got := cfg.Subscription.GetUserRPMLimit(); got != -1 {
+		t.Fatalf("user rpm limit = %d, want -1", got)
 	}
 }
 

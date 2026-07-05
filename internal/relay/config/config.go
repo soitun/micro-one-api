@@ -36,9 +36,6 @@ type SubscriptionConfig struct {
 func (c SubscriptionConfig) GetSubscriptionEnabled() bool { return c.Enabled }
 
 func (c SubscriptionConfig) GetUserRPMLimit() int32 {
-	if c.UserRPMLimit <= 0 {
-		return 3
-	}
 	return c.UserRPMLimit
 }
 
