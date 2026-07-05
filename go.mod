@@ -7,7 +7,7 @@ require (
 	github.com/coder/websocket v1.8.14
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/go-kratos/kratos/contrib/registry/consul/v2 v2.0.0-20260404020628-f149714c1d54
-	github.com/go-kratos/kratos/v2 v2.9.2
+	github.com/go-kratos/kratos/v2 v2.9.3-0.20260413003801-0284a5bcf92b
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/wire v0.7.0
