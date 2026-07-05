@@ -95,3 +95,5 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260406210006-6f92a3bedf2d // indirect
 )
+
+replace github.com/go-kratos/kratos/v2 => github.com/Yanhu007/kratos/v2 v2.9.3-0.20260413003801-0284a5bcf92b

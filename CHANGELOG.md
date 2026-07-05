@@ -31,6 +31,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - gosec SAST：0 issues。
 - govulncheck SCA：0 vulnerabilities。
 - gitleaks secret scan：0 leaks。
+- 临时 replace `github.com/go-kratos/kratos/v2` 到包含 CVE-2026-6993 修复的提交,规避 Kratos `http.DefaultServeMux` confused deputy 告警。
 
 ## [0.4.0] - 2026-07-04
 
