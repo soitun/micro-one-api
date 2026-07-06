@@ -9,6 +9,7 @@ import (
 
 	billingv1 "micro-one-api/api/billing/v1"
 	identityv1 "micro-one-api/api/identity/v1"
+	billingbiz "micro-one-api/internal/billing/biz"
 	subscriptionbiz "micro-one-api/internal/subscription/biz"
 )
 
@@ -70,6 +71,35 @@ func (s *AdminService) ListPurchasableSubscriptionPlans(ctx context.Context) ([]
 		return nil, ErrSubscriptionServiceNotConfigured
 	}
 	return s.planUc.ListForSale(ctx)
+}
+
+// ListSubscriptionPlansForSale returns only on-sale plans (for_sale=true).
+// Backs the admin ?for_sale=true filter so the plan lifecycle view can
+// distinguish on-shelf from off-shelf without a client-side filter.
+func (s *AdminService) ListSubscriptionPlansForSale(ctx context.Context) ([]*subscriptionbiz.SubscriptionPlan, error) {
+	if s == nil || s.planUc == nil {
+		return nil, ErrSubscriptionServiceNotConfigured
+	}
+	return s.planUc.ListForSale(ctx)
+}
+
+// ListSubscriptionPlansOffSale returns only retired plans (for_sale=false).
+func (s *AdminService) ListSubscriptionPlansOffSale(ctx context.Context) ([]*subscriptionbiz.SubscriptionPlan, error) {
+	if s == nil || s.planUc == nil {
+		return nil, ErrSubscriptionServiceNotConfigured
+	}
+	return s.planUc.ListOffSale(ctx)
+}
+
+// SetSubscriptionPlanForSale takes a plan on or off shelf. It is the narrow
+// admin operation behind the 上架/下架 buttons; it only flips for_sale and
+// does not accept a full plan body, so a price/validity edit cannot slip in
+// through the shelf-toggle path.
+func (s *AdminService) SetSubscriptionPlanForSale(ctx context.Context, planID int64, forSale bool) error {
+	if s == nil || s.planUc == nil {
+		return ErrSubscriptionServiceNotConfigured
+	}
+	return s.planUc.SetForSale(ctx, planID, forSale)
 }
 
 func (s *AdminService) CreateSubscriptionPlan(ctx context.Context, plan *subscriptionbiz.SubscriptionPlan) error {
@@ -534,6 +564,17 @@ func (s *AdminService) CompleteSubscriptionPurchase(ctx context.Context, userID 
 	}
 
 	if order.PlanId > 0 {
+		// Phase 2: fulfil from the immutable plan snapshot captured at order
+		// creation. This keeps already-created orders completable even if the
+		// plan was later taken off-shelf or edited; only NEW orders are gated
+		// by the for_sale check (in CreateSubscriptionPaymentOrder).
+		if order.GetPlanSnapshot() != "" {
+			sub, err := s.completeFromPlanSnapshot(ctx, userID, order)
+			if err != nil {
+				return nil, err
+			}
+			return sub, nil
+		}
 		if s.planUc == nil {
 			return nil, ErrSubscriptionServiceNotConfigured
 		}
@@ -575,4 +616,37 @@ func (s *AdminService) CompleteSubscriptionPurchase(ctx context.Context, userID 
 		return nil, fmt.Errorf("failed to assign subscription: %w", err)
 	}
 	return sub, nil
+}
+
+// completeFromPlanSnapshot fulfils a paid plan order from the immutable
+// snapshot stored on the payment order. The live plan row is not consulted,
+// so a plan taken off-shelf between order creation and payment completion
+// cannot strand the order. The snapshot carries group_id, validity and name.
+func (s *AdminService) completeFromPlanSnapshot(ctx context.Context, userID int64, order *billingv1.PaymentOrder) (*subscriptionbiz.UserSubscription, error) {
+	snap, err := billingbiz.DecodePlanSnapshot(order.GetPlanSnapshot())
+	if err != nil {
+		return nil, fmt.Errorf("decode plan snapshot: %w", err)
+	}
+	if snap.PlanID == 0 || snap.GroupID <= 0 {
+		return nil, fmt.Errorf("plan snapshot is incomplete")
+	}
+	if err := s.ensureSubscriptionCanUseGroup(ctx, userID, snap.GroupID); err != nil {
+		return nil, err
+	}
+	durationDays := order.GetAssetAmount()
+	if durationDays <= 0 {
+		durationDays = int64(snap.ValidityDays)
+	}
+	if durationDays <= 0 {
+		return nil, errors.New("subscription plan duration must be positive")
+	}
+	group, err := s.groupUc.Get(ctx, snap.GroupID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subscription group: %w", err)
+	}
+	name := snap.Name
+	if name == "" {
+		name = snap.ProductName
+	}
+	return s.assignOrExtendGroupSubscription(ctx, userID, group, durationDays, name, "")
 }

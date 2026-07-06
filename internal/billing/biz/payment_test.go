@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -56,6 +57,26 @@ func (r *memoryPaymentRepo) MarkOrderClosed(ctx context.Context, tradeNo, provid
 	}
 	r.order.Status = PaymentOrderStatusClosed
 	r.order.ProviderTradeNo = providerTradeNo
+	return r.order, true, nil
+}
+
+func (r *memoryPaymentRepo) MarkOrderRefunded(ctx context.Context, tradeNo, reason string, revert func(*PaymentOrder) error) (*PaymentOrder, bool, error) {
+	if r.order == nil || r.order.TradeNo != tradeNo {
+		return nil, false, nil
+	}
+	if r.order.Status == PaymentOrderStatusRefunded {
+		return r.order, false, nil
+	}
+	if r.order.Status != PaymentOrderStatusPaid {
+		return nil, false, fmt.Errorf("payment order status %q cannot be refunded", r.order.Status)
+	}
+	if revert != nil {
+		if err := revert(r.order); err != nil {
+			return nil, false, err
+		}
+	}
+	r.order.Status = PaymentOrderStatusRefunded
+	r.order.ProviderPayload = reason
 	return r.order, true, nil
 }
 

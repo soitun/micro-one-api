@@ -21,10 +21,29 @@ type BillingService struct {
 	paymentUc      *biz.PaymentUsecase
 	alipayVerifier biz.PaymentNotifyVerifier
 	reconUc        *biz.ReconciliationUsecase
+	refundUc       *biz.RefundUsecase
+	reportUc       *biz.SubscriptionReportUsecase
 }
 
 func NewBillingService(uc *biz.BillingUsecase, reconUc *biz.ReconciliationUsecase, paymentUc *biz.PaymentUsecase, alipayVerifier biz.PaymentNotifyVerifier) *BillingService {
 	return &BillingService{uc: uc, reconUc: reconUc, paymentUc: paymentUc, alipayVerifier: alipayVerifier}
+}
+
+// SetRefundUsecase wires the refund coordinator. Optional; when unset the
+// RefundPaymentOrder RPC returns not-configured.
+func (s *BillingService) SetRefundUsecase(uc *biz.RefundUsecase) {
+	if s == nil {
+		return
+	}
+	s.refundUc = uc
+}
+
+// SetSubscriptionReportUsecase wires the operational report builder.
+func (s *BillingService) SetSubscriptionReportUsecase(uc *biz.SubscriptionReportUsecase) {
+	if s == nil {
+		return
+	}
+	s.reportUc = uc
 }
 
 func (s *BillingService) ReserveQuota(ctx context.Context, req *billingv1.ReserveQuotaRequest) (*billingv1.ReserveQuotaResponse, error) {
@@ -616,6 +635,67 @@ func (s *BillingService) HandleAlipayNotify(w http.ResponseWriter, r *http.Reque
 	writeNotifyResponse(w, true)
 }
 
+func (s *BillingService) RefundPaymentOrder(ctx context.Context, req *billingv1.RefundPaymentOrderRequest) (*billingv1.RefundPaymentOrderResponse, error) {
+	if s.refundUc == nil {
+		return &billingv1.RefundPaymentOrderResponse{Success: false, ErrorMessage: "refund service is not configured"}, nil
+	}
+	res, err := s.refundUc.RefundSubscriptionOrder(ctx, biz.RefundRequest{
+		TradeNo:  req.GetTradeNo(),
+		Reason:   req.GetReason(),
+		Policy:   biz.RefundPolicy(req.GetPolicy()),
+		Operator: req.GetOperatorId(),
+	})
+	if err != nil {
+		return &billingv1.RefundPaymentOrderResponse{Success: false, ErrorMessage: err.Error()}, nil
+	}
+	return &billingv1.RefundPaymentOrderResponse{
+		Success:            true,
+		RefundedQuota:      res.RefundedQuota,
+		BalanceAfter:       res.BalanceAfter,
+		SubscriptionId:     res.SubscriptionID,
+		SubscriptionAction: res.SubscriptionAct,
+		LedgerDedupeKey:    res.LedgerDedupeKey,
+	}, nil
+}
+
+func (s *BillingService) SubscriptionOperationReport(ctx context.Context, req *billingv1.SubscriptionOperationReportRequest) (*billingv1.SubscriptionOperationReportResponse, error) {
+	if s.reportUc == nil {
+		return &billingv1.SubscriptionOperationReportResponse{Success: false, ErrorMessage: "report service is not configured"}, nil
+	}
+	var startTime, endTime time.Time
+	if req.GetStartTime() > 0 {
+		startTime = time.Unix(req.GetStartTime(), 0)
+	}
+	if req.GetEndTime() > 0 {
+		endTime = time.Unix(req.GetEndTime(), 0)
+	}
+	report, err := s.reportUc.BuildReport(ctx, startTime, endTime, req.GetPlanId(), req.GetGroupId(), req.GetUserId())
+	if err != nil {
+		return &billingv1.SubscriptionOperationReportResponse{Success: false, ErrorMessage: err.Error()}, nil
+	}
+	resp := &billingv1.SubscriptionOperationReportResponse{
+		Success:            true,
+		TotalRevenueQuota:  report.TotalRevenueQuota,
+		TotalRefundedQuota: report.TotalRefundedQuota,
+	}
+	for _, r := range report.Rows {
+		resp.Rows = append(resp.Rows, &billingv1.PlanOperationRow{
+			PlanId:               r.PlanID,
+			PlanName:             r.PlanName,
+			GroupId:              r.GroupID,
+			NewPurchaseCount:     r.NewPurchaseCount,
+			RenewalCount:         r.RenewalCount,
+			RefundCount:          r.RefundCount,
+			RevenueQuota:         r.RevenueQuota,
+			RefundedQuota:        r.RefundedQuota,
+			ActiveSubscriptions:  r.ActiveSubscriptions,
+			ExpiredSubscriptions: r.ExpiredSubscriptions,
+			RevokedSubscriptions: r.RevokedSubscriptions,
+		})
+	}
+	return resp, nil
+}
+
 func toProtoPaymentOrder(order *biz.PaymentOrder) *billingv1.PaymentOrder {
 	if order == nil {
 		return nil
@@ -636,6 +716,7 @@ func toProtoPaymentOrder(order *biz.PaymentOrder) *billingv1.PaymentOrder {
 		AssetIssueStatus: order.AssetIssueStatus,
 		GroupId:          order.GroupID,
 		PlanId:           order.PlanID,
+		PlanSnapshot:     order.PlanSnapshot,
 		PaidAt:           toProtoTimestampPtr(order.PaidAt),
 		CreatedAt:        toProtoTimestamp(order.CreatedAt),
 		UpdatedAt:        toProtoTimestamp(order.UpdatedAt),

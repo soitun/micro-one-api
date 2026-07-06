@@ -28,6 +28,8 @@ service BillingService {
   rpc GetPaymentOrderByTradeNo(GetPaymentOrderByTradeNoRequest) returns (PaymentOrderResponse);
   rpc MarkPaymentOrderPaid(MarkPaymentOrderPaidRequest) returns (PaymentOrderResponse);
   rpc ListPaymentOrders(ListPaymentOrdersRequest) returns (ListPaymentOrdersResponse);
+  rpc RefundPaymentOrder(RefundPaymentOrderRequest) returns (RefundPaymentOrderResponse);
+  rpc SubscriptionOperationReport(SubscriptionOperationReportRequest) returns (SubscriptionOperationReportResponse);
   rpc ListReconciliationRuns(ListReconciliationRunsRequest) returns (ListReconciliationRunsResponse);
   rpc GetReconciliationRun(GetReconciliationRunRequest) returns (GetReconciliationRunResponse);
   rpc AggregateLedgerByDate(AggregateLedgerByDateRequest) returns (AggregateLedgerByDateResponse);
@@ -295,6 +297,7 @@ message PaymentOrder {
   string asset_issue_status = 13;
   int64 group_id = 14;  // Subscription group ID for auto-assignment after payment
   int64 plan_id = 18;   // Subscription plan ID for plan-based auto-assignment
+  string plan_snapshot = 19;  // JSON snapshot of the plan captured at order creation (off-shelf-safe fulfillment)
   google.protobuf.Timestamp paid_at = 15;
   google.protobuf.Timestamp created_at = 16;
   google.protobuf.Timestamp updated_at = 17;
@@ -340,6 +343,58 @@ message ListPaymentOrdersRequest {
 message ListPaymentOrdersResponse {
   repeated PaymentOrder orders = 1;
   int64 total = 2;
+}
+
+// ========== 退款 / 冲正 ==========
+
+message RefundPaymentOrderRequest {
+  string trade_no = 1;
+  string reason = 2;
+  // refund policy: revoke / shorten / keep. Empty defaults to revoke.
+  string policy = 3;
+  string operator_id = 4;
+}
+
+message RefundPaymentOrderResponse {
+  bool success = 1;
+  string error_message = 2;
+  int64 refunded_quota = 3;
+  int64 balance_after = 4;
+  int64 subscription_id = 5;
+  string subscription_action = 6;  // revoked / shortened / kept
+  string ledger_dedupe_key = 7;
+}
+
+// ========== 订阅运营报表 ==========
+
+message SubscriptionOperationReportRequest {
+  int64 start_time = 1;
+  int64 end_time = 2;
+  int64 plan_id = 3;    // optional filter
+  int64 group_id = 4;  // optional filter
+  string user_id = 5;  // optional filter
+}
+
+message PlanOperationRow {
+  int64 plan_id = 1;
+  string plan_name = 2;
+  int64 group_id = 3;
+  int64 new_purchase_count = 4;
+  int64 renewal_count = 5;
+  int64 refund_count = 6;
+  int64 revenue_quota = 7;
+  int64 refunded_quota = 8;
+  int64 active_subscriptions = 9;
+  int64 expired_subscriptions = 10;
+  int64 revoked_subscriptions = 11;
+}
+
+message SubscriptionOperationReportResponse {
+  bool success = 1;
+  string error_message = 2;
+  repeated PlanOperationRow rows = 3;
+  int64 total_revenue_quota = 4;
+  int64 total_refunded_quota = 5;
 }
 
 // ========== 对账 ==========

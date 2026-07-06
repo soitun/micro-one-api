@@ -29,6 +29,7 @@ type PaymentOrder struct {
 	AssetIssueStatus string     `gorm:"column:asset_issue_status;type:varchar(32);index;not null;default:'pending'"`
 	GroupID          int64      `gorm:"column:group_id;type:bigint;default:0"`
 	PlanID           int64      `gorm:"column:plan_id;type:bigint;default:0"`
+	PlanSnapshot     string     `gorm:"column:plan_snapshot;type:text"`
 	PaidAt           *time.Time `gorm:"column:paid_at;index"`
 	CreatedAt        time.Time  `gorm:"column:created_at"`
 	UpdatedAt        time.Time  `gorm:"column:updated_at"`
@@ -233,6 +234,73 @@ func (r *paymentRepo) MarkOrderClosed(ctx context.Context, tradeNo, providerTrad
 	return result, changed, nil
 }
 
+// MarkOrderRefunded transitions a paid order to status="refunded" inside a
+// row-locked transaction. The revert callback runs inside the tx and performs
+// the wallet credit + ledger reversal + subscription mutation so all three
+// commit atomically. Returns changed=false when the order was already
+// refunded (idempotent re-entry from a replayed refund callback).
+func (r *paymentRepo) MarkOrderRefunded(ctx context.Context, tradeNo, reason string, revert func(*biz.PaymentOrder) error) (*biz.PaymentOrder, bool, error) {
+	var result *biz.PaymentOrder
+	changed := false
+
+	err := r.data.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var po PaymentOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("trade_no = ? OR provider_trade_no = ?", tradeNo, tradeNo).
+			First(&po).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+
+		order, err := toBizPaymentOrder(&po)
+		if err != nil {
+			return err
+		}
+		// Idempotent: an already-refunded order short-circuits without
+		// re-running the revert, so a replayed refund callback cannot
+		// double-credit the wallet or double-revoke the subscription.
+		if po.Status == biz.PaymentOrderStatusRefunded {
+			result = order
+			return nil
+		}
+		// Only paid orders can be refunded. Pending orders should be closed,
+		// not refunded; closed orders have no wallet movement to reverse.
+		if po.Status != biz.PaymentOrderStatusPaid {
+			return fmt.Errorf("payment order status %q cannot be refunded", po.Status)
+		}
+		if revert == nil {
+			return errors.New("refund revert callback is required")
+		}
+		if err := revert(order); err != nil {
+			return err
+		}
+
+		now := time.Now()
+		if err := tx.Model(&PaymentOrder{}).Where("id = ?", po.ID).Updates(map[string]interface{}{
+			"status":             biz.PaymentOrderStatusRefunded,
+			"provider_payload":   reason,
+			"asset_issue_status": "refunded",
+			"updated_at":         now,
+		}).Error; err != nil {
+			return err
+		}
+		po.Status = biz.PaymentOrderStatusRefunded
+		po.UpdatedAt = now
+		result, err = toBizPaymentOrder(&po)
+		if err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to mark payment order refunded: %w", err)
+	}
+	return result, changed, nil
+}
+
 func toPOPaymentOrder(order *biz.PaymentOrder) (*PaymentOrder, error) {
 	id, err := safecast.Int64ToUint(order.ID)
 	if err != nil {
@@ -254,6 +322,7 @@ func toPOPaymentOrder(order *biz.PaymentOrder) (*PaymentOrder, error) {
 		AssetIssueStatus: order.AssetIssueStatus,
 		GroupID:          order.GroupID,
 		PlanID:           order.PlanID,
+		PlanSnapshot:     order.PlanSnapshot,
 		PaidAt:           order.PaidAt,
 		CreatedAt:        order.CreatedAt,
 		UpdatedAt:        order.UpdatedAt,
@@ -281,6 +350,7 @@ func toBizPaymentOrder(po *PaymentOrder) (*biz.PaymentOrder, error) {
 		AssetIssueStatus: po.AssetIssueStatus,
 		GroupID:          po.GroupID,
 		PlanID:           po.PlanID,
+		PlanSnapshot:     po.PlanSnapshot,
 		PaidAt:           po.PaidAt,
 		CreatedAt:        po.CreatedAt,
 		UpdatedAt:        po.UpdatedAt,

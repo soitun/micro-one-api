@@ -223,7 +223,20 @@ func handleSubscriptionGroupByID(w http.ResponseWriter, r *http.Request, svc *se
 func handleSubscriptionPlans(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
 	switch r.Method {
 	case http.MethodGet:
-		plans, err := svc.ListSubscriptionPlans(r.Context())
+		// for_sale=true returns only on-sale plans (user catalogue shape);
+		// for_sale=false returns only off-shelf plans; omitted returns all
+		// so admins can audit the full lifecycle in one view.
+		filter := r.URL.Query().Get("for_sale")
+		var plans []*subscriptionbiz.SubscriptionPlan
+		var err error
+		switch filter {
+		case "true":
+			plans, err = svc.ListSubscriptionPlansForSale(r.Context())
+		case "false":
+			plans, err = svc.ListSubscriptionPlansOffSale(r.Context())
+		default:
+			plans, err = svc.ListSubscriptionPlans(r.Context())
+		}
 		writeSubscriptionResponse(w, plans, err)
 	case http.MethodPost:
 		var plan subscriptionbiz.SubscriptionPlan
@@ -238,6 +251,28 @@ func handleSubscriptionPlans(w http.ResponseWriter, r *http.Request, svc *servic
 }
 
 func handleSubscriptionPlanByID(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	// /api/v1/admin/subscription-plans/{id}/for-sale is the narrow on/off-shelf
+	// toggle. It only flips for_sale and never accepts a full plan body, so a
+	// price/validity edit cannot sneak in through the shelf-toggle path. It is
+	// checked before the plain parsePathID because that helper rejects paths
+	// containing a second segment.
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/admin/subscription-plans/")
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) == 2 && parts[1] == "for-sale" && r.Method == http.MethodPost {
+		id, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil || id <= 0 {
+			writeJSON(w, http.StatusBadRequest, apiResponse(false, "invalid plan id", nil))
+			return
+		}
+		var req struct {
+			ForSale bool `json:"for_sale"`
+		}
+		if !decodeBody(w, r, &req) {
+			return
+		}
+		writeSubscriptionResponse(w, nil, svc.SetSubscriptionPlanForSale(r.Context(), id, req.ForSale))
+		return
+	}
 	id, ok := parsePathID(r.URL.Path, "/api/v1/admin/subscription-plans/")
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, apiResponse(false, "invalid plan id", nil))

@@ -47,21 +47,27 @@ func NewPaymentSubscriptionAssigner(subscriptions SubscriptionAssignmentUsecase,
 }
 
 func (a *paymentSubscriptionAssigner) AssignSubscriptionAfterPayment(ctx context.Context, order *PaymentOrder) error {
-	if a == nil || a.subscriptions == nil || a.groups == nil {
+	if a == nil || a.subscriptions == nil {
 		return errors.New("subscription assigner is not configured")
 	}
 	if order == nil {
 		return errors.New("payment order is required")
 	}
-	userID, err := strconv.ParseInt(order.UserID, 10, 64)
-	if err != nil || userID <= 0 {
+	if _, err := strconv.ParseInt(order.UserID, 10, 64); err != nil || order.UserID == "" {
 		return fmt.Errorf("invalid payment order user_id %q", order.UserID)
+	}
+	// Plan-backed orders (including snapshot-fulfilled ones) carry their own
+	// group_id in the snapshot/plan, so the order-level GroupID may be 0. Only
+	// the group-only path requires a populated order.GroupID and a configured
+	// group getter.
+	if order.PlanID > 0 {
+		return a.assignPlan(ctx, order)
+	}
+	if a.groups == nil {
+		return errors.New("subscription assigner is not configured")
 	}
 	if order.GroupID <= 0 {
 		return errors.New("subscription group_id is required")
-	}
-	if order.PlanID > 0 {
-		return a.assignPlan(ctx, order)
 	}
 	return a.assignGroup(ctx, order)
 }
@@ -99,6 +105,19 @@ func (a *paymentSubscriptionAssigner) assignGroup(ctx context.Context, order *Pa
 }
 
 func (a *paymentSubscriptionAssigner) assignPlan(ctx context.Context, order *PaymentOrder) error {
+	if order == nil {
+		return errors.New("payment order is required")
+	}
+	// Phase 2: fulfil from the immutable plan snapshot captured at order
+	// creation. This decouples payment completion from later on/off-shelf or
+	// price/validity edits to the live plan row. When a snapshot exists the
+	// assigner never re-reads the plan repo for fulfilment attributes.
+	if snap, snapErr := DecodePlanSnapshot(order.PlanSnapshot); snapErr != nil {
+		return fmt.Errorf("decode plan snapshot: %w", snapErr)
+	} else if snap.PlanID > 0 {
+		return a.assignFromSnapshot(ctx, order, snap)
+	}
+
 	if a.plans == nil {
 		return errors.New("subscription plan assigner is not configured")
 	}
@@ -138,6 +157,51 @@ func (a *paymentSubscriptionAssigner) assignPlan(ctx context.Context, order *Pay
 	_, _, err = a.subscriptions.AssignOrExtend(ctx, &subscriptionbiz.AssignSubscriptionRequest{
 		UserID:           userID,
 		GroupID:          plan.GroupID,
+		SubscriptionName: name,
+		StartsAt:         now,
+		ExpiresAt:        expiresAt,
+		Metadata:         string(metadata),
+	})
+	return err
+}
+
+// assignFromSnapshot issues the subscription using only the frozen plan view
+// stored on the payment order. The live plan row is not consulted, so taking
+// the plan off-shelf after order creation cannot strand an already-paid order.
+func (a *paymentSubscriptionAssigner) assignFromSnapshot(ctx context.Context, order *PaymentOrder, snap PlanSnapshot) error {
+	userID, err := strconv.ParseInt(order.UserID, 10, 64)
+	if err != nil || userID <= 0 {
+		return fmt.Errorf("invalid payment order user_id %q", order.UserID)
+	}
+	if snap.GroupID <= 0 {
+		return errors.New("plan snapshot group_id is required")
+	}
+	durationDays := order.AssetAmount
+	if durationDays <= 0 {
+		durationDays = int64(snap.ValidityDays)
+	}
+	if durationDays <= 0 {
+		return errors.New("subscription plan duration must be positive")
+	}
+	name := snap.Name
+	if name == "" {
+		name = snap.ProductName
+	}
+	if name == "" {
+		name = fmt.Sprintf("plan-%d", snap.PlanID)
+	}
+	now := a.now().Unix()
+	expiresAt := now + durationDays*subscriptionSecondsPerDay
+	metadata, _ := json.Marshal(map[string]string{
+		"payment_trade_no":  order.TradeNo,
+		"provider_trade_no": order.ProviderTradeNo,
+		"plan_id":           strconv.FormatInt(snap.PlanID, 10),
+		"plan_name":         snap.Name,
+		"plan_snapshot":     "true",
+	})
+	_, _, err = a.subscriptions.AssignOrExtend(ctx, &subscriptionbiz.AssignSubscriptionRequest{
+		UserID:           userID,
+		GroupID:          snap.GroupID,
 		SubscriptionName: name,
 		StartsAt:         now,
 		ExpiresAt:        expiresAt,

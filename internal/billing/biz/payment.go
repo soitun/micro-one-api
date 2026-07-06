@@ -40,9 +40,14 @@ type PaymentOrder struct {
 	AssetIssueStatus string
 	GroupID          int64 // Subscription group ID for auto-assignment after payment
 	PlanID           int64 // Subscription plan ID for plan-based auto-assignment
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	PaidAt           *time.Time
+	// PlanSnapshot holds the immutable purchase-time view of the plan. It is
+	// populated at order creation so fulfillment does not depend on the live
+	// plan row (which may be taken off-shelf or edited while the order is
+	// pending). See plan_snapshot.go. Empty for non-plan orders.
+	PlanSnapshot string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	PaidAt       *time.Time
 }
 
 type CreatePaymentOrderRequest struct {
@@ -95,6 +100,9 @@ type PaymentRepo interface {
 	ListOrders(ctx context.Context, req ListPaymentOrdersRequest) ([]*PaymentOrder, int64, error)
 	MarkOrderPaid(ctx context.Context, tradeNo, providerTradeNo string, issue func(*PaymentOrder) error) (*PaymentOrder, bool, error)
 	MarkOrderClosed(ctx context.Context, tradeNo, providerTradeNo string) (*PaymentOrder, bool, error)
+	// MarkOrderRefunded transitions a paid order to refunded, running the
+	// revert callback inside the same transaction. Idempotent.
+	MarkOrderRefunded(ctx context.Context, tradeNo, reason string, revert func(*PaymentOrder) error) (*PaymentOrder, bool, error)
 }
 
 type PaymentProvider interface {
@@ -110,10 +118,11 @@ type PaymentNotifyVerifier interface {
 }
 
 type PaymentUsecase struct {
-	repo     PaymentRepo
-	provider PaymentProvider
-	issuer   PaymentAssetIssuer
-	assigner SubscriptionAssigner // Optional: assigns subscription after payment
+	repo        PaymentRepo
+	provider    PaymentProvider
+	issuer      PaymentAssetIssuer
+	assigner    SubscriptionAssigner // Optional: assigns subscription after payment
+	snapshotter PlanSnapshotter      // Optional: captures plan snapshot at order creation
 }
 
 type PaymentAssetIssuer interface {
@@ -130,9 +139,32 @@ func NewPaymentUsecase(repo PaymentRepo, provider PaymentProvider, issuer Paymen
 	return &PaymentUsecase{repo: repo, provider: provider, issuer: issuer}
 }
 
+// NewPaymentUsecaseWithSnapshotter wires a plan snapshotter so subscription
+// orders capture an immutable plan view at creation time. The snapshot makes
+// fulfillment independent of later on/off-shelf changes to the plan row.
+func NewPaymentUsecaseWithSnapshotter(repo PaymentRepo, provider PaymentProvider, issuer PaymentAssetIssuer, snapshotter PlanSnapshotter) *PaymentUsecase {
+	return &PaymentUsecase{repo: repo, provider: provider, issuer: issuer, snapshotter: snapshotter}
+}
+
 // NewPaymentUsecaseWithAssigner creates a PaymentUsecase with subscription assignment support.
 func NewPaymentUsecaseWithAssigner(repo PaymentRepo, provider PaymentProvider, issuer PaymentAssetIssuer, assigner SubscriptionAssigner) *PaymentUsecase {
 	return &PaymentUsecase{repo: repo, provider: provider, issuer: issuer, assigner: assigner}
+}
+
+// NewPaymentUsecaseWithAssignerAndSnapshotter wires both the subscription
+// assigner and the plan snapshotter. This is the production constructor used
+// by billing-service so plan-backed subscription orders are off-shelf-safe.
+func NewPaymentUsecaseWithAssignerAndSnapshotter(repo PaymentRepo, provider PaymentProvider, issuer PaymentAssetIssuer, assigner SubscriptionAssigner, snapshotter PlanSnapshotter) *PaymentUsecase {
+	return &PaymentUsecase{repo: repo, provider: provider, issuer: issuer, assigner: assigner, snapshotter: snapshotter}
+}
+
+// SetPlanSnapshotter installs a plan snapshotter on an already-constructed
+// usecase. Used by wiring paths that build the usecase before the snapshotter.
+func (uc *PaymentUsecase) SetPlanSnapshotter(snapshotter PlanSnapshotter) {
+	if uc == nil {
+		return
+	}
+	uc.snapshotter = snapshotter
 }
 
 func (uc *PaymentUsecase) CreateOrder(ctx context.Context, req CreatePaymentOrderRequest) (*PaymentOrder, error) {
@@ -157,6 +189,17 @@ func (uc *PaymentUsecase) CreateOrder(ctx context.Context, req CreatePaymentOrde
 		PlanID:           req.PlanID,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
+	}
+	// Phase 2: capture the plan snapshot at creation time so fulfillment is
+	// decoupled from later on/off-shelf changes. Only subscription orders with
+	// a plan_id carry a snapshot; balance orders and group-only orders leave
+	// the column NULL.
+	if order.AssetType == PaymentAssetTypeSubscription && order.PlanID > 0 && uc.snapshotter != nil {
+		snapshot, snapErr := uc.snapshotter.CapturePlanSnapshot(ctx, order.PlanID)
+		if snapErr != nil {
+			return nil, fmt.Errorf("capture plan snapshot: %w", snapErr)
+		}
+		ApplyPlanSnapshotToOrder(order, snapshot)
 	}
 	providerOrder, err := uc.provider.CreateOrder(ctx, order)
 	if err != nil {

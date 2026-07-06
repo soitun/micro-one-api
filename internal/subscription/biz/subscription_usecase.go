@@ -152,6 +152,31 @@ func (uc *SubscriptionUsecase) Extend(ctx context.Context, id int64, newExpiresA
 	return uc.repo.UpdateSubscription(ctx, subscription)
 }
 
+// Shorten pulls a subscription's expires_at back by subtractSeconds, used by
+// the refund/reversal flow when a prorated refund claws back part of the
+// entitlement. It refuses to operate on a revoked subscription and clamps the
+// new expiry at now so a refund cannot push expires_at into the future.
+func (uc *SubscriptionUsecase) Shorten(ctx context.Context, id int64, subtractSeconds int64) error {
+	if subtractSeconds <= 0 {
+		return errors.New("subtract_seconds must be positive")
+	}
+	subscription, err := uc.repo.GetSubscriptionByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if subscription.Status == SubscriptionStatusRevoked {
+		return ErrSubscriptionRevoked
+	}
+	now := uc.now().Unix()
+	newExpiry := subscription.ExpiresAt - subtractSeconds
+	if newExpiry < now {
+		newExpiry = now
+	}
+	subscription.ExpiresAt = newExpiry
+	subscription.UpdatedAt = now
+	return uc.repo.UpdateSubscription(ctx, subscription)
+}
+
 func (uc *SubscriptionUsecase) ResetQuota(ctx context.Context, id int64, scope string) error {
 	subscription, err := uc.repo.GetSubscriptionByID(ctx, id)
 	if err != nil {

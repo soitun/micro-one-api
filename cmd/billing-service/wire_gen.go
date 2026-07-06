@@ -96,9 +96,18 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	paymentProvider := biz.NewConfiguredPaymentProvider(cfg.Payment)
 	paymentAssetIssuer := biz.NewPaymentAssetIssuer(uc)
 	paymentSubscriptionAssigner := biz.NewPaymentSubscriptionAssigner(subscriptionUc, subscriptionRepo, subscriptionRepo)
-	paymentUc := biz.NewPaymentUsecaseWithAssigner(d.PaymentRepo(), paymentProvider, paymentAssetIssuer, paymentSubscriptionAssigner)
+	planSnapshotter := biz.NewPaymentPlanSnapshotter(subscriptionRepo)
+	paymentUc := biz.NewPaymentUsecaseWithAssignerAndSnapshotter(d.PaymentRepo(), paymentProvider, paymentAssetIssuer, paymentSubscriptionAssigner, planSnapshotter)
 	alipayVerifier := biz.NewAlipayPaymentProvider(cfg.Payment.Alipay)
 	svc := service.NewBillingService(uc, reconUc, paymentUc, alipayVerifier)
+	// Phase 2: refund/reversal coordinator. The subscription reverter delegates
+	// to the subscription usecase so revoke/shorten mutations land on the same
+	// row the assigner created. The operational report builder aggregates
+	// payment_orders + user_subscriptions so the dashboard never samples.
+	refundUc := biz.NewRefundUsecase(d.PaymentRepo(), d.AccountRepo(), d.LedgerRepo(), subscriptionUc)
+	svc.SetRefundUsecase(refundUc)
+	reportUc := biz.NewSubscriptionReportUsecase(data.NewOperationReportRepo(d))
+	svc.SetSubscriptionReportUsecase(reportUc)
 
 	// Build the optional notify-worker gRPC client. When the endpoint is empty
 	// or alerts are disabled, the job receives a noop notifier so legacy log

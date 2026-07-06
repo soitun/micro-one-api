@@ -371,7 +371,8 @@ CREATE TABLE IF NOT EXISTS payment_orders (
   updated_at INTEGER NOT NULL DEFAULT 0,
   asset_issue_status TEXT NOT NULL DEFAULT 'pending',
   group_id INTEGER NOT NULL DEFAULT 0,
-  plan_id INTEGER NOT NULL DEFAULT 0
+  plan_id INTEGER NOT NULL DEFAULT 0,
+  plan_snapshot TEXT DEFAULT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_payment_orders_user_id                ON payment_orders(user_id);
