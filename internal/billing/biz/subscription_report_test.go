@@ -23,6 +23,9 @@ func (s *stubOperationReportRepo) AggregatePaymentOrdersByPlan(ctx context.Conte
 func (s *stubOperationReportRepo) CountSubscriptionsByStatus(ctx context.Context, planID, groupID int64) (map[int64]int64, map[int64]int64, map[int64]int64, error) {
 	return s.active, s.expired, s.revoked, s.err
 }
+func (s *stubOperationReportRepo) AggregateUsageFallbackByPlan(ctx context.Context, startTime, endTime time.Time, planID, groupID int64, userID string) (map[int64]int64, map[int64]int64, error) {
+	return map[int64]int64{1: 800}, map[int64]int64{1: 200}, s.err
+}
 
 func TestSubscriptionReport_AggregatesRowsAndTotals(t *testing.T) {
 	repo := &stubOperationReportRepo{
@@ -55,6 +58,10 @@ func TestSubscriptionReport_AggregatesRowsAndTotals(t *testing.T) {
 	}
 	if report.TotalRefundedQuota != 100 {
 		t.Fatalf("total refunded = %d, want 100", report.TotalRefundedQuota)
+	}
+	// Usage fallback ratio: plan 1 has 800 subscription + 200 balance fallback.
+	if report.Rows[0].SubscriptionUsageQuota != 800 || report.Rows[0].BalanceFallbackQuota != 200 {
+		t.Fatalf("usage/fallback[0] = %d/%d, want 800/200", report.Rows[0].SubscriptionUsageQuota, report.Rows[0].BalanceFallbackQuota)
 	}
 }
 
@@ -94,6 +101,9 @@ func (c *capturingReportRepo) AggregatePaymentOrdersByPlan(ctx context.Context, 
 }
 func (c *capturingReportRepo) CountSubscriptionsByStatus(ctx context.Context, planID, groupID int64) (map[int64]int64, map[int64]int64, map[int64]int64, error) {
 	return c.inner.CountSubscriptionsByStatus(ctx, planID, groupID)
+}
+func (c *capturingReportRepo) AggregateUsageFallbackByPlan(ctx context.Context, startTime, endTime time.Time, planID, groupID int64, userID string) (map[int64]int64, map[int64]int64, error) {
+	return c.inner.AggregateUsageFallbackByPlan(ctx, startTime, endTime, planID, groupID, userID)
 }
 
 func TestSubscriptionReport_NotConfigured(t *testing.T) {

@@ -387,6 +387,8 @@ message PlanOperationRow {
   int64 active_subscriptions = 9;
   int64 expired_subscriptions = 10;
   int64 revoked_subscriptions = 11;
+  int64 subscription_usage_quota = 12;  // 订阅用量（subscription_cost）
+  int64 balance_fallback_quota = 13;    // 余额兜底用量（balance_cost）
 }
 
 message SubscriptionOperationReportResponse {

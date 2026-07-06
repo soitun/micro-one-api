@@ -20,6 +20,14 @@ type PlanOperationRow struct {
 	ActiveSubscriptions  int64
 	ExpiredSubscriptions int64
 	RevokedSubscriptions int64
+	// SubscriptionUsageQuota is the total quota absorbed by subscriptions
+	// purchased under this plan (cost_source=subscription). BalanceFallbackQuota
+	// is the quota that fell back to the wallet (cost_source=balance) because
+	// the subscription's window was exhausted. The ratio
+	// BalanceFallbackQuota / (SubscriptionUsageQuota + BalanceFallbackQuota)
+	// is the "余额兜底比例" the roadmap asks for.
+	SubscriptionUsageQuota int64
+	BalanceFallbackQuota   int64
 }
 
 // SubscriptionOperationReport is the aggregated result.
@@ -42,6 +50,11 @@ type OperationReportRepo interface {
 	// subscription to the plan it was purchased under; when no link exists
 	// (admin-assigned subscriptions) the row is excluded.
 	CountSubscriptionsByStatus(ctx context.Context, planID, groupID int64) (active, expired, revoked map[int64]int64, err error)
+	// AggregateUsageFallbackByPlan sums subscription_cost and balance_cost
+	// per plan so the report can show the 余额兜底比例 (how much of a plan's
+	// usage fell back to the wallet after the subscription window was
+	// exhausted).
+	AggregateUsageFallbackByPlan(ctx context.Context, startTime, endTime time.Time, planID, groupID int64, userID string) (subscriptionUsage, balanceFallback map[int64]int64, err error)
 }
 
 // SubscriptionReportUsecase builds the operational report from ledger/order/
@@ -85,6 +98,16 @@ func (uc *SubscriptionReportUsecase) BuildReport(ctx context.Context, startTime,
 		rows[i].ActiveSubscriptions = active[pid]
 		rows[i].ExpiredSubscriptions = expired[pid]
 		rows[i].RevokedSubscriptions = revoked[pid]
+	}
+	// Subscription usage vs balance fallback ratio (余额兜底比例).
+	subUsage, balFallback, err := uc.repo.AggregateUsageFallbackByPlan(ctx, startTime, endTime, planID, groupID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate usage fallback: %w", err)
+	}
+	for i := range rows {
+		pid := rows[i].PlanID
+		rows[i].SubscriptionUsageQuota = subUsage[pid]
+		rows[i].BalanceFallbackQuota = balFallback[pid]
 	}
 	report := &SubscriptionOperationReport{Rows: rows}
 	for _, r := range rows {

@@ -150,3 +150,61 @@ func (r *operationReportRepo) CountSubscriptionsByStatus(ctx context.Context, pl
 	}
 	return active, expired, revoked, nil
 }
+
+// AggregateUsageFallbackByPlan sums subscription_cost and balance_cost per plan
+// from the billing ledger, joined to payment_orders via the reservation
+// reference to recover the plan. subscription_cost = quota absorbed by the
+// subscription; balance_cost = quota that fell back to the wallet (余额兜底).
+// The ratio balance_cost / (subscription_cost + balance_cost) is the fallback
+// ratio.
+func (r *operationReportRepo) AggregateUsageFallbackByPlan(ctx context.Context, startTime, endTime time.Time, planID, groupID int64, userID string) (subscriptionUsage, balanceFallback map[int64]int64, err error) {
+	subscriptionUsage = map[int64]int64{}
+	balanceFallback = map[int64]int64{}
+	if r.data == nil || r.data.db == nil {
+		return subscriptionUsage, balanceFallback, nil
+	}
+	type row struct {
+		PlanID  int64 `gorm:"column:plan_id"`
+		SubCost int64 `gorm:"column:sub_cost"`
+		BalCost int64 `gorm:"column:bal_cost"`
+	}
+	// The ledger's reference_id is the reservation_id; the reservation's
+	// user_id links to the payment order only via the trade_no in the
+	// subscription metadata. For a direct plan-level aggregation we join
+	// ledger -> reservation -> payment_orders.plan_id when possible, but the
+	// reservation does not carry plan_id. Instead we aggregate by cost_source
+	// across all consume ledgers in the window, scoped by the user/group
+	// filters, and attribute to plan_id via the payment_orders join on
+	// reservation.user_id = payment_orders.user_id. This is a best-effort
+	// approximation; the authoritative fallback ratio is the per-reservation
+	// one already exposed by SumSubscriptionCostByReservation.
+	q := r.data.db.WithContext(ctx).Table("billing_ledgers AS l").
+		Select("COALESCE(po.plan_id, 0) AS plan_id, SUM(CASE WHEN l.cost_source = 'subscription' THEN l.subscription_cost ELSE 0 END) AS sub_cost, SUM(CASE WHEN l.cost_source = 'balance' THEN l.balance_cost ELSE 0 END) AS bal_cost").
+		Joins("LEFT JOIN billing_reservations res ON res.reservation_id = l.reference_id").
+		Joins("LEFT JOIN payment_orders po ON po.user_id = res.user_id AND po.plan_id > 0").
+		Where("l.type = ?", "consume").
+		Where("l.created_at >= ?", startTime).
+		Where("l.created_at <= ?", endTime).
+		Group("po.plan_id")
+	if planID > 0 {
+		q = q.Where("po.plan_id = ?", planID)
+	}
+	if groupID > 0 {
+		q = q.Where("po.group_id = ?", groupID)
+	}
+	if userID != "" {
+		q = q.Where("l.user_id = ?", userID)
+	}
+	var rows []row
+	if err := q.Scan(&rows).Error; err != nil {
+		return subscriptionUsage, balanceFallback, err
+	}
+	for _, rr := range rows {
+		if rr.PlanID == 0 {
+			continue
+		}
+		subscriptionUsage[rr.PlanID] = rr.SubCost
+		balanceFallback[rr.PlanID] = rr.BalCost
+	}
+	return subscriptionUsage, balanceFallback, nil
+}

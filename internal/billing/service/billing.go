@@ -680,17 +680,19 @@ func (s *BillingService) SubscriptionOperationReport(ctx context.Context, req *b
 	}
 	for _, r := range report.Rows {
 		resp.Rows = append(resp.Rows, &billingv1.PlanOperationRow{
-			PlanId:               r.PlanID,
-			PlanName:             r.PlanName,
-			GroupId:              r.GroupID,
-			NewPurchaseCount:     r.NewPurchaseCount,
-			RenewalCount:         r.RenewalCount,
-			RefundCount:          r.RefundCount,
-			RevenueQuota:         r.RevenueQuota,
-			RefundedQuota:        r.RefundedQuota,
-			ActiveSubscriptions:  r.ActiveSubscriptions,
-			ExpiredSubscriptions: r.ExpiredSubscriptions,
-			RevokedSubscriptions: r.RevokedSubscriptions,
+			PlanId:                 r.PlanID,
+			PlanName:               r.PlanName,
+			GroupId:                r.GroupID,
+			NewPurchaseCount:       r.NewPurchaseCount,
+			RenewalCount:           r.RenewalCount,
+			RefundCount:            r.RefundCount,
+			RevenueQuota:           r.RevenueQuota,
+			RefundedQuota:          r.RefundedQuota,
+			ActiveSubscriptions:    r.ActiveSubscriptions,
+			ExpiredSubscriptions:   r.ExpiredSubscriptions,
+			RevokedSubscriptions:   r.RevokedSubscriptions,
+			SubscriptionUsageQuota: r.SubscriptionUsageQuota,
+			BalanceFallbackQuota:   r.BalanceFallbackQuota,
 		})
 	}
 	return resp, nil
