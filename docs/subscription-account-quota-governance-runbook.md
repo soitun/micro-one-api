@@ -222,3 +222,19 @@ SELECT subscription_account_id,reservation_id,cost_source,cost_usd,charged_usd,r
 | `micro_one_api_relay_account_rpm_fallback_total{reason}` | RPM limiter Redis 降级次数 |
 | `micro_one_api_relay_codex_quota_used_percent{window}` | Codex 主/副窗口使用率 |
 | `micro_one_api_relay_codex_quota_snapshots_total{result}` | Codex 快照解析次数 |
+
+
+> ⚠️ **部署必读（阶段2治理后台任务默认全关）**
+>
+> 以下三个后台治理任务在 `cmd/channel-service/wire_gen.go` 中默认 **关闭**
+> (`envBool(..., false)`)，运维未显式开启则整套治理零生效：
+>
+> | 环境变量 | 默认 | 作用 |
+> |---|---|---|
+> | `SUBSCRIPTION_QUOTA_RESET_ENABLED` | `false` | fixed 策略 daily/weekly 额度自动重置 |
+> | `SUBSCRIPTION_ACCOUNT_RECOVERY_ENABLED` | `false` | 临时禁用账号 TTL 到期后自动恢复（codex snapshot 耗尽等） |
+> | `SUBSCRIPTION_QUOTA_ALERT_ENABLED` | `false` | 额度耗尽/临近告警（复用 notify-worker） |
+>
+> 生产环境**必须**显式设置这三个环境变量为 `true` 才能让阶段2治理生效。
+> 不开启时：fixed 策略账号不会自动重置、codex 耗尽账号不会自动恢复、额度告警不投递。
+

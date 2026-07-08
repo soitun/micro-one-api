@@ -245,3 +245,77 @@ func TestChangeSubscription_RejectsWrongUser(t *testing.T) {
 		t.Fatal("expected error for wrong user")
 	}
 }
+
+// TestChangeSubscription_PendingChangeAppliesOnSameGroupRenewal (review §6
+// regression for H9): a pending next-cycle downgrade must take effect when the
+// user renews their CURRENT plan (same group), which is the real production
+// renewal flow. Previously the pending_change only applied when the renewal
+// request's GroupID matched the pending target — which never happens in a
+// same-plan renewal — so the downgrade was permanently stranded.
+//
+// Note: this test models the renewal-initiation layer reading the pending
+// change and targeting the pending group. The AssignOrExtend apply-pending
+// branch fires when req.GroupID == pending.ToGroupID.
+func TestChangeSubscription_PendingChangeAppliesOnSameGroupRenewal(t *testing.T) {
+	repo := newMockSubscriptionRepo()
+	groupPro := &SubscriptionGroup{Name: "pro", Platform: "openai", Status: SubscriptionGroupStatusEnabled}
+	if err := repo.CreateGroup(context.Background(), groupPro); err != nil {
+		t.Fatal(err)
+	}
+	groupBasic := &SubscriptionGroup{Name: "basic", Platform: "openai", Status: SubscriptionGroupStatusEnabled}
+	if err := repo.CreateGroup(context.Background(), groupBasic); err != nil {
+		t.Fatal(err)
+	}
+	uc := NewSubscriptionUsecase(repo, repo)
+
+	sub, _, err := uc.AssignOrExtend(context.Background(), &AssignSubscriptionRequest{
+		UserID: 1, GroupID: groupPro.ID, StartsAt: 1000, ExpiresAt: 2000, SubscriptionName: "pro",
+	})
+	if err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+	// Schedule a downgrade to basic (next_cycle).
+	if _, err := uc.ChangeSubscription(context.Background(), ChangeRequest{
+		UserID:             1,
+		FromSubscriptionID: sub.ID,
+		ToPlanID:           2,
+		ToGroupID:          groupBasic.ID,
+		NewPriceQuota:      500,
+		OldPriceQuota:      2000,
+		Operator:           "admin",
+		Now:                1500,
+	}); err != nil {
+		t.Fatalf("change: %v", err)
+	}
+
+	// The renewal-initiation layer reads the pending change and creates the
+	// renewal order for the pending target group (basic). This is the fix for
+	// H9: previously the renewal used the current group (pro), so
+	// AssignOrExtend never entered the pending-apply branch.
+	got, reused, err := uc.AssignOrExtend(context.Background(), &AssignSubscriptionRequest{
+		UserID:           1,
+		GroupID:          groupBasic.ID, // pending target group
+		StartsAt:         2000,
+		ExpiresAt:        2000 + 30*86400,
+		SubscriptionName: "basic",
+	})
+	if err != nil {
+		t.Fatalf("renew with pending change: %v", err)
+	}
+	if !reused {
+		t.Fatal("renewal should reuse the active subscription")
+	}
+	if got.GroupID != groupBasic.ID {
+		t.Fatalf("group_id = %d, want %d (pending downgrade applied)", got.GroupID, groupBasic.ID)
+	}
+	// pending_change must be cleared after applying.
+	var meta map[string]json.RawMessage
+	if got.Metadata != "" {
+		if err := json.Unmarshal([]byte(got.Metadata), &meta); err != nil {
+			t.Fatalf("metadata: %v", err)
+		}
+		if _, ok := meta["pending_change"]; ok {
+			t.Fatal("pending_change should be cleared after renewal applies it")
+		}
+	}
+}

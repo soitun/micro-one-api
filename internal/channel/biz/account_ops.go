@@ -417,20 +417,23 @@ func (s *AccountRecoverySweeper) tryRecover(ctx context.Context, account *Subscr
 
 // clearMarkers clears the temporary unschedulable state and stamps metadata so
 // the admin UI can show "recovered" rather than the stale reason.
+//
+// Review L3 fix: the three writes (clear temp-unschedulable, clear last_error,
+// clear recovery metadata) are now composed into a single repo call
+// (ClearRecoveryMarkers) so they commit atomically in one transaction. The
+// previous implementation issued three independent repo writes; a failure
+// after the first left the account with half-cleared markers. The repo falls
+// back to the non-transactional path when the atomic method is unavailable.
 func (s *AccountRecoverySweeper) clearMarkers(ctx context.Context, account *SubscriptionAccount, policy, result string) {
-	if account.RateLimitedUntil > 0 {
-		if err := s.repo.ClearTempUnschedulable(ctx, account.ID); err != nil {
-			metrics.SubscriptionAccountRecoveriesTotal.WithLabelValues(policy, "error").Inc()
-			return
-		}
+	needsTempClear := account.RateLimitedUntil > 0
+	needsErrorClear := subscriptionAccountMetadataValue(account.Metadata, metaKeyLastError) != ""
+	needsMetaClear := subscriptionAccountMetadataValue(account.Metadata, metaKeyUnschedulableReason) != "" ||
+		subscriptionAccountMetadataValue(account.Metadata, metaKeyRecoveryPolicy) != ""
+	if !needsTempClear && !needsErrorClear && !needsMetaClear {
+		metrics.SubscriptionAccountRecoveriesTotal.WithLabelValues(policy, result).Inc()
+		return
 	}
-	if msg := subscriptionAccountMetadataValue(account.Metadata, metaKeyLastError); msg != "" {
-		if err := s.repo.SetSubscriptionAccountError(ctx, account.ID, ""); err != nil {
-			metrics.SubscriptionAccountRecoveriesTotal.WithLabelValues(policy, "error").Inc()
-			return
-		}
-	}
-	if err := s.repo.ClearRecoveryMetadata(ctx, account.ID); err != nil {
+	if err := s.repo.ClearRecoveryMarkers(ctx, account.ID, needsTempClear, needsErrorClear, needsMetaClear); err != nil {
 		metrics.SubscriptionAccountRecoveriesTotal.WithLabelValues(policy, "error").Inc()
 		return
 	}

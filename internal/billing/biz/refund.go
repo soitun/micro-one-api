@@ -148,8 +148,14 @@ func (uc *RefundUsecase) RefundSubscriptionOrder(ctx context.Context, req Refund
 		if snapErr != nil {
 			return fmt.Errorf("decode plan snapshot for refund: %w", snapErr)
 		}
+		// Refund the amount the user actually paid (review H5 fix). The wallet
+		// credit is a store-credit reversal, so it must return what was charged,
+		// not the plan's nominal price. Using the plan's PriceQuota caused
+		// over/under-refunds whenever a discount or coupon changed the paid
+		// amount. The plan snapshot's PriceQuota is only a fallback for legacy
+		// orders that predate a populated money_cents column.
 		refundQuota := order.MoneyCents / 100
-		if snap.PriceQuota > 0 {
+		if refundQuota <= 0 && snap.PriceQuota > 0 {
 			refundQuota = snap.PriceQuota
 		}
 		// Credit the wallet back the purchase price in the same transaction that
@@ -229,7 +235,34 @@ func (uc *RefundUsecase) applySubscriptionReversal(ctx context.Context, tx *gorm
 		if subID <= 0 {
 			return 0, "", errors.New("shorten refund requires a subscription_id")
 		}
-		subtract := int64(snap.ValidityDays) * subscriptionSecondsPerDay
+		// Review M4 fix: prorate the subtraction against the REMAINING time
+		// instead of subtracting the full plan validity. The previous code
+		// subtracted the full validity_days, which (combined with the clamp
+		// at now) made "shorten" behave like "revoke" whenever the
+		// subscription had less remaining time than the full validity — the
+		// common case for any subscription consumed past the refund window.
+		// Prorating by the refund-to-purchase ratio claw back only the
+		// refunded share of the entitlement.
+		totalSeconds := int64(snap.ValidityDays) * subscriptionSecondsPerDay
+		if totalSeconds <= 0 {
+			return 0, "", errors.New("shorten refund requires a positive plan validity")
+		}
+		refundedQuota := order.MoneyCents / 100
+		if refundedQuota <= 0 && snap.PriceQuota > 0 {
+			refundedQuota = snap.PriceQuota
+		}
+		paidQuota := snap.PriceQuota
+		if paidQuota <= 0 {
+			paidQuota = refundedQuota
+		}
+		subtract := totalSeconds
+		if paidQuota > 0 && refundedQuota > 0 && refundedQuota <= paidQuota {
+			// Prorate: subtract = remaining * (refunded / paid).
+			// We pass the prorated fraction to ShortenInTx; ShortenInTx
+			// clamps at now so a refund larger than the remaining time
+			// revokes the remainder (no future-dated expiry).
+			subtract = totalSeconds * refundedQuota / paidQuota
+		}
 		if err := uc.subscriptions.ShortenInTx(ctx, tx, subID, subtract); err != nil {
 			return 0, "", fmt.Errorf("shorten subscription: %w", err)
 		}

@@ -214,6 +214,11 @@ type ChannelRepo interface {
 	// account metadata blob. It is called by the recovery sweeper once an account
 	// has been auto-recovered so the admin UI no longer shows a stale reason.
 	ClearRecoveryMetadata(ctx context.Context, accountID int64) error
+	// ClearRecoveryMarkers atomically clears the temp-unschedulable,
+	// last-error, and recovery-metadata markers in a single transaction so a
+	// failure cannot leave the account with half-cleared markers (review L3).
+	// Each flag controls whether that specific marker is cleared.
+	ClearRecoveryMarkers(ctx context.Context, accountID int64, clearTemp, clearError, clearMeta bool) error
 	// RecordQuotaResetRun durably records an automated fixed-strategy quota reset
 	// for idempotency and audit. Implementations return biz.ErrQuotaResetRunDuplicate
 	// when the (account, scope, window_start) tuple already exists.
@@ -749,6 +754,9 @@ func (a *SubscriptionAccount) EffectiveQuotaTimezone() string {
 		return DefaultQuotaTimezone
 	}
 	if _, err := time.LoadLocation(tz); err != nil {
+		// Review L1 fix: log the invalid timezone so operators can locate the
+		// misconfigured account instead of silently falling back to UTC.
+		fmt.Fprintf(os.Stderr, "subscription account %d: invalid quota_timezone %q, falling back to UTC: %v\n", a.ID, tz, err)
 		return DefaultQuotaTimezone
 	}
 	return tz

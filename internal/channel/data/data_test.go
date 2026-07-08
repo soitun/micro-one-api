@@ -143,6 +143,21 @@ func setupChannelTestDB(t *testing.T) *Repository {
 		ON subscription_account_quota_events(reservation_id, subscription_account_id, cost_source)
 	`).Error)
 
+	require.NoError(t, db.Exec(`
+		CREATE TABLE IF NOT EXISTS account_quota_snapshots (
+			account_id INTEGER PRIMARY KEY,
+			primary_used_percent REAL,
+			primary_reset_after_seconds INTEGER,
+			primary_window_minutes INTEGER,
+			secondary_used_percent REAL,
+			secondary_reset_after_seconds INTEGER,
+			secondary_window_minutes INTEGER,
+			primary_over_secondary_percent REAL,
+			updated_at DATETIME,
+			snapshot_paused INTEGER DEFAULT 0
+		)
+	`).Error)
+
 	return &Repository{db: db}
 }
 
@@ -663,7 +678,7 @@ func TestRecordAccountQuotaSnapshot_PersistsAndUpdatesAccount(t *testing.T) {
 	repo := setupChannelTestDB(t)
 	ctx := context.Background()
 	require.NoError(t, repo.db.Exec(`
-		CREATE TABLE account_quota_snapshots (
+		CREATE TABLE IF NOT EXISTS account_quota_snapshots (
 			account_id INTEGER PRIMARY KEY,
 			primary_used_percent REAL,
 			primary_reset_after_seconds INTEGER,
@@ -731,11 +746,17 @@ func TestRecordAccountQuotaSnapshot_PersistsAndUpdatesAccount(t *testing.T) {
 	assert.EqualValues(t, secondaryWindow, *listed[0].SecondaryQuotaWindowMinutes)
 	assert.Equal(t, updatedAt.Unix(), listed[0].QuotaSnapshotUpdatedAt)
 
-	require.NoError(t, repo.AutoPauseAccount(ctx, account.ID, "quota exhausted"))
+	// Review H1/H2 fix: a "quota exhausted" reason derives the "quota"
+	// recovery policy, which is transient. The account must NOT be disabled
+	// (status must stay enabled) so the recovery sweeper can clear the
+	// unschedulable markers once the local window resets. Only authorization
+	// errors (manual policy) disable the account.
+	require.NoError(t, repo.AutoPauseAccount(ctx, account.ID, "local quota exhausted"))
 	stored, err = repo.FindSubscriptionAccountByID(ctx, account.ID)
 	require.NoError(t, err)
-	assert.EqualValues(t, biz.ChannelStatusDisabled, stored.Status)
-	assert.Equal(t, "quota exhausted", stored.LastError)
+	assert.EqualValues(t, biz.ChannelStatusEnabled, stored.Status)
+	assert.Equal(t, "local quota exhausted", stored.LastError)
+	assert.Contains(t, stored.Metadata, `"recovery_policy":"quota"`)
 }
 
 func TestGetAccountQuotaSnapshotMemorySkipsOverflowResetAfter(t *testing.T) {
@@ -754,4 +775,54 @@ func TestGetAccountQuotaSnapshotMemorySkipsOverflowResetAfter(t *testing.T) {
 	if snapshot.PrimaryResetAfterSeconds != nil {
 		t.Fatalf("reset after should be absent for overflow value, got %d", *snapshot.PrimaryResetAfterSeconds)
 	}
+}
+
+// TestAutoPauseAccount_CodexKeepsEnabledWithCodexPolicy (review §6 regression
+// for H1/H2): a codex snapshot exhaustion reason must keep the account ENABLED
+// and stamp the "codex" recovery policy (not manual/disabled), so the recovery
+// sweeper's codex branch can clear markers once the snapshot resets.
+func TestAutoPauseAccount_CodexKeepsEnabledWithCodexPolicy(t *testing.T) {
+	repo := setupChannelTestDB(t)
+	ctx := context.Background()
+	account := &biz.SubscriptionAccount{
+		Name:      "codex-acct",
+		Platform:  "codex",
+		Status:    biz.ChannelStatusEnabled,
+		Group:     "default",
+		Models:    []string{"gpt-5"},
+		AccountID: "acc_codex",
+	}
+	require.NoError(t, repo.CreateSubscriptionAccount(ctx, account))
+
+	require.NoError(t, repo.AutoPauseAccount(ctx, account.ID, "codex quota exhausted"))
+	stored, err := repo.FindSubscriptionAccountByID(ctx, account.ID)
+	require.NoError(t, err)
+	// Must NOT be disabled — the sweeper only scans enabled accounts.
+	assert.EqualValues(t, biz.ChannelStatusEnabled, stored.Status)
+	assert.Equal(t, "codex quota exhausted", stored.LastError)
+	assert.Contains(t, stored.Metadata, `"recovery_policy":"codex"`)
+}
+
+// TestAutoPauseAccount_AuthorizationErrorDisablesWithManualPolicy (review H1/H2
+// guard): a 401/403 authorization error must still disable the account and
+// stamp manual policy (never auto-recover), preserving the existing behavior
+// for auth errors.
+func TestAutoPauseAccount_AuthorizationErrorDisablesWithManualPolicy(t *testing.T) {
+	repo := setupChannelTestDB(t)
+	ctx := context.Background()
+	account := &biz.SubscriptionAccount{
+		Name:      "auth-acct",
+		Platform:  "codex",
+		Status:    biz.ChannelStatusEnabled,
+		Group:     "default",
+		Models:    []string{"gpt-5"},
+		AccountID: "acc_auth",
+	}
+	require.NoError(t, repo.CreateSubscriptionAccount(ctx, account))
+
+	require.NoError(t, repo.AutoPauseAccount(ctx, account.ID, "upstream 401 unauthorized"))
+	stored, err := repo.FindSubscriptionAccountByID(ctx, account.ID)
+	require.NoError(t, err)
+	assert.EqualValues(t, biz.ChannelStatusDisabled, stored.Status)
+	assert.Contains(t, stored.Metadata, `"recovery_policy":"manual"`)
 }

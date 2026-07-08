@@ -401,3 +401,64 @@ func TestRefund_LegacyPayloadSubscriptionIDStillWorks(t *testing.T) {
 		t.Fatalf("result subscription_id = %d, want 7", res.SubscriptionID)
 	}
 }
+
+// TestRefund_UsesActualPaidAmountNotPlanPrice (review §6 regression for H5):
+// the refund wallet credit must equal the amount the user actually paid
+// (MoneyCents/100), not the plan's nominal PriceQuota. Previously the code
+// overwrote the paid amount with the plan snapshot's PriceQuota, causing
+// over/under-refunds on discounted orders.
+func TestRefund_UsesActualPaidAmountNotPlanPrice(t *testing.T) {
+	repo := &fakeRefundRepo{order: newRefundOrder("PAY-RF-PAID", true)}
+	// Simulate a discounted order: the user paid 150000 cents (1500 quota)
+	// for a plan whose nominal price is 2000 quota.
+	repo.order.MoneyCents = 150000
+	repo.order.ProviderPayload = `{"subscription_id":"11"}`
+	accounts := &stubAccountRepo{newBalance: 5000}
+	ledger := &recordingLedgerRepo{}
+	reverter := &stubSubscriptionReverter{}
+	uc := NewRefundUsecase(repo, accounts, ledger, reverter)
+
+	res, err := uc.RefundSubscriptionOrder(context.Background(), RefundRequest{
+		TradeNo: "PAY-RF-PAID",
+		Policy:  RefundPolicyRevoke,
+	})
+	if err != nil {
+		t.Fatalf("refund: %v", err)
+	}
+	// Refunded quota must be the actual paid amount (1500), not the plan
+	// nominal price (2000).
+	if res.RefundedQuota != 1500 {
+		t.Fatalf("refunded quota = %d, want 1500 (actual paid, not plan price 2000)", res.RefundedQuota)
+	}
+	if accounts.lastDelta != 1500 {
+		t.Fatalf("wallet credit delta = %d, want 1500", accounts.lastDelta)
+	}
+	if len(ledger.created) != 1 || ledger.created[0].Amount != 1500 {
+		t.Fatalf("ledger amount = %v, want 1500", ledger.created)
+	}
+}
+
+// TestRefund_FallsBackToPlanPriceWhenMoneyCentsZero (review H5 legacy path):
+// legacy orders without a populated money_cents column fall back to the plan
+// snapshot's PriceQuota so the refund is not zero.
+func TestRefund_FallsBackToPlanPriceWhenMoneyCentsZero(t *testing.T) {
+	repo := &fakeRefundRepo{order: newRefundOrder("PAY-RF-LEGACY", true)}
+	repo.order.MoneyCents = 0 // legacy: no money_cents
+	repo.order.ProviderPayload = `{"subscription_id":"12"}`
+	accounts := &stubAccountRepo{newBalance: 5000}
+	ledger := &recordingLedgerRepo{}
+	reverter := &stubSubscriptionReverter{}
+	uc := NewRefundUsecase(repo, accounts, ledger, reverter)
+
+	res, err := uc.RefundSubscriptionOrder(context.Background(), RefundRequest{
+		TradeNo: "PAY-RF-LEGACY",
+		Policy:  RefundPolicyRevoke,
+	})
+	if err != nil {
+		t.Fatalf("refund: %v", err)
+	}
+	// Plan snapshot PriceQuota is 2000; fallback must use it.
+	if res.RefundedQuota != 2000 {
+		t.Fatalf("refunded quota = %d, want 2000 (plan snapshot fallback)", res.RefundedQuota)
+	}
+}

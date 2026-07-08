@@ -324,3 +324,81 @@ func TestSubscriptionUsecase_RejectsDuplicateAssignmentAndRevokedExtend(t *testi
 func ptrFloat64(v float64) *float64 {
 	return &v
 }
+
+// TestAssignOrExtend_AccumulatesRemainingTime (review §6 regression for H3):
+// renewing a subscription that still has remaining time must ADD the renewal
+// duration to the existing expiry, not overwrite it with now+duration.
+// Previously a renewal whose duration was shorter than the remaining window
+// truncated the user's entitlement (H3).
+func TestAssignOrExtend_AccumulatesRemainingTime(t *testing.T) {
+	repo := newMockSubscriptionRepo()
+	group := &SubscriptionGroup{Name: "pro", Platform: "openai", Status: SubscriptionGroupStatusEnabled}
+	if err := repo.CreateGroup(context.Background(), group); err != nil {
+		t.Fatal(err)
+	}
+	uc := NewSubscriptionUsecase(repo, repo)
+	// Fix now so the test is deterministic. now=5000.
+	uc.now = func() time.Time { return time.Unix(5000, 0) }
+
+	// Create a subscription expiring at 9000 (4000s of remaining time).
+	sub, _, err := uc.AssignOrExtend(context.Background(), &AssignSubscriptionRequest{
+		UserID: 1, GroupID: group.ID, StartsAt: 1000, ExpiresAt: 9000, SubscriptionName: "pro",
+	})
+	if err != nil {
+		t.Fatalf("initial assign: %v", err)
+	}
+	origExpires := sub.ExpiresAt // 9000
+
+	// Renew for 30 days (30*86400) starting now=5000. A renewal must accumulate:
+	// new expires = max(9000, 5000) + 30d = 9000 + 30d, NOT 5000 + 30d.
+	renewed, reused, err := uc.AssignOrExtend(context.Background(), &AssignSubscriptionRequest{
+		UserID: 1, GroupID: group.ID, StartsAt: 5000, ExpiresAt: 5000 + 30*86400, SubscriptionName: "pro",
+	})
+	if err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	if !reused {
+		t.Fatal("renewal should reuse the active subscription, not create a new one")
+	}
+	want := origExpires + int64(30*86400)
+	if renewed.ExpiresAt != want {
+		t.Fatalf("renewal expiry = %d, want %d (accumulated); orig=%d", renewed.ExpiresAt, want, origExpires)
+	}
+}
+
+// TestAssignOrExtend_RenewalAfterExpiryStartsFromNow (review §6 regression for H3):
+// when the active subscription has already expired, the renewal starts from now
+// (max(active.ExpiresAt, now) = now), so the user does not get credit for time
+// they already consumed past expiry.
+func TestAssignOrExtend_RenewalAfterExpiryStartsFromNow(t *testing.T) {
+	repo := newMockSubscriptionRepo()
+	group := &SubscriptionGroup{Name: "pro", Platform: "openai", Status: SubscriptionGroupStatusEnabled}
+	if err := repo.CreateGroup(context.Background(), group); err != nil {
+		t.Fatal(err)
+	}
+	uc := NewSubscriptionUsecase(repo, repo)
+	uc.now = func() time.Time { return time.Unix(10000, 0) }
+
+	// Active subscription expired at 5000 (now=10000).
+	sub, _, err := uc.AssignOrExtend(context.Background(), &AssignSubscriptionRequest{
+		UserID: 1, GroupID: group.ID, StartsAt: 1000, ExpiresAt: 5000, SubscriptionName: "pro",
+	})
+	if err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+	if sub.ExpiresAt != 5000 {
+		t.Fatalf("initial expiry = %d, want 5000", sub.ExpiresAt)
+	}
+
+	// Renew for 30 days. base = max(5000, 10000) = 10000.
+	renewed, _, err := uc.AssignOrExtend(context.Background(), &AssignSubscriptionRequest{
+		UserID: 1, GroupID: group.ID, StartsAt: 10000, ExpiresAt: 10000 + 30*86400, SubscriptionName: "pro",
+	})
+	if err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	want := int64(10000 + 30*86400)
+	if renewed.ExpiresAt != want {
+		t.Fatalf("renewal expiry = %d, want %d (now+30d, no credit for expired time)", renewed.ExpiresAt, want)
+	}
+}

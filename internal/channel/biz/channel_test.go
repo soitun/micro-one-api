@@ -1247,3 +1247,18 @@ func equalStringSlices(a, b []string) bool {
 	}
 	return true
 }
+
+func (m *mockChannelRepo) ClearRecoveryMarkers(ctx context.Context, accountID int64, clearTemp, clearError, clearMeta bool) error {
+	if acc, ok := m.accounts[accountID]; ok {
+		if clearTemp {
+			acc.RateLimitedUntil = 0
+		}
+		if clearError {
+			acc.LastError = ""
+		}
+		if clearMeta {
+			acc.Metadata = ""
+		}
+	}
+	return nil
+}

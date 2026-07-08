@@ -331,3 +331,18 @@ func TestChannelServiceSubscriptionAccountCRUD(t *testing.T) {
 		t.Fatalf("UpdateSubscriptionAccount() mismatch: resp=%+v err=%v account=%+v", updateResp, err, repo.updatedAccount)
 	}
 }
+
+func (r *channelServiceRepo) ClearRecoveryMarkers(ctx context.Context, accountID int64, clearTemp, clearError, clearMeta bool) error {
+	if r.account != nil && r.account.ID == accountID {
+		if clearTemp {
+			r.account.RateLimitedUntil = 0
+		}
+		if clearError {
+			r.account.LastError = ""
+		}
+		if clearMeta {
+			r.account.Metadata = ""
+		}
+	}
+	return nil
+}

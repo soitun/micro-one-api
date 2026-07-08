@@ -248,6 +248,20 @@ func (s *ChannelSubscriptionAccountStore) RecordAccountQuotaSnapshot(ctx context
 	return nil
 }
 
+// AutoPauseAccount marks a subscription account unschedulable for a codex
+// snapshot exhaustion event. Per review H1/H2, codex snapshot exhaustion is
+// transient (it clears when the upstream snapshot resets), so the account is
+// NOT disabled — it stays enabled so the recovery sweeper can clear the
+// unschedulable markers once CodexSnapshotQuotaExceeded() flips false. The
+// channel service's AutoPauseAccount derives the recovery policy from the
+// reason and keeps status=enabled for codex/quota policies.
+//
+// We use SetSubscriptionAccountError to stamp the reason + recovery metadata
+// (the channel service maps this to unschedulable markers via
+// stampRecoveryMetadata). We deliberately do NOT call
+// ChangeSubscriptionAccountStatus(disabled) here; doing so would permanently
+// disable the account (the sweeper only scans enabled accounts), violating the
+// "wait for snapshot reset then recover" acceptance criterion.
 func (s *ChannelSubscriptionAccountStore) AutoPauseAccount(ctx context.Context, accountID int64, reason string) error {
 	if s == nil || s.client == nil {
 		return relaycredential.ErrNotConfigured
@@ -259,16 +273,6 @@ func (s *ChannelSubscriptionAccountStore) AutoPauseAccount(ctx context.Context, 
 		return err
 	} else if resp != nil && !resp.GetSuccess() {
 		return relaycredential.ErrRefreshFailed
-	}
-	resp, err := s.client.ChangeSubscriptionAccountStatus(ctx, &channelv1.ChangeSubscriptionAccountStatusRequest{
-		AccountId: accountID,
-		Status:    2,
-	})
-	if err != nil {
-		return err
-	}
-	if resp != nil && !resp.GetSuccess() {
-		return fmt.Errorf("auto-pause subscription account: %s", resp.GetMessage())
 	}
 	return nil
 }

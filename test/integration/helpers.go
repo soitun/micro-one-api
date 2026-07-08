@@ -556,3 +556,7 @@ func (m *testChannelRepo) ChangeStatus(ctx context.Context, channelID int64, sta
 	}
 	return nil
 }
+
+func (m *testChannelRepo) ClearRecoveryMarkers(ctx context.Context, accountID int64, clearTemp, clearError, clearMeta bool) error {
+	return channelbiz.ErrSubscriptionAccountNotFound
+}

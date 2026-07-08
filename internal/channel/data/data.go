@@ -595,13 +595,19 @@ func (r *Repository) AutoPauseAccount(ctx context.Context, accountID int64, reas
 	if !ok {
 		return biz.ErrSubscriptionAccountNotFound
 	}
-	account.Status = biz.ChannelStatusDisabled
 	account.LastError = reason
-	// AutoPause is used for authorization errors and codex snapshot exhaustion;
-	// stamp a manual recovery policy so the recovery sweeper never re-enables
-	// the account without an explicit admin action or OAuth rebind.
+	// Derive the recovery policy from the reason (review H1/H2 fix). Codex
+	// snapshot exhaustion and local quota exhaustion are transient — the
+	// account stays ENABLED (status=enabled) so the recovery sweeper can clear
+	// the unschedulable markers once the upstream snapshot / local window
+	// resets. Only authorization errors (401/403, policy=manual) disable the
+	// account, because those never auto-recover and require an OAuth rebind.
+	policy := recoveryPolicyForReason(reason)
 	account.Metadata = stampRecoveryMetadata(account.Metadata, reason, 0, time.Now().Unix())
-	account.Metadata = setSubscriptionAccountMetadataValue(account.Metadata, "recovery_policy", biz.RecoveryPolicyManual)
+	account.Metadata = setSubscriptionAccountMetadataValue(account.Metadata, "recovery_policy", policy)
+	if policy == biz.RecoveryPolicyManual {
+		account.Status = biz.ChannelStatusDisabled
+	}
 	account.UpdatedAt = time.Now().Unix()
 	return nil
 }
@@ -1091,17 +1097,29 @@ func (r *Repository) autoPauseAccountDB(ctx context.Context, accountID int64, re
 	if err != nil {
 		return err
 	}
+	// Derive the recovery policy from the reason (review H1/H2 fix). Codex
+	// snapshot exhaustion and local quota exhaustion are transient: keep the
+	// account ENABLED so the recovery sweeper can clear the unschedulable
+	// markers once the upstream snapshot / local window resets. Only
+	// authorization errors (manual policy) disable the account.
+	policy := recoveryPolicyForReason(reason)
 	metadata := stampRecoveryMetadata(account.Metadata, reason, 0, time.Now().Unix())
-	metadata = setSubscriptionAccountMetadataValue(metadata, "recovery_policy", biz.RecoveryPolicyManual)
+	metadata = setSubscriptionAccountMetadataValue(metadata, "recovery_policy", policy)
+	status := biz.ChannelStatusEnabled
+	abilityEnabled := true
+	if policy == biz.RecoveryPolicyManual {
+		status = biz.ChannelStatusDisabled
+		abilityEnabled = false
+	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&subscriptionAccountModel{}).Where("id = ?", accountID).Updates(map[string]interface{}{
-			"status":     biz.ChannelStatusDisabled,
+			"status":     status,
 			"metadata":   stringPtr(metadata),
 			"updated_at": time.Now().Unix(),
 		}).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&subscriptionAccountAbilityModel{}).Where("account_id = ?", accountID).Update("enabled", false).Error; err != nil {
+		if err := tx.Model(&subscriptionAccountAbilityModel{}).Where("account_id = ?", accountID).Update("enabled", abilityEnabled).Error; err != nil {
 			return err
 		}
 		return tx.Model(&accountQuotaSnapshotModel{}).Where("account_id = ?", accountID).Updates(map[string]interface{}{
@@ -2098,6 +2116,65 @@ func (r *Repository) ClearRecoveryMetadata(ctx context.Context, accountID int64)
 	return nil
 }
 
+func (r *Repository) ClearRecoveryMarkers(ctx context.Context, accountID int64, clearTemp, clearError, clearMeta bool) error {
+	if accountID <= 0 {
+		return biz.ErrSubscriptionAccountNotFound
+	}
+	if r.db != nil {
+		return r.clearRecoveryMarkersDB(ctx, accountID, clearTemp, clearError, clearMeta)
+	}
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	account, ok := r.subAccounts[accountID]
+	if !ok {
+		return biz.ErrSubscriptionAccountNotFound
+	}
+	if clearTemp {
+		account.RateLimitedUntil = 0
+	}
+	if clearError {
+		account.LastError = ""
+		account.Metadata = setSubscriptionAccountMetadataValue(account.Metadata, "last_error", "")
+	}
+	if clearMeta {
+		account.Metadata = clearSubscriptionAccountRecoveryMetadata(account.Metadata)
+	}
+	account.UpdatedAt = time.Now().Unix()
+	return nil
+}
+
+func (r *Repository) clearRecoveryMarkersDB(ctx context.Context, accountID int64, clearTemp, clearError, clearMeta bool) error {
+	account, err := r.findSubscriptionAccountByIDDB(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	metadata := account.Metadata
+	updates := map[string]interface{}{
+		"updated_at": time.Now().Unix(),
+	}
+	if clearTemp {
+		updates["rate_limited_until"] = 0
+	}
+	if clearError {
+		metadata = setSubscriptionAccountMetadataValue(metadata, "last_error", "")
+	}
+	if clearMeta {
+		metadata = clearSubscriptionAccountRecoveryMetadata(metadata)
+	}
+	updates["metadata"] = stringPtr(metadata)
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&subscriptionAccountModel{}).Where("id = ?", accountID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if clearTemp {
+			if err := tx.Model(&subscriptionAccountAbilityModel{}).Where("account_id = ?", accountID).Update("enabled", true).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (r *Repository) clearRecoveryMetadataDB(ctx context.Context, accountID int64) error {
 	account, err := r.findSubscriptionAccountByIDDB(ctx, accountID)
 	if err != nil {
@@ -2182,6 +2259,16 @@ func stampRecoveryMetadata(raw, reason string, untilUnix, nowUnix int64) string 
 func recoveryPolicyForReason(reason string) string {
 	lower := strings.ToLower(reason)
 	switch {
+	// Codex snapshot exhaustion: a transient upstream quota condition that
+	// clears when the upstream snapshot resets. Must NOT be treated as manual
+	// (the review H1/H2 found codex-exhausted accounts were permanently
+	// disabled because AutoPauseAccount forced manual). The recovery sweeper's
+	// codex branch waits for CodexSnapshotQuotaExceeded() to flip false.
+	case strings.Contains(lower, "codex"), strings.Contains(lower, "snapshot"):
+		return biz.RecoveryPolicyCodex
+	// Local quota window exhaustion: clears when the local window resets.
+	case strings.Contains(lower, "quota"):
+		return biz.RecoveryPolicyQuota
 	case strings.Contains(lower, "401"), strings.Contains(lower, "403"), strings.Contains(lower, "unauthorized"), strings.Contains(lower, "forbidden"):
 		return biz.RecoveryPolicyManual
 	case strings.Contains(lower, "429"), strings.Contains(lower, "rate limit"), strings.Contains(lower, "529"), strings.Contains(lower, "overloaded"), strings.Contains(lower, "5xx"), strings.Contains(lower, "500"), strings.Contains(lower, "502"), strings.Contains(lower, "503"), strings.Contains(lower, "504"):

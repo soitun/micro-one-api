@@ -262,3 +262,19 @@ func trimSpace(s string) string {
 	}
 	return s
 }
+
+
+// PendingChange describes a scheduled next-cycle subscription change
+// (downgrade) recorded on the active subscription's metadata. It is the
+// public, read-only view used by the renewal-initiation layer (admin/service)
+// to decide which group a renewal order should target so a pending downgrade
+// actually takes effect (review H9 fix).
+type PendingChange = changeAudit
+
+// PendingChangeFromMetadata extracts a pending next-cycle change from a
+// subscription's metadata blob. Returns ok=false when no pending change is
+// scheduled. It is the exported wrapper around the package-internal
+// pendingChangeMetadata helper.
+func PendingChangeFromMetadata(metadata string) (PendingChange, bool) {
+	return pendingChangeMetadata(metadata)
+}

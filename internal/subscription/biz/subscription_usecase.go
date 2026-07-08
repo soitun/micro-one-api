@@ -103,6 +103,13 @@ func (uc *SubscriptionUsecase) AssignOrExtend(ctx context.Context, req *AssignSu
 		sub, err := uc.Assign(ctx, req)
 		return sub, false, err
 	}
+	// Apply a scheduled next-cycle change (downgrade) when the renewal targets
+	// the pending group. The renewal-initiation layer (admin/service) is
+	// responsible for reading pending_change and creating the renewal order for
+	// the target group (review H9 fix); this branch then applies it. A
+	// same-group renewal (user renews the current plan) intentionally leaves a
+	// pending_change in place so the downgrade still takes effect at the next
+	// renewal that targets the pending group.
 	if active.GroupID != req.GroupID {
 		pending, ok := pendingChangeMetadata(active.Metadata)
 		if !ok || pending.ToGroupID != req.GroupID {
@@ -111,19 +118,25 @@ func (uc *SubscriptionUsecase) AssignOrExtend(ctx context.Context, req *AssignSu
 		active.GroupID = req.GroupID
 		active.Metadata = clearPendingChangeMetadata(active.Metadata)
 	}
-	if req.ExpiresAt <= active.ExpiresAt {
-		duration := req.ExpiresAt - req.StartsAt
-		if duration <= 0 {
-			return active, true, nil
-		}
-		req.ExpiresAt = active.ExpiresAt + duration
+	// Extension always accumulates remaining time (review H3 fix): the new
+	// expires_at is max(active.ExpiresAt, now) + requestedDuration. The
+	// previous code dropped remaining time when the renewal duration was
+	// shorter than the remaining window (the common "renew close to expiry"
+	// case), truncating the user's entitlement. Centralizing the accumulation
+	// here makes the payment-callback path and the admin issuance path use the
+	// same renewal semantics.
+	now := uc.now().Unix()
+	duration := req.ExpiresAt - req.StartsAt
+	base := active.ExpiresAt
+	if base < now {
+		base = now
 	}
-	active.ExpiresAt = req.ExpiresAt
+	active.ExpiresAt = base + duration
 	if req.SubscriptionName != "" {
 		active.SubscriptionName = req.SubscriptionName
 	}
 	active.Metadata = mergeSubscriptionMetadata(active.Metadata, req.Metadata)
-	active.UpdatedAt = uc.now().Unix()
+	active.UpdatedAt = now
 	if err := uc.repo.UpdateSubscription(ctx, active); err != nil {
 		return nil, true, err
 	}

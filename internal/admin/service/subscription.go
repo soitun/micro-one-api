@@ -270,10 +270,21 @@ func (s *AdminService) ensureSubscriptionCanUseGroup(ctx context.Context, userID
 		}
 		return err
 	}
-	if active != nil && active.GroupID != groupID {
-		return subscriptionbiz.ErrSubscriptionAlreadyAssigned
+	if active == nil {
+		return nil
 	}
-	return nil
+	if active.GroupID == groupID {
+		return nil
+	}
+	// A pending next-cycle change (downgrade) scheduled on the active
+	// subscription may target a different group. Allow the renewal to proceed
+	// for the pending target group so the downgrade takes effect at renewal
+	// (review H9 fix). Previously the renewal flow required the request's
+	// GroupID to equal the active group, so a pending downgrade never applied.
+	if pending, ok := subscriptionbiz.PendingChangeFromMetadata(active.Metadata); ok && pending.ToGroupID == groupID {
+		return nil
+	}
+	return subscriptionbiz.ErrSubscriptionAlreadyAssigned
 }
 
 func (s *AdminService) assignOrExtendGroupSubscription(ctx context.Context, userID int64, group *subscriptionbiz.SubscriptionGroup, durationDays int64, subscriptionName, metadata string) (*subscriptionbiz.UserSubscription, error) {
@@ -287,24 +298,20 @@ func (s *AdminService) assignOrExtendGroupSubscription(ctx context.Context, user
 	if name == "" {
 		name = group.Name
 	}
+	// Pass the raw renewal duration (startsAt=now, expiresAt=now+duration) and
+	// let SubscriptionUsecase.AssignOrExtend accumulate any remaining time on
+	// the active subscription (review H3: max(active.ExpiresAt, now)+duration).
+	// Previously this function computed the accumulated expiry itself while the
+	// payment-callback assigner path did not, so the two issuance paths used
+	// inconsistent renewal semantics. Centralizing the accumulation in
+	// AssignOrExtend makes both paths identical.
 	now := time.Now().Unix()
-	startsAt := now
-	expiresAt := now + durationDays*secondsPerDay
-	if active, err := s.subscriptionUc.GetActiveSubscriptionForUser(ctx, userID); err == nil && active != nil && active.GroupID == group.ID {
-		startsAt = active.StartsAt
-		base := active.ExpiresAt
-		if base < now {
-			base = now
-			startsAt = now
-		}
-		expiresAt = base + durationDays*secondsPerDay
-	}
 	sub, _, err := s.subscriptionUc.AssignOrExtend(ctx, &subscriptionbiz.AssignSubscriptionRequest{
 		UserID:           userID,
 		GroupID:          group.ID,
 		SubscriptionName: name,
-		StartsAt:         startsAt,
-		ExpiresAt:        expiresAt,
+		StartsAt:         now,
+		ExpiresAt:        now + durationDays*secondsPerDay,
 		Metadata:         metadata,
 	})
 	return sub, err
@@ -354,15 +361,108 @@ func (s *AdminService) ExtendSubscription(ctx context.Context, id int64, expires
 }
 
 // ChangeSubscription upgrades or downgrades the user's active subscription
-// (phase 2.4). It delegates to the subscription usecase which enforces the
-// fixed policy: immediate upgrade charges the difference and keeps expires_at;
-// next-cycle downgrade records a pending change applied at the next renewal.
+// (phase 2.4). It enforces the fixed policy:
+//   - immediate upgrade: charge the price difference to the wallet (billing
+//     writes the ledger atomically) BEFORE mutating the subscription, so the
+//     audit trail reflects a real charge; if the wallet rejects the charge
+//     (insufficient balance) the subscription is not changed.
+//   - next-cycle downgrade: record a pending_change applied at the next
+//     renewal; no wallet movement.
+//
 // The operator id is the admin who triggered the change.
+//
+// Review H7+H8 fix: previously the admin layer delegated to the subscription
+// usecase without charging the wallet, so upgrades were free while the
+// subscription metadata recorded a charged amount — a fabricated audit entry.
+// Now the wallet charge happens here, before ChangeSubscription, and the
+// ChargeResult.ChargedQuota only reflects a real charge.
 func (s *AdminService) ChangeSubscription(ctx context.Context, req subscriptionbiz.ChangeRequest) (*subscriptionbiz.ChangeResult, error) {
 	if s == nil || s.subscriptionUc == nil {
 		return nil, ErrSubscriptionServiceNotConfigured
 	}
-	return s.subscriptionUc.ChangeSubscription(ctx, req)
+	// Review M7 fix: server-side price validation. When the target plan is
+	// specified, load it and verify the requested NewPriceQuota matches the
+	// plan's configured price so a tampered admin request cannot charge a
+	// wrong upgrade diff. OldPriceQuota is validated against the active
+	// subscription's current plan when available.
+	if req.ToPlanID > 0 && s.planUc != nil {
+		plan, err := s.planUc.Get(ctx, req.ToPlanID)
+		if err != nil {
+			return nil, fmt.Errorf("load target plan for price validation: %w", err)
+		}
+		if plan == nil {
+			return nil, subscriptionbiz.ErrSubscriptionPlanNotFound
+		}
+		if req.NewPriceQuota != plan.PriceQuota {
+			return nil, fmt.Errorf("new_price_quota %d does not match plan %d price %d", req.NewPriceQuota, req.ToPlanID, plan.PriceQuota)
+		}
+		if req.ToGroupID <= 0 {
+			req.ToGroupID = plan.GroupID
+		}
+	}
+	// Infer the policy the same way the usecase does, so we only charge for
+	// immediate upgrades.
+	policy := req.Policy
+	if policy == "" {
+		if req.NewPriceQuota >= req.OldPriceQuota {
+			policy = subscriptionbiz.SubscriptionChangePolicyImmediate
+		} else {
+			policy = subscriptionbiz.SubscriptionChangePolicyNextCycle
+		}
+	}
+	charged := int64(0)
+	if policy == subscriptionbiz.SubscriptionChangePolicyImmediate {
+		charged = req.NewPriceQuota - req.OldPriceQuota
+		// Only charge a positive difference. A same-price or negative-difference
+		// "upgrade" is treated as a no-op change (the usecase still records the
+		// group swap); charging a negative amount would be a refund through the
+		// wrong path. Downgrades are deferred to next_cycle and never charged
+		// here.
+		if charged > 0 {
+			if s.billingClient == nil {
+				return nil, ErrSubscriptionServiceNotConfigured
+			}
+			userIDStr := strconv.FormatInt(req.UserID, 10)
+			remark := fmt.Sprintf("subscription upgrade group=%d (operator=%s)", req.ToGroupID, req.Operator)
+			deduct, err := s.billingClient.PurchaseSubscription(ctx, &billingv1.PurchaseSubscriptionRequest{
+				UserId:      userIDStr,
+				PriceAmount: charged,
+				GroupId:     req.ToGroupID,
+				Remark:      remark,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("charge upgrade difference: %w", err)
+			}
+			if !deduct.GetSuccess() {
+				return nil, fmt.Errorf("charge upgrade difference: %s", deduct.GetErrorMessage())
+			}
+		} else {
+			charged = 0
+		}
+	}
+	res, err := s.subscriptionUc.ChangeSubscription(ctx, req)
+	if err != nil && charged > 0 {
+		// Compensate: the wallet was charged but the subscription mutation
+		// failed, so refund the difference so no charge lingers without a
+		// service change. Mirrors the PurchaseSubscription saga.
+		userIDStr := strconv.FormatInt(req.UserID, 10)
+		if _, refundErr := s.billingClient.TopUpQuota(ctx, &billingv1.TopUpQuotaRequest{
+			UserId:     userIDStr,
+			Amount:     charged,
+			OperatorId: "system",
+			Remark:     fmt.Sprintf("refund: subscription change rollback group=%d", req.ToGroupID),
+		}); refundErr != nil {
+			return nil, fmt.Errorf("change subscription failed (%w) and quota refund failed: %v", err, refundErr)
+		}
+		return nil, err
+	}
+	if res != nil && policy == subscriptionbiz.SubscriptionChangePolicyImmediate {
+		// Reflect the real charge in the result (the usecase's ChargedQuota is
+		// derived from the request; we override it with the amount actually
+		// deducted so the audit trail matches the ledger).
+		res.ChargedQuota = charged
+	}
+	return res, err
 }
 
 func (s *AdminService) ResetSubscriptionQuota(ctx context.Context, id int64, scope string) error {

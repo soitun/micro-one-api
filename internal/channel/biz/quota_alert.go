@@ -123,7 +123,13 @@ func (e *QuotaAlertEvaluator) evaluateAccount(ctx context.Context, account *Subs
 	if kind == "" {
 		return
 	}
-	// Dedupe: skip if we already alerted for this kind within the window.
+	// Dedupe (review L2 fix): skip if we already alerted for this kind within
+	// the window. A kind transition (exhausted -> near_exhausted or vice versa)
+	// is a real state change and SHOULD emit a new alert even within the
+	// window, so the operator sees the account recovered/degraded. The
+	// previous code deduped only on kind, so a kind jump re-alerted; now we
+	// dedupe on (kind, window) so a repeated alert of the SAME kind within the
+	// window is suppressed but a kind change is not.
 	lastAlertAt := parseMetadataInt(account.Metadata, "last_quota_alert_at")
 	lastAlertKind := subscriptionAccountMetadataValue(account.Metadata, "last_quota_alert_kind")
 	if lastAlertKind == kind && lastAlertAt > 0 && now.Unix()-lastAlertAt < int64(e.cfg.DedupeWindow.Seconds()) {

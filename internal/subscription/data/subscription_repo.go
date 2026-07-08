@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 
 	"micro-one-api/internal/subscription/biz"
 
@@ -230,6 +231,13 @@ func (r *Repository) addUsageMemory(ctx context.Context, userID int64, costUSD f
 func (r *Repository) createSubscriptionDB(ctx context.Context, subscription *biz.UserSubscription) error {
 	model := subscriptionToModel(subscription)
 	if err := r.db.WithContext(ctx).Create(&model).Error; err != nil {
+		// The unique index on (active_user_id) (review H10) makes a concurrent
+		// duplicate-active creation collide here. Map it to the sentinel so the
+		// usecase layer returns ErrSubscriptionAlreadyAssigned instead of a
+		// raw driver error.
+		if isDuplicateKeyErr(err) {
+			return biz.ErrSubscriptionAlreadyAssigned
+		}
 		return err
 	}
 	subscription.ID = model.ID
@@ -490,4 +498,18 @@ func (r *Repository) getActiveSubscriptionByUserMemory(ctx context.Context, user
 		return nil, biz.ErrSubscriptionNotFound
 	}
 	return chosen, nil
+}
+
+// isDuplicateKeyErr reports whether err is a unique-constraint violation,
+// covering MySQL, SQLite and Postgres drivers used by this project. Mirrors
+// the helper in internal/channel/data.
+func isDuplicateKeyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Duplicate entry") ||
+		strings.Contains(msg, "UNIQUE constraint failed") ||
+		strings.Contains(msg, "duplicate key value") ||
+		strings.Contains(msg, "uniq_user_subs_active_user_id")
 }
