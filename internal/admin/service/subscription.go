@@ -353,6 +353,18 @@ func (s *AdminService) ExtendSubscription(ctx context.Context, id int64, expires
 	return s.subscriptionUc.Extend(ctx, id, expiresAt)
 }
 
+// ChangeSubscription upgrades or downgrades the user's active subscription
+// (phase 2.4). It delegates to the subscription usecase which enforces the
+// fixed policy: immediate upgrade charges the difference and keeps expires_at;
+// next-cycle downgrade records a pending change applied at the next renewal.
+// The operator id is the admin who triggered the change.
+func (s *AdminService) ChangeSubscription(ctx context.Context, req subscriptionbiz.ChangeRequest) (*subscriptionbiz.ChangeResult, error) {
+	if s == nil || s.subscriptionUc == nil {
+		return nil, ErrSubscriptionServiceNotConfigured
+	}
+	return s.subscriptionUc.ChangeSubscription(ctx, req)
+}
+
 func (s *AdminService) ResetSubscriptionQuota(ctx context.Context, id int64, scope string) error {
 	if s == nil || s.subscriptionUc == nil {
 		return ErrSubscriptionServiceNotConfigured

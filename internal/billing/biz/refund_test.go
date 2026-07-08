@@ -344,3 +344,60 @@ func TestRefund_KeepPolicyLeavesSubscriptionUntouched(t *testing.T) {
 // Compile-time guards to avoid unused-import churn if tests are trimmed.
 var _ = errors.New
 var _ = subscriptionbiz.SubscriptionStatusActive
+
+// TestRefund_PrefersSubscriptionIDColumnOverActiveFallback verifies the phase
+// 2.3 traceability fix: when the order carries a subscription_id column (written
+// by the assigner at MarkOrderPaid), the refund revokes THAT subscription
+// deterministically, even though the user's current active subscription is a
+// different row. Without the column the refund would fall back to the active
+// subscription and revoke the wrong one.
+func TestRefund_PrefersSubscriptionIDColumnOverActiveFallback(t *testing.T) {
+	repo := &fakeRefundRepo{order: newRefundOrder("PAY-RF-TRACE", true)}
+	// The order granted subscription 5 (stamped on the column at MarkOrderPaid).
+	repo.order.SubscriptionID = 5
+	reverter := &stubSubscriptionReverter{}
+	// GetActiveSubscriptionForUser returns a DIFFERENT active subscription (99),
+	// which is the wrong target if the fallback path were taken.
+	uc := NewRefundUsecase(repo, &stubAccountRepo{newBalance: 5000}, &recordingLedgerRepo{}, reverter)
+
+	res, err := uc.RefundSubscriptionOrder(context.Background(), RefundRequest{
+		TradeNo: "PAY-RF-TRACE",
+		Policy:  RefundPolicyRevoke,
+	})
+	if err != nil {
+		t.Fatalf("refund: %v", err)
+	}
+	if reverter.revokeCalls != 1 || reverter.lastSubID != 5 {
+		t.Fatalf("refund revoked %d (calls=%d), want the column-stamped subscription 5 (not the active 99)",
+			reverter.lastSubID, reverter.revokeCalls)
+	}
+	if res.SubscriptionID != 5 {
+		t.Fatalf("result subscription_id = %d, want 5", res.SubscriptionID)
+	}
+}
+
+// TestRefund_LegacyPayloadSubscriptionIDStillWorks verifies the backward-compat
+// fallback path: orders fulfilled before the subscription_id column existed
+// still resolve via ProviderPayload.subscription_id.
+func TestRefund_LegacyPayloadSubscriptionIDStillWorks(t *testing.T) {
+	repo := &fakeRefundRepo{order: newRefundOrder("PAY-RF-LEGACY", true)}
+	// No column; legacy payload carries the link.
+	repo.order.SubscriptionID = 0
+	repo.order.ProviderPayload = `{"subscription_id":"7"}`
+	reverter := &stubSubscriptionReverter{}
+	uc := NewRefundUsecase(repo, &stubAccountRepo{newBalance: 5000}, &recordingLedgerRepo{}, reverter)
+
+	res, err := uc.RefundSubscriptionOrder(context.Background(), RefundRequest{
+		TradeNo: "PAY-RF-LEGACY",
+		Policy:  RefundPolicyRevoke,
+	})
+	if err != nil {
+		t.Fatalf("refund: %v", err)
+	}
+	if reverter.lastSubID != 7 {
+		t.Fatalf("legacy payload refund resolved subscription %d, want 7", reverter.lastSubID)
+	}
+	if res.SubscriptionID != 7 {
+		t.Fatalf("result subscription_id = %d, want 7", res.SubscriptionID)
+	}
+}

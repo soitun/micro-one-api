@@ -47,6 +47,11 @@ type PaymentOrder struct {
 	// plan row (which may be taken off-shelf or edited while the order is
 	// pending). See plan_snapshot.go. Empty for non-plan orders.
 	PlanSnapshot string
+	// SubscriptionID is the id of the subscription granted by this order. It is
+	// written by the assigner at MarkOrderPaid time and persisted so refunds can
+	// resolve the exact subscription to revoke/shorten deterministically (phase
+	// 2.3 traceability). Zero for balance orders or orders not yet fulfilled.
+	SubscriptionID int64
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	PaidAt       *time.Time

@@ -92,6 +92,22 @@ type QuotaResetRunApplier interface {
 	RecordQuotaResetAndReset(ctx context.Context, run *SubscriptionAccountQuotaResetRun) error
 }
 
+// RecoveryProber performs a lightweight upstream probe to verify an account is
+// actually serving again before the recovery sweeper clears its unschedulable
+// markers (roadmap §1.2 "增加恢复前探测策略, 只对可安全探测的平台执行轻量
+// 请求"). Implementations MUST be safe to leave nil (no probe available): the
+// sweeper then falls back to its existing local-state check. Only platforms the
+// prober explicitly supports are probed; others recover via the local path.
+type RecoveryProber interface {
+	// ProbeRecovery performs a lightweight upstream check for the account. It
+	// returns ok=true when the upstream confirms the account is healthy
+	// (e.g. a 1-token request succeeds), ok=false when the upstream still
+	// rejects it, and err!=nil when the probe could not be run (network,
+	// unsupported platform). A nil prober means "no probe configured" and the
+	// sweeper treats every account as probe-eligible via its local checks.
+	ProbeRecovery(ctx context.Context, account *SubscriptionAccount) (ok bool, err error)
+}
+
 // SubscriptionAccountQuotaResetRun is the audit row for an automated reset.
 type SubscriptionAccountQuotaResetRun struct {
 	AccountID   int64
@@ -236,9 +252,10 @@ type AccountRecoverySweeperConfig struct {
 // codex-snapshot exhaustion are only recovered after the underlying window or
 // snapshot has reset (detected by re-checking IsSchedulableAt).
 type AccountRecoverySweeper struct {
-	repo ChannelRepo
-	now  func() time.Time
-	cfg  AccountRecoverySweeperConfig
+	repo    ChannelRepo
+	now     func() time.Time
+	cfg     AccountRecoverySweeperConfig
+	prober  RecoveryProber // optional upstream probe (roadmap §1.2)
 }
 
 // NewAccountRecoverySweeper builds an automated account-recovery sweeper.
@@ -257,6 +274,12 @@ func NewAccountRecoverySweeper(repo ChannelRepo, cfg AccountRecoverySweeperConfi
 
 // SetNow overrides the clock (tests).
 func (s *AccountRecoverySweeper) SetNow(f func() time.Time) { s.now = f }
+// SetProber wires an optional upstream recovery probe (roadmap §1.2). When set,
+// the sweeper asks the prober to confirm the account is healthy before clearing
+// unschedulable markers for auto-policy accounts; this prevents re-enabling an
+// account that still fails upstream even though its local TTL has elapsed. Nil
+// (the default) keeps the local-state-only recovery behavior.
+func (s *AccountRecoverySweeper) SetProber(p RecoveryProber) { s.prober = p }
 
 // Run loops until ctx is cancelled, executing SweepOnce every Interval.
 func (s *AccountRecoverySweeper) Run(ctx context.Context) {
@@ -325,10 +348,39 @@ func (s *AccountRecoverySweeper) tryRecover(ctx context.Context, account *Subscr
 		metrics.SubscriptionAccountRecoveriesTotal.WithLabelValues(policy, "waiting").Inc()
 		return
 	}
+	// Pre-recovery probe (roadmap §1.2): when a probe is configured and the
+	// account is auto-policy, confirm upstream health before clearing markers.
+	// probeGate returns true when recovery may proceed (probe ok or no probe),
+	// false when the account must stay blocked (probe negative).
+	probeGate := func(resultLabel string) bool {
+		if s.prober == nil || (policy != RecoveryPolicyAuto && policy != RecoveryPolicyRolling) {
+			return true
+		}
+		ok, perr := s.prober.ProbeRecovery(ctx, account)
+		if perr != nil {
+			// Probe unavailable (unsupported platform / network): fall back to
+			// local-state recovery so we do not strand accounts on platforms the
+			// probe does not cover.
+			metrics.SubscriptionAccountRecoveriesTotal.WithLabelValues(policy, "probe_unavailable").Inc()
+			return true
+		}
+		if !ok {
+			metrics.SubscriptionAccountRecoveriesTotal.WithLabelValues(policy, "probe_negative").Inc()
+			return false
+		}
+		metrics.SubscriptionAccountRecoveriesTotal.WithLabelValues(policy, "probe_confirmed").Inc()
+		_ = resultLabel
+		return true
+	}
+
 	// Only attempt recovery when the account is currently unschedulable.
 	if account.IsSchedulableAt(now) {
-		// Already schedulable: clear stale markers if any remain.
+		// Already schedulable: clear stale markers if any remain, but only
+		// after the probe (when configured) confirms upstream health.
 		if account.RateLimitedUntil > 0 || subscriptionAccountMetadataValue(account.Metadata, metaKeyUnschedulableReason) != "" {
+			if !probeGate("already_schedulable") {
+				return
+			}
 			s.clearMarkers(ctx, account, policy, "already_schedulable")
 		}
 		return
@@ -338,6 +390,9 @@ func (s *AccountRecoverySweeper) tryRecover(ctx context.Context, account *Subscr
 		// TTL-based: only recover once rate_limited_until is in the past.
 		if account.RateLimitedUntil > 0 && now.Unix() < account.RateLimitedUntil {
 			metrics.SubscriptionAccountRecoveriesTotal.WithLabelValues(policy, "waiting").Inc()
+			return
+		}
+		if !probeGate("ttl_elapsed") {
 			return
 		}
 		s.clearMarkers(ctx, account, policy, "ttl_elapsed")

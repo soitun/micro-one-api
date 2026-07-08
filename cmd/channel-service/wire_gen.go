@@ -58,7 +58,9 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	eventBus := events.NewConfiguredEventBus(repo.Redis(), "channel-service")
 	uc := biz.NewChannelUsecase(repo, eventBus)
 	var stopEventBus func()
+	var modelProbe *service.CodexModelProbeService
 	if probe := service.NewCodexModelProbeService(repo); probe != nil {
+		modelProbe = probe
 		eventBus.Subscribe(events.TopicChannelChanged, probe.HandleSubscriptionAccountEvent)
 		probe.SyncExistingCodexAccounts(context.Background(), repo)
 	}
@@ -71,7 +73,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	stopOpsAutomation := startAccountOpsAutomation(uc, repo, notifyConn)
+	stopOpsAutomation := startAccountOpsAutomation(uc, repo, notifyConn, modelProbe)
 	svc := service.NewChannelService(uc)
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
 	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, uc)
@@ -176,7 +178,7 @@ func cleanRecipients(input []string) []string {
 //
 // Returns a cleanup function that cancels the background context and closes
 // the notify connection if one was opened. Safe to call with a nil uc.
-func startAccountOpsAutomation(uc *biz.ChannelUsecase, repo biz.ChannelRepo, existingNotifyConn *grpc.ClientConn) func() {
+func startAccountOpsAutomation(uc *biz.ChannelUsecase, repo biz.ChannelRepo, existingNotifyConn *grpc.ClientConn, modelProbe *service.CodexModelProbeService) func() {
 	var (
 		cancel func()
 		wg     sync.WaitGroup
@@ -217,6 +219,11 @@ func startAccountOpsAutomation(uc *biz.ChannelUsecase, repo biz.ChannelRepo, exi
 			Timeout:  timeout,
 			PageSize: 200,
 		})
+		// Wire the optional pre-recovery probe (roadmap §1.2) so auto-policy
+		// accounts are confirmed healthy upstream before re-enablement.
+		if modelProbe != nil {
+			recovery.SetProber(service.NewRecoveryProbeAdapter(modelProbe))
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

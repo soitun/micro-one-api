@@ -387,6 +387,28 @@ func (s *AdminService) GetPaymentOrderByTradeNo(ctx context.Context, req *billin
 	return s.billingClient.GetPaymentOrderByTradeNo(ctx, req)
 }
 
+// RefundPaymentOrder proxies an admin-initiated refund to the billing service.
+// It is the management path behind the admin "退款" action so refunds no longer
+// require a direct gRPC call into billing-service. The operator id is taken
+// from the admin identity, never from the request body.
+func (s *AdminService) RefundPaymentOrder(ctx context.Context, req *billingv1.RefundPaymentOrderRequest) (*billingv1.RefundPaymentOrderResponse, error) {
+	if s.billingClient == nil {
+		return &billingv1.RefundPaymentOrderResponse{Success: false, ErrorMessage: "billing service unavailable"}, nil
+	}
+	return s.billingClient.RefundPaymentOrder(ctx, req)
+}
+
+// SubscriptionOperationReport proxies the plan-dimension operational report
+// (new/renewal/refund counts, revenue, active/expired/revoked subscriptions,
+// subscription vs balance-fallback usage) so the admin dashboard can render it
+// without a direct gRPC client.
+func (s *AdminService) SubscriptionOperationReport(ctx context.Context, req *billingv1.SubscriptionOperationReportRequest) (*billingv1.SubscriptionOperationReportResponse, error) {
+	if s.billingClient == nil {
+		return &billingv1.SubscriptionOperationReportResponse{Success: false, ErrorMessage: "billing service unavailable"}, nil
+	}
+	return s.billingClient.SubscriptionOperationReport(ctx, req)
+}
+
 // GetAccountSnapshot 获取账户快照
 func (s *AdminService) GetAccountSnapshot(ctx context.Context, req *adminv1.GetAccountSnapshotRequest) (*adminv1.AdminAccountSnapshotResponse, error) {
 	billingReq := &billingv1.GetAccountSnapshotRequest{

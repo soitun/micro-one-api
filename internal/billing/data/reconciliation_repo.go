@@ -219,3 +219,36 @@ func (r *reconciliationRepo) SumOverdraftBalances(ctx context.Context) (int64, e
 	}
 	return total, nil
 }
+
+// SumReversalLedgerAmounts returns the total amount of reversal ledger entries
+// (type=refund, cost_source=reversal). This is the wallet-side view of refunds
+// used by the phase 2.3 reconciliation coverage check.
+func (r *reconciliationRepo) SumReversalLedgerAmounts(ctx context.Context) (int64, error) {
+	if r.data == nil || r.data.db == nil {
+		return 0, nil
+	}
+	var total int64
+	err := r.data.db.WithContext(ctx).Table("billing_ledgers").
+		Select("COALESCE(SUM(amount), 0)").
+		Where("type = ? AND cost_source = ?", biz.LedgerTypeRefund, biz.CostSourceReversal).
+		Scan(&total).Error
+	return total, err
+}
+
+// CountRefundedOrders returns the count and total money_cents of payment orders
+// in the refunded terminal state (phase 2.3 reconciliation coverage).
+func (r *reconciliationRepo) CountRefundedOrders(ctx context.Context) (int64, int64, error) {
+	if r.data == nil || r.data.db == nil {
+		return 0, 0, nil
+	}
+	type agg struct {
+		Count int64 `gorm:"column:cnt"`
+		Total int64 `gorm:"column:total_cents"`
+	}
+	var row agg
+	err := r.data.db.WithContext(ctx).Table("payment_orders").
+		Select("COUNT(*) AS cnt, COALESCE(SUM(money_cents), 0) AS total_cents").
+		Where("status = ?", biz.PaymentOrderStatusRefunded).
+		Scan(&row).Error
+	return row.Count, row.Total, err
+}

@@ -20,6 +20,10 @@ type mockReconRepo struct {
 	channelLedgerUsage   []*ChannelLedgerUsage
 	ledgerConsumeSummary *ConsumeSummary
 	logConsumeSummary    *ConsumeSummary
+	// Phase 2.3 reconciliation coverage fields.
+	refundedOrderCount    int64
+	refundedOrderCents    int64
+	reversalLedgerAmount  int64
 }
 
 func (m *mockReconRepo) ListAllAccounts(ctx context.Context) ([]*Account, error) {
@@ -75,6 +79,14 @@ func (m *mockReconRepo) SumPendingReceivables(ctx context.Context) (int64, error
 
 func (m *mockReconRepo) SumOverdraftBalances(ctx context.Context) (int64, error) {
 	return 0, nil
+}
+
+func (m *mockReconRepo) SumReversalLedgerAmounts(ctx context.Context) (int64, error) {
+	return m.reversalLedgerAmount, nil
+}
+
+func (m *mockReconRepo) CountRefundedOrders(ctx context.Context) (int64, int64, error) {
+	return m.refundedOrderCount, m.refundedOrderCents, nil
 }
 
 func TestRunReconciliation_ExpiredReservations(t *testing.T) {
@@ -217,4 +229,60 @@ func TestRunReconciliation_LogLedgerConsistency(t *testing.T) {
 	assert.Equal(t, int64(1), result.LogInconsistencies[0].LogCount)
 	assert.Equal(t, int64(300), result.LogInconsistencies[0].QuotaDiff)
 	assert.Equal(t, 1, result.DiscrepancyCount())
+}
+
+// TestRunReconciliation_RefundReversalConsistent verifies that when refunded
+// orders and reversal ledger amounts match (quota-normalized), no refund
+// discrepancy is reported (phase 2.3 reconciliation coverage).
+func TestRunReconciliation_RefundReversalConsistent(t *testing.T) {
+	repo := &mockReconRepo{
+		refundedOrderCount:   2,
+		refundedOrderCents:   400000, // 4000 quota
+		reversalLedgerAmount: 4000,   // matches 400000 cents / 100
+	}
+	accountRepo := &mockAccountRepo{}
+	reservationRepo := &mockReservationRepo{reservations: make(map[string]*Reservation)}
+	uc := NewReconciliationUsecase(accountRepo, reservationRepo, repo, nil)
+	res, err := uc.RunReconciliation(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, res.RefundInconsistencies, "no discrepancy when refunds match reversal ledgers")
+}
+
+// TestRunReconciliation_RefundReversalMismatch verifies that a mismatch between
+// refunded order money and the reversal ledger amount is surfaced as a
+// refund-specific discrepancy (phase 2.3 reconciliation coverage).
+func TestRunReconciliation_RefundReversalMismatch(t *testing.T) {
+	repo := &mockReconRepo{
+		refundedOrderCount:   1,
+		refundedOrderCents:   200000, // 2000 quota expected
+		reversalLedgerAmount: 1500,   // 500 quota short -> missing reversal
+	}
+	accountRepo := &mockAccountRepo{}
+	reservationRepo := &mockReservationRepo{reservations: make(map[string]*Reservation)}
+	uc := NewReconciliationUsecase(accountRepo, reservationRepo, repo, nil)
+	res, err := uc.RunReconciliation(context.Background())
+	require.NoError(t, err)
+	require.Len(t, res.RefundInconsistencies, 1, "mismatch must be reported")
+	d := res.RefundInconsistencies[0]
+	assert.Equal(t, int64(1), d.RefundedOrderCount)
+	assert.Equal(t, int64(200000), d.RefundedOrderMoneyCents)
+	assert.Equal(t, int64(1500), d.ReversalLedgerAmount)
+	// MoneyCentsDiff = refunded_cents - reversal_amount*100 = 200000 - 150000
+	assert.Equal(t, int64(50000), d.MoneyCentsDiff)
+}
+
+// TestRunReconciliation_RefundedOrdersWithoutAnyReversal verifies the special
+// case where refunded orders exist but no reversal ledger was written at all.
+func TestRunReconciliation_RefundedOrdersWithoutAnyReversal(t *testing.T) {
+	repo := &mockReconRepo{
+		refundedOrderCount:   3,
+		refundedOrderCents:   600000,
+		reversalLedgerAmount: 0,
+	}
+	accountRepo := &mockAccountRepo{}
+	reservationRepo := &mockReservationRepo{reservations: make(map[string]*Reservation)}
+	uc := NewReconciliationUsecase(accountRepo, reservationRepo, repo, nil)
+	res, err := uc.RunReconciliation(context.Background())
+	require.NoError(t, err)
+	require.Len(t, res.RefundInconsistencies, 1, "missing reversal must be reported")
 }

@@ -49,26 +49,26 @@ type codexModelProbeContentItem struct {
 	Text string `json:"text"`
 }
 
-type codexModelProbeService struct {
+type CodexModelProbeService struct {
 	lookup  subscriptionAccountLookup
 	client  *http.Client
 	mu      sync.Mutex
 	pending map[int64]struct{}
 }
 
-func newCodexModelProbeService(lookup subscriptionAccountLookup) *codexModelProbeService {
-	return &codexModelProbeService{
+func newCodexModelProbeService(lookup subscriptionAccountLookup) *CodexModelProbeService {
+	return &CodexModelProbeService{
 		lookup:  lookup,
 		client:  &http.Client{Timeout: 20 * time.Second},
 		pending: make(map[int64]struct{}),
 	}
 }
 
-func NewCodexModelProbeService(lookup subscriptionAccountLookup) *codexModelProbeService {
+func NewCodexModelProbeService(lookup subscriptionAccountLookup) *CodexModelProbeService {
 	return newCodexModelProbeService(lookup)
 }
 
-func (s *codexModelProbeService) SyncExistingCodexAccounts(ctx context.Context, lister subscriptionAccountLister) {
+func (s *CodexModelProbeService) SyncExistingCodexAccounts(ctx context.Context, lister subscriptionAccountLister) {
 	if s == nil || s.lookup == nil || lister == nil {
 		return
 	}
@@ -95,7 +95,7 @@ func (s *codexModelProbeService) SyncExistingCodexAccounts(ctx context.Context, 
 	}
 }
 
-func (s *codexModelProbeService) HandleSubscriptionAccountEvent(ctx context.Context, event events.Event) error {
+func (s *CodexModelProbeService) HandleSubscriptionAccountEvent(ctx context.Context, event events.Event) error {
 	if s == nil || s.lookup == nil || event.Topic != events.TopicChannelChanged {
 		return nil
 	}
@@ -115,7 +115,7 @@ func (s *codexModelProbeService) HandleSubscriptionAccountEvent(ctx context.Cont
 	return nil
 }
 
-func (s *codexModelProbeService) ProbeCodexModels(ctx context.Context, account *biz.SubscriptionAccount) ([]string, error) {
+func (s *CodexModelProbeService) ProbeCodexModels(ctx context.Context, account *biz.SubscriptionAccount) ([]string, error) {
 	if s == nil {
 		return nil, errors.New("codex model prober is not configured")
 	}
@@ -151,7 +151,7 @@ func (s *codexModelProbeService) ProbeCodexModels(ctx context.Context, account *
 	return supported, nil
 }
 
-func (s *codexModelProbeService) syncCodexModels(ctx context.Context, accountID int64) error {
+func (s *CodexModelProbeService) syncCodexModels(ctx context.Context, accountID int64) error {
 	account, err := s.lookup.FindSubscriptionAccountByID(ctx, accountID)
 	if err != nil {
 		return err
@@ -167,7 +167,7 @@ func (s *codexModelProbeService) syncCodexModels(ctx context.Context, accountID 
 	return nil
 }
 
-func (s *codexModelProbeService) probeModel(ctx context.Context, account *biz.SubscriptionAccount, model string) (bool, error) {
+func (s *CodexModelProbeService) probeModel(ctx context.Context, account *biz.SubscriptionAccount, model string) (bool, error) {
 	payload := codexModelProbeRequest{
 		Model:           model,
 		Input:           []codexModelProbeInputItem{{Role: "user", Content: []codexModelProbeContentItem{{Type: "input_text", Text: "hi"}}}},
@@ -298,7 +298,7 @@ func subscriptionAccountIDFromEventPayload(payload any) int64 {
 	return 0
 }
 
-func (s *codexModelProbeService) markPending(accountID int64) bool {
+func (s *CodexModelProbeService) markPending(accountID int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.pending[accountID]; ok {
@@ -308,8 +308,46 @@ func (s *codexModelProbeService) markPending(accountID int64) bool {
 	return true
 }
 
-func (s *codexModelProbeService) unmarkPending(accountID int64) {
+func (s *CodexModelProbeService) unmarkPending(accountID int64) {
 	s.mu.Lock()
 	delete(s.pending, accountID)
 	s.mu.Unlock()
+}
+
+// RecoveryProbeAdapter adapts the codex model probe into a biz.RecoveryProber.
+// It performs the SAME lightweight 1-token upstream request the model probe
+// uses, but interprets the result for account recovery: if the upstream
+// accepts the request the account is healthy and can be re-enabled; if it
+// rejects it the account is still failing and must not be re-enabled. Only
+// codex accounts are probed; non-codex accounts return an error so the sweeper
+// falls back to its local-state recovery path (roadmap §1.2: "只对可安全探测
+// 的平台执行轻量请求").
+type RecoveryProbeAdapter struct {
+	probe subscriptionAccountModelProber
+}
+
+// NewRecoveryProbeAdapter wraps a codex model prober as a recovery prober.
+func NewRecoveryProbeAdapter(probe subscriptionAccountModelProber) *RecoveryProbeAdapter {
+	return &RecoveryProbeAdapter{probe: probe}
+}
+
+// ProbeRecovery implements biz.RecoveryProber. ok=true means the upstream
+// accepted a lightweight request (account is healthy); ok=false means the
+// upstream still rejects the account; err!=nil means the probe does not apply
+// to this platform or could not run, so the sweeper falls back to local state.
+func (a *RecoveryProbeAdapter) ProbeRecovery(ctx context.Context, account *biz.SubscriptionAccount) (bool, error) {
+	if a == nil || a.probe == nil || account == nil {
+		return false, errors.New("recovery probe not configured")
+	}
+	// Only codex accounts are safely probeable today. Other platforms return an
+	// error so the sweeper falls back to local-state recovery.
+	if strings.ToLower(strings.TrimSpace(account.Platform)) != "codex" {
+		return false, fmt.Errorf("platform %q is not probeable for recovery", account.Platform)
+	}
+	// A successful model probe means the access token still works and the
+	// upstream is accepting requests, i.e. the account has recovered.
+	if _, err := a.probe.ProbeCodexModels(ctx, account); err != nil {
+		return false, nil
+	}
+	return true, nil
 }

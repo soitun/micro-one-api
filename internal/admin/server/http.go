@@ -81,6 +81,17 @@ func newAdminGuard(svc *service.AdminService) func(http.HandlerFunc) http.Handle
 	}
 }
 
+// adminOperatorIDFromRequest returns the authenticated admin's user id, which
+// newAdminGuard stamps onto the X-Operator-User-Id header after validating the
+// bearer token. Admin-only handlers use it so audit fields (e.g. the refund
+// operator id) reflect the real caller instead of a client-supplied value.
+func adminOperatorIDFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.Header.Get("X-Operator-User-Id"))
+}
+
 // NewHTTPServer wires HTTP transport for admin-api.
 //
 // Optional arguments are kept for backwards-compatible tests and older wire
@@ -310,6 +321,11 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	srv.HandleFunc("/api/v1/admin/subscriptions/assign", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleAssignSubscription(w, r, svc)
 	}))
+	// Subscription change (phase 2.4): upgrade/downgrade the user's active
+	// subscription. The operator id is the admin caller.
+	srv.HandleFunc("/api/v1/admin/subscriptions/change", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleChangeSubscription(w, r, svc)
+	}))
 	srv.HandlePrefix("/api/v1/admin/subscriptions/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleSubscriptionByID(w, r, svc)
 	}))
@@ -446,6 +462,18 @@ func NewHTTPServer(addr string, svc *service.AdminService, options ...string) *k
 	}))
 	srv.HandlePrefix("/api/payment/orders/", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handlePaymentOrderByTradeNo(w, r, svc)
+	}))
+	// Admin-initiated refund (phase 2.3 management path). POST only; the
+	// trade_no identifies the order and the body carries reason/policy. The
+	// operator id is taken from the admin token, never trusted from the body.
+	srv.HandleFunc("/api/v1/admin/payments/refund", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleRefundPaymentOrder(w, r, svc)
+	}))
+	// Subscription operational report (phase 2.5): plan-dimension aggregation
+	// of new/renewal/refund counts, revenue, active/expired/revoked
+	// subscriptions and subscription vs balance-fallback usage.
+	srv.HandleFunc("/api/v1/admin/subscriptions/operation-report", adminAuth(func(w http.ResponseWriter, r *http.Request) {
+		handleSubscriptionOperationReport(w, r, svc)
 	}))
 	srv.HandleFunc("/api/channel/test", adminAuth(func(w http.ResponseWriter, r *http.Request) {
 		handleTestChannels(w, r, svc)

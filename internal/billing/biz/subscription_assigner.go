@@ -93,7 +93,7 @@ func (a *paymentSubscriptionAssigner) assignGroup(ctx context.Context, order *Pa
 		"payment_trade_no":  order.TradeNo,
 		"provider_trade_no": order.ProviderTradeNo,
 	})
-	_, _, err = a.subscriptions.AssignOrExtend(ctx, &subscriptionbiz.AssignSubscriptionRequest{
+	sub, _, err := a.subscriptions.AssignOrExtend(ctx, &subscriptionbiz.AssignSubscriptionRequest{
 		UserID:           userID,
 		GroupID:          order.GroupID,
 		SubscriptionName: name,
@@ -101,6 +101,13 @@ func (a *paymentSubscriptionAssigner) assignGroup(ctx context.Context, order *Pa
 		ExpiresAt:        now + int64(group.DurationDays)*subscriptionSecondsPerDay,
 		Metadata:         string(metadata),
 	})
+	if err == nil && sub != nil {
+		// Stamp the granted subscription id onto the order so refunds can
+		// resolve the exact subscription deterministically (phase 2.3
+		// traceability) instead of falling back to the user's current
+		// active subscription.
+		order.SubscriptionID = sub.ID
+	}
 	return err
 }
 
@@ -154,7 +161,7 @@ func (a *paymentSubscriptionAssigner) assignPlan(ctx context.Context, order *Pay
 		"plan_id":           strconv.FormatInt(plan.ID, 10),
 		"plan_name":         plan.Name,
 	})
-	_, _, err = a.subscriptions.AssignOrExtend(ctx, &subscriptionbiz.AssignSubscriptionRequest{
+	sub, _, err := a.subscriptions.AssignOrExtend(ctx, &subscriptionbiz.AssignSubscriptionRequest{
 		UserID:           userID,
 		GroupID:          plan.GroupID,
 		SubscriptionName: name,
@@ -162,6 +169,10 @@ func (a *paymentSubscriptionAssigner) assignPlan(ctx context.Context, order *Pay
 		ExpiresAt:        expiresAt,
 		Metadata:         string(metadata),
 	})
+	if err == nil && sub != nil {
+		// Stamp the granted subscription id onto the order (phase 2.3).
+		order.SubscriptionID = sub.ID
+	}
 	return err
 }
 
@@ -199,7 +210,7 @@ func (a *paymentSubscriptionAssigner) assignFromSnapshot(ctx context.Context, or
 		"plan_name":         snap.Name,
 		"plan_snapshot":     "true",
 	})
-	_, _, err = a.subscriptions.AssignOrExtend(ctx, &subscriptionbiz.AssignSubscriptionRequest{
+	sub, _, err := a.subscriptions.AssignOrExtend(ctx, &subscriptionbiz.AssignSubscriptionRequest{
 		UserID:           userID,
 		GroupID:          snap.GroupID,
 		SubscriptionName: name,
@@ -207,5 +218,9 @@ func (a *paymentSubscriptionAssigner) assignFromSnapshot(ctx context.Context, or
 		ExpiresAt:        expiresAt,
 		Metadata:         string(metadata),
 	})
+	if err == nil && sub != nil {
+		// Stamp the granted subscription id onto the order (phase 2.3).
+		order.SubscriptionID = sub.ID
+	}
 	return err
 }

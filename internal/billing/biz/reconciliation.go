@@ -39,6 +39,14 @@ type ReconciliationRepo interface {
 	// reconciliation to verify the receivables mirror and the wallet
 	// state are aligned.
 	SumOverdraftBalances(ctx context.Context) (int64, error)
+	// SumReversalLedgerAmounts returns the total amount of reversal ledger
+	// entries (type=refund, cost_source=reversal) — the wallet-side view of
+	// refunds. Used by reconciliation to verify every refunded order has a
+	// matching reversal ledger and vice versa (phase 2.3).
+	SumReversalLedgerAmounts(ctx context.Context) (int64, error)
+	// CountRefundedOrders returns the count and total money_cents of orders
+	// in the refunded terminal state (phase 2.3 reconciliation coverage).
+	CountRefundedOrders(ctx context.Context) (count int64, totalMoneyCents int64, err error)
 }
 
 // ReconciliationRunStore persists historical reconciliation runs so admins can review them.
@@ -58,6 +66,7 @@ type ReconciliationResult struct {
 	LogInconsistencies     []LogInconsistency          `json:"log_inconsistencies,omitempty"`
 	SubscriptionInconsistencies []SubscriptionInconsistency `json:"subscription_inconsistencies,omitempty"`
 	ReceivableInconsistencies    []ReceivableInconsistency    `json:"receivable_inconsistencies,omitempty"`
+	RefundInconsistencies        []RefundInconsistency        `json:"refund_inconsistencies,omitempty"`
 	TotalAccounts          int                         `json:"total_accounts"`
 	TotalChannels          int                         `json:"total_channels"`
 	TotalReservations      int                         `json:"total_reservations"`
@@ -70,6 +79,7 @@ const (
 	ReconciliationDiscrepancyTypeLog           = "ledger_log_consume"
 	ReconciliationDiscrepancyTypeSubscription  = "subscription_absorption"
 	ReconciliationDiscrepancyTypeReceivable    = "receivable_mirror"
+	ReconciliationDiscrepancyTypeRefund       = "refund_reversal"
 )
 
 func (r *ReconciliationResult) DiscrepancyCount() int {
@@ -80,7 +90,8 @@ func (r *ReconciliationResult) DiscrepancyCount() int {
 		len(r.ChannelInconsistencies) +
 		len(r.LogInconsistencies) +
 		len(r.SubscriptionInconsistencies) +
-		len(r.ReceivableInconsistencies)
+		len(r.ReceivableInconsistencies) +
+		len(r.RefundInconsistencies)
 }
 
 // AccountInconsistency describes a quota mismatch for a single account.
@@ -130,6 +141,22 @@ type ReceivableInconsistency struct {
 	PendingReceivableQuota int64  `json:"pending_receivable_quota"`
 	OverdraftQuota        int64  `json:"overdraft_quota"`
 	Difference            int64  `json:"difference_quota"`
+}
+
+// RefundInconsistency captures a mismatch between refunded payment orders and
+// the reversal ledger entries (phase 2.3 reconciliation coverage). Every
+// refunded order must have exactly one type=refund, cost_source=reversal ledger
+// entry whose amount equals the order's purchase price; a count or amount
+// mismatch signals a missed or duplicate refund.
+type RefundInconsistency struct {
+	RefundedOrderCount    int64 `json:"refunded_order_count"`
+	RefundedOrderMoneyCents int64 `json:"refunded_order_money_cents"`
+	ReversalLedgerCount   int64 `json:"reversal_ledger_count"`
+	ReversalLedgerAmount  int64 `json:"reversal_ledger_amount"`
+	// MoneyCentsDiff is refunded_order_money_cents - reversal_ledger_amount
+	// (in cents). Positive: refunded orders without a matching ledger; negative:
+	// reversal ledgers without a matching order.
+	MoneyCentsDiff int64 `json:"money_cents_diff"`
 }
 
 // ChannelLedgerUsage is the local ledger usage/cost summary for a channel.
@@ -208,6 +235,7 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeLog).Add(float64(len(result.LogInconsistencies)))
 			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeSubscription).Add(float64(len(result.SubscriptionInconsistencies)))
 			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeReceivable).Add(float64(len(result.ReceivableInconsistencies)))
+			metrics.ReconciliationDiscrepanciesTotal.WithLabelValues(ReconciliationDiscrepancyTypeRefund).Add(float64(len(result.RefundInconsistencies)))
 		}
 	}()
 
@@ -365,6 +393,36 @@ func (uc *ReconciliationUsecase) RunReconciliation(ctx context.Context) (result 
 				})
 			}
 		}
+	}
+
+	// Step 7 (new): refund/reversal coverage. Every refunded payment order
+	// must have a matching reversal ledger entry (type=refund,
+	// cost_source=reversal) and vice versa. The wallet-level check in step 2
+	// implicitly catches the net effect, but this step surfaces a refund-
+	// specific discrepancy so operators can see missed or duplicate refunds
+	// directly (phase 2.3 reconciliation coverage).
+	if refundedCount, refundedCents, rerr := uc.reconRepo.CountRefundedOrders(ctx); rerr == nil {
+		if reversalAmount, lerr := uc.reconRepo.SumReversalLedgerAmounts(ctx); lerr == nil {
+			// Reversal ledger amounts are in quota (wallet units); refunded
+			// order money_cents are in cents. Normalize both to quota for
+			// the comparison (the refund ledger amount is quota, refunded
+			// orders' money_cents/100 = quota). Reversal ledger count is not
+			// directly available without an extra query, so we compare the
+			// aggregated amounts: refunded quota should equal reversal amount.
+			refundedQuota := refundedCents / 100
+			if refundedQuota != reversalAmount || refundedCount > 0 && reversalAmount == 0 {
+				result.RefundInconsistencies = append(result.RefundInconsistencies, RefundInconsistency{
+					RefundedOrderCount:      refundedCount,
+					RefundedOrderMoneyCents: refundedCents,
+					ReversalLedgerAmount:    reversalAmount,
+					MoneyCentsDiff:          refundedCents - reversalAmount*100,
+				})
+			}
+		} else {
+			apploggerError(lerr, "sum reversal ledger amounts for reconciliation")
+		}
+	} else {
+		apploggerError(rerr, "count refunded orders for reconciliation")
 	}
 
 	return result, nil

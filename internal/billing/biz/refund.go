@@ -255,6 +255,15 @@ func (uc *RefundUsecase) refundSubscriptionID(ctx context.Context, order *Paymen
 	if order == nil {
 		return 0
 	}
+	// Preferred path: the subscription_id column written by the assigner at
+	// MarkOrderPaid (phase 2.3 traceability). This is deterministic and points
+	// at the exact subscription the order granted, so refunding an old order
+	// after the user bought a new subscription revokes the right one.
+	if order.SubscriptionID > 0 {
+		return order.SubscriptionID
+	}
+	// Legacy fallback: subscription_id encoded in ProviderPayload (orders
+	// fulfilled before this column existed). Kept for backward compatibility.
 	if order.ProviderPayload != "" {
 		var pm map[string]string
 		if json.Unmarshal([]byte(order.ProviderPayload), &pm) == nil {
@@ -263,6 +272,9 @@ func (uc *RefundUsecase) refundSubscriptionID(ctx context.Context, order *Paymen
 			}
 		}
 	}
+	// Last-resort fallback: the user's current active subscription. This is
+	// only reached by very old orders without any traceability link and is
+	// inherently ambiguous if the user has since purchased a new subscription.
 	userID, err := strconv.ParseInt(order.UserID, 10, 64)
 	if err != nil || userID <= 0 || uc.subscriptions == nil {
 		return 0

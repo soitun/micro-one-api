@@ -30,6 +30,7 @@ type PaymentOrder struct {
 	GroupID          int64      `gorm:"column:group_id;type:bigint;default:0"`
 	PlanID           int64      `gorm:"column:plan_id;type:bigint;default:0"`
 	PlanSnapshot     string     `gorm:"column:plan_snapshot;type:text"`
+	SubscriptionID   int64      `gorm:"column:subscription_id;default:0;index:idx_payment_orders_subscription_id"`
 	PaidAt           *time.Time `gorm:"column:paid_at;index"`
 	CreatedAt        time.Time  `gorm:"column:created_at"`
 	UpdatedAt        time.Time  `gorm:"column:updated_at"`
@@ -156,13 +157,19 @@ func (r *paymentRepo) MarkOrderPaid(ctx context.Context, tradeNo, providerTradeN
 		}
 
 		now := time.Now()
-		if err := tx.Model(&PaymentOrder{}).Where("id = ?", po.ID).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"status":             biz.PaymentOrderStatusPaid,
 			"provider_trade_no":  providerTradeNo,
 			"asset_issue_status": biz.PaymentAssetIssueStatusIssued,
 			"paid_at":            now,
 			"updated_at":         now,
-		}).Error; err != nil {
+		}
+		// Persist the subscription_id stamped by the assigner (phase 2.3
+		// traceability) so refunds resolve the exact subscription.
+		if order.SubscriptionID > 0 {
+			updates["subscription_id"] = order.SubscriptionID
+		}
+		if err := tx.Model(&PaymentOrder{}).Where("id = ?", po.ID).Updates(updates).Error; err != nil {
 			return err
 		}
 		po.Status = biz.PaymentOrderStatusPaid
@@ -170,6 +177,9 @@ func (r *paymentRepo) MarkOrderPaid(ctx context.Context, tradeNo, providerTradeN
 		po.AssetIssueStatus = biz.PaymentAssetIssueStatusIssued
 		po.PaidAt = &now
 		po.UpdatedAt = now
+		if order.SubscriptionID > 0 {
+			po.SubscriptionID = order.SubscriptionID
+		}
 		result, err = toBizPaymentOrder(&po)
 		if err != nil {
 			return err
@@ -323,6 +333,7 @@ func toPOPaymentOrder(order *biz.PaymentOrder) (*PaymentOrder, error) {
 		GroupID:          order.GroupID,
 		PlanID:           order.PlanID,
 		PlanSnapshot:     order.PlanSnapshot,
+		SubscriptionID:   order.SubscriptionID,
 		PaidAt:           order.PaidAt,
 		CreatedAt:        order.CreatedAt,
 		UpdatedAt:        order.UpdatedAt,
@@ -351,6 +362,7 @@ func toBizPaymentOrder(po *PaymentOrder) (*biz.PaymentOrder, error) {
 		GroupID:          po.GroupID,
 		PlanID:           po.PlanID,
 		PlanSnapshot:     po.PlanSnapshot,
+		SubscriptionID:   po.SubscriptionID,
 		PaidAt:           po.PaidAt,
 		CreatedAt:        po.CreatedAt,
 		UpdatedAt:        po.UpdatedAt,

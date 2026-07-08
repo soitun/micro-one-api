@@ -309,3 +309,93 @@ func TestErrQuotaResetRunDuplicate_IsDistinct(t *testing.T) {
 		t.Fatalf("ErrQuotaResetRunDuplicate must not collide with ErrSubscriptionAccountNotFound")
 	}
 }
+
+// fakeRecoveryProber is a test double for biz.RecoveryProber.
+type fakeRecoveryProber struct {
+	ok       bool
+	err      error
+	probed   int
+	platform string // last probed platform
+}
+
+func (p *fakeRecoveryProber) ProbeRecovery(ctx context.Context, account *SubscriptionAccount) (bool, error) {
+	p.probed++
+	if account != nil {
+		p.platform = account.Platform
+	}
+	return p.ok, p.err
+}
+
+// TestAccountRecoverySweeper_ProbeConfirmedRecovers verifies that when a
+// recovery probe is configured and returns ok=true, an auto-policy account
+// past its TTL is recovered via the probe-confirmed path (roadmap §1.2).
+func TestAccountRecoverySweeper_ProbeConfirmedRecovers(t *testing.T) {
+	now := time.Unix(1000, 0)
+	acc := autoBlockedAccount(1, 500, `{"recovery_policy":"auto","unschedulable_reason":"upstream 429"}`)
+	acc.Platform = "codex"
+	repo := newSweeperRepo(acc)
+	probe := &fakeRecoveryProber{ok: true}
+
+	s := NewAccountRecoverySweeper(repo, AccountRecoverySweeperConfig{Enabled: true, PageSize: 10})
+	s.SetNow(func() time.Time { return now })
+	s.SetProber(probe)
+	if err := s.SweepOnce(context.Background()); err != nil {
+		t.Fatalf("SweepOnce() error = %v", err)
+	}
+	if probe.probed != 1 {
+		t.Fatalf("probe called %d times, want 1", probe.probed)
+	}
+	if acc.RateLimitedUntil != 0 {
+		t.Fatalf("RateLimitedUntil = %v, want 0 (probe-confirmed recovery)", acc.RateLimitedUntil)
+	}
+}
+
+// TestAccountRecoverySweeper_ProbeNegativeHoldsRecovery verifies that when the
+// probe returns ok=false (upstream still failing), the account is NOT recovered
+// even though its local TTL elapsed (roadmap §1.2).
+func TestAccountRecoverySweeper_ProbeNegativeHoldsRecovery(t *testing.T) {
+	now := time.Unix(1000, 0)
+	acc := autoBlockedAccount(1, 500, `{"recovery_policy":"auto","unschedulable_reason":"upstream 429"}`)
+	acc.Platform = "codex"
+	repo := newSweeperRepo(acc)
+	probe := &fakeRecoveryProber{ok: false}
+
+	s := NewAccountRecoverySweeper(repo, AccountRecoverySweeperConfig{Enabled: true, PageSize: 10})
+	s.SetNow(func() time.Time { return now })
+	s.SetProber(probe)
+	if err := s.SweepOnce(context.Background()); err != nil {
+		t.Fatalf("SweepOnce() error = %v", err)
+	}
+	if probe.probed != 1 {
+		t.Fatalf("probe called %d times, want 1", probe.probed)
+	}
+	if acc.RateLimitedUntil == 0 {
+		t.Fatalf("RateLimitedUntil cleared despite negative probe; account still failing upstream must stay blocked")
+	}
+}
+
+// TestAccountRecoverySweeper_ProbeUnavailableFallsBackToLocal verifies that
+// when the probe returns an error (e.g. unsupported platform), the sweeper falls
+// back to its local-state recovery path instead of stranding the account
+// (roadmap §1.2: probe only applies to safely-probeable platforms).
+func TestAccountRecoverySweeper_ProbeUnavailableFallsBackToLocal(t *testing.T) {
+	now := time.Unix(1000, 0)
+	acc := autoBlockedAccount(1, 500, `{"recovery_policy":"auto","unschedulable_reason":"upstream 429"}`)
+	acc.Platform = "claude" // not probeable -> adapter returns error
+	repo := newSweeperRepo(acc)
+	probe := &fakeRecoveryProber{err: errors.New("platform claude is not probeable")}
+
+	s := NewAccountRecoverySweeper(repo, AccountRecoverySweeperConfig{Enabled: true, PageSize: 10})
+	s.SetNow(func() time.Time { return now })
+	s.SetProber(probe)
+	if err := s.SweepOnce(context.Background()); err != nil {
+		t.Fatalf("SweepOnce() error = %v", err)
+	}
+	if probe.probed != 1 {
+		t.Fatalf("probe called %d times, want 1", probe.probed)
+	}
+	// Fallback: local recovery path clears the markers.
+	if acc.RateLimitedUntil != 0 {
+		t.Fatalf("RateLimitedUntil = %v, want 0 (fallback local recovery)", acc.RateLimitedUntil)
+	}
+}

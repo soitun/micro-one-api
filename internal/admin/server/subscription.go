@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"micro-one-api/internal/admin/service"
+	billingv1 "micro-one-api/api/billing/v1"
 	subscriptionbiz "micro-one-api/internal/subscription/biz"
 )
 
@@ -540,4 +541,137 @@ func planResponse(plan *subscriptionbiz.SubscriptionPlan) subscriptionPlanDTO {
 		CreatedAt:     plan.CreatedAt,
 		UpdatedAt:     plan.UpdatedAt,
 	}
+}
+
+
+// handleRefundPaymentOrder lets an admin reverse a paid subscription order. The
+// operator id is taken from the admin identity (not the body); trade_no,
+// reason and policy come from the request body. Maps to billing-service
+// RefundPaymentOrder (phase 2.3 management path).
+func handleRefundPaymentOrder(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req struct {
+		TradeNo string `json:"trade_no"`
+		Reason  string `json:"reason"`
+		Policy  string `json:"policy"` // revoke / shorten / keep (empty = revoke)
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.TradeNo == "" {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "trade_no is required", nil))
+		return
+	}
+	resp, err := svc.RefundPaymentOrder(r.Context(), &billingv1.RefundPaymentOrderRequest{
+		TradeNo:    req.TradeNo,
+		Reason:     req.Reason,
+		Policy:     req.Policy,
+		OperatorId: adminOperatorIDFromRequest(r),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse(false, err.Error(), nil))
+		return
+	}
+	if !resp.GetSuccess() {
+		writeJSON(w, http.StatusOK, apiResponse(false, resp.GetErrorMessage(), nil))
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{
+		"refunded_quota":      resp.GetRefundedQuota(),
+		"balance_after":       resp.GetBalanceAfter(),
+		"subscription_id":     resp.GetSubscriptionId(),
+		"subscription_action": resp.GetSubscriptionAction(),
+		"ledger_dedupe_key":   resp.GetLedgerDedupeKey(),
+	}))
+}
+
+// handleSubscriptionOperationReport returns the plan-dimension operational
+// report for the admin dashboard (phase 2.5). All filters are optional.
+func handleSubscriptionOperationReport(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	resp, err := svc.SubscriptionOperationReport(r.Context(), &billingv1.SubscriptionOperationReportRequest{
+		StartTime: getQueryInt64(r, "start_time", 0),
+		EndTime:   getQueryInt64(r, "end_time", 0),
+		PlanId:    getQueryInt64(r, "plan_id", 0),
+		GroupId:   getQueryInt64(r, "group_id", 0),
+		UserId:    r.URL.Query().Get("user_id"),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiResponse(false, err.Error(), nil))
+		return
+	}
+	if !resp.GetSuccess() {
+		writeJSON(w, http.StatusOK, apiResponse(false, resp.GetErrorMessage(), nil))
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{
+		"rows":                  resp.GetRows(),
+		"total_revenue_quota":   resp.GetTotalRevenueQuota(),
+		"total_refunded_quota":  resp.GetTotalRefundedQuota(),
+	}))
+}
+
+// handleChangeSubscription upgrades or downgrades a user's active subscription
+// (phase 2.4). POST only. The body carries the from-subscription, target
+// plan/group and the prices needed to infer the policy (immediate upgrade vs
+// next-cycle downgrade). The operator id is taken from the admin identity.
+func handleChangeSubscription(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req struct {
+		UserID             int64  `json:"user_id"`
+		FromSubscriptionID int64  `json:"from_subscription_id"`
+		ToPlanID           int64  `json:"to_plan_id"`
+		ToGroupID          int64  `json:"to_group_id"`
+		NewPlanName        string `json:"new_plan_name"`
+		NewPriceQuota      int64  `json:"new_price_quota"`
+		OldPriceQuota      int64  `json:"old_price_quota"`
+		Policy             string `json:"policy"` // immediate / next_cycle (empty = infer from price)
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.UserID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "user_id is required", nil))
+		return
+	}
+	if req.FromSubscriptionID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "from_subscription_id is required", nil))
+		return
+	}
+	if req.ToGroupID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "to_group_id is required", nil))
+		return
+	}
+	res, err := svc.ChangeSubscription(r.Context(), subscriptionbiz.ChangeRequest{
+		UserID:             req.UserID,
+		FromSubscriptionID: req.FromSubscriptionID,
+		ToPlanID:           req.ToPlanID,
+		ToGroupID:          req.ToGroupID,
+		NewPlanName:        req.NewPlanName,
+		NewPriceQuota:      req.NewPriceQuota,
+		OldPriceQuota:      req.OldPriceQuota,
+		Policy:             req.Policy,
+		Operator:           adminOperatorIDFromRequest(r),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, apiResponse(false, err.Error(), nil))
+		return
+	}
+	writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{
+		"subscription_id":       res.SubscriptionID,
+		"applied":               res.Applied,
+		"charged_quota":         res.ChargedQuota,
+		"new_group_id":          res.NewGroupID,
+		"new_subscription_name": res.NewSubscriptionName,
+		"policy":                res.Policy,
+	}))
 }

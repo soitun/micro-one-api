@@ -54,6 +54,14 @@ func setupOperationReportDB(t *testing.T) *gorm.DB {
 			created_at DATETIME
 		)
 	`).Error)
+	require.NoError(t, db.Exec(`
+		CREATE TABLE subscription_plans (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT,
+			group_id INTEGER,
+			for_sale INTEGER DEFAULT 1
+		)
+	`).Error)
 	return db
 }
 
@@ -122,4 +130,46 @@ func TestOperationReportRepo_AttributesSubscriptionsAndUsageByPaymentTradeNo(t *
 	require.Equal(t, int64(20), balanceFallback[7])
 	require.Equal(t, int64(200), subUsage[8])
 	require.Equal(t, int64(40), balanceFallback[8])
+}
+
+// TestOperationReportRepo_PlanNameResolvedFromPlansTable verifies the report
+// resolves the plan name from subscription_plans instead of emitting "plan-%d"
+// (phase 2.5 low-risk improvement).
+func TestOperationReportRepo_PlanNameResolvedFromPlansTable(t *testing.T) {
+	db := setupOperationReportDB(t)
+	repo := NewOperationReportRepo(&Data{db: db})
+	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+
+	require.NoError(t, db.Exec(`INSERT INTO subscription_plans (id, name, group_id) VALUES (7, 'Pro Monthly', 3)`).Error)
+	require.NoError(t, db.Exec(`
+		INSERT INTO payment_orders (user_id, trade_no, asset_type, status, plan_id, group_id, money_cents, created_at) VALUES
+		('1', 'o1', 'subscription', 'paid', 7, 3, 10000, ?)
+	`, start.Add(time.Hour)).Error)
+
+	rows, err := repo.AggregatePaymentOrdersByPlan(context.Background(), start, end, 0, 0, "")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "Pro Monthly", rows[0].PlanName, "plan name should come from subscription_plans.name")
+}
+
+// TestOperationReportRepo_PlanNameFallsBackWhenPlanDeleted verifies that when
+// the plan row has been deleted, the report falls back to "plan-%d" rather than
+// returning a blank name.
+func TestOperationReportRepo_PlanNameFallsBackWhenPlanDeleted(t *testing.T) {
+	db := setupOperationReportDB(t)
+	repo := NewOperationReportRepo(&Data{db: db})
+	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+
+	// No subscription_plans row for plan 9 (deleted).
+	require.NoError(t, db.Exec(`
+		INSERT INTO payment_orders (user_id, trade_no, asset_type, status, plan_id, group_id, money_cents, created_at) VALUES
+		('1', 'o2', 'subscription', 'paid', 9, 3, 10000, ?)
+	`, start.Add(time.Hour)).Error)
+
+	rows, err := repo.AggregatePaymentOrdersByPlan(context.Background(), start, end, 0, 0, "")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "plan-9", rows[0].PlanName, "deleted plan should fall back to plan-%%d")
 }

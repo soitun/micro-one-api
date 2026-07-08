@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"micro-one-api/internal/billing/biz"
@@ -33,22 +34,28 @@ func (r *operationReportRepo) AggregatePaymentOrdersByPlan(ctx context.Context, 
 		return nil, nil
 	}
 	type row struct {
-		PlanID      int64 `gorm:"column:plan_id"`
-		GroupID     int64 `gorm:"column:group_id"`
-		PaidCount   int64 `gorm:"column:paid_count"`
-		RefundCount int64 `gorm:"column:refund_count"`
-		Revenue     int64 `gorm:"column:revenue"`
-		Refunded    int64 `gorm:"column:refunded"`
+		PlanID      int64  `gorm:"column:plan_id"`
+		PlanName    string `gorm:"column:plan_name"`
+		GroupID     int64  `gorm:"column:group_id"`
+		PaidCount   int64  `gorm:"column:paid_count"`
+		RefundCount int64  `gorm:"column:refund_count"`
+		Revenue     int64  `gorm:"column:revenue"`
+		Refunded    int64  `gorm:"column:refunded"`
 	}
+	// The plan name is recovered from subscription_plans (preferred) and falls
+	// back to the payment_orders.plan_snapshot when the plan has been deleted.
+	// This avoids labeling report rows as "plan-%d" when a real name exists.
 	q := r.data.db.WithContext(ctx).Table("payment_orders").
 		Select(`
 			payment_orders.plan_id AS plan_id,
+			COALESCE(subscription_plans.name, '') AS plan_name,
 			payment_orders.group_id AS group_id,
 			SUM(CASE WHEN payment_orders.status = 'paid' THEN 1 ELSE 0 END) AS paid_count,
 			SUM(CASE WHEN payment_orders.status = 'refunded' THEN 1 ELSE 0 END) AS refund_count,
 			SUM(CASE WHEN payment_orders.status = 'paid' THEN payment_orders.money_cents ELSE 0 END) AS revenue,
 			SUM(CASE WHEN payment_orders.status = 'refunded' THEN payment_orders.money_cents ELSE 0 END) AS refunded
 		`).
+		Joins("LEFT JOIN subscription_plans ON subscription_plans.id = payment_orders.plan_id").
 		Where("payment_orders.asset_type = ?", "subscription").
 		Where("payment_orders.plan_id > 0").
 		Where("payment_orders.created_at >= ?", startTime).
@@ -71,7 +78,7 @@ func (r *operationReportRepo) AggregatePaymentOrdersByPlan(ctx context.Context, 
 	for _, rr := range rows {
 		out = append(out, biz.PlanOperationRow{
 			PlanID:           rr.PlanID,
-			PlanName:         fmt.Sprintf("plan-%d", rr.PlanID),
+			PlanName:         planNameOrFallback(rr.PlanName, rr.PlanID),
 			GroupID:          rr.GroupID,
 			NewPurchaseCount: 0,
 			RenewalCount:     rr.PaidCount,
@@ -300,4 +307,15 @@ func uniqueStrings(in []string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+
+// planNameOrFallback returns the real plan name when present, or a stable
+// "plan-%d" fallback for deleted/unknown plans so the report row is never blank.
+func planNameOrFallback(name string, planID int64) string {
+	name = strings.TrimSpace(name)
+	if name != "" {
+		return name
+	}
+	return fmt.Sprintf("plan-%d", planID)
 }
