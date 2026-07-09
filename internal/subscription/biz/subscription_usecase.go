@@ -366,9 +366,9 @@ func (uc *SubscriptionUsecase) GetProgress(ctx context.Context, userID int64) (*
 		ExpiresAt:        rolled.ExpiresAt,
 		GroupID:          rolled.GroupID,
 		SubscriptionName: groupName,
-		// NextRefresh is the moment the current window ends and usage resets. It
-		// is derived from the window's start + period; for a freshly-rolled
-		// window (start == now) that is now + period.
+		// NextRefresh is the moment the current window ends and usage resets.
+		// Windows are anchored to starts_at, so daily/weekly/monthly refresh
+		// countdowns stay aligned to the subscription success time.
 		DailyUsed:        makeDimension(rolled.DailyUsageUSD, dailyLimit, rolled.DailyWindowStart+int64(quotaDailyWindow.Seconds())),
 		WeeklyUsed:       makeDimension(rolled.WeeklyUsageUSD, weeklyLimit, rolled.WeeklyWindowStart+int64(quotaWeeklyWindow.Seconds())),
 		MonthlyUsed:      makeDimension(rolled.MonthlyUsageUSD, monthlyLimit, rolled.MonthlyWindowStart+int64(quotaMonthlyWindow.Seconds())),
@@ -397,28 +397,41 @@ func RollUsageWindows(subscription *UserSubscription, now int64) *UserSubscripti
 		return nil
 	}
 	cloned := *subscription
-	if cloned.DailyWindowStart == 0 {
-		cloned.DailyWindowStart = now
-	}
-	if cloned.WeeklyWindowStart == 0 {
-		cloned.WeeklyWindowStart = now
-	}
-	if cloned.MonthlyWindowStart == 0 {
-		cloned.MonthlyWindowStart = now
-	}
-	if now-cloned.DailyWindowStart >= int64(quotaDailyWindow.Seconds()) {
-		cloned.DailyUsageUSD = 0
-		cloned.DailyWindowStart = now
-	}
-	if now-cloned.WeeklyWindowStart >= int64(quotaWeeklyWindow.Seconds()) {
-		cloned.WeeklyUsageUSD = 0
-		cloned.WeeklyWindowStart = now
-	}
-	if now-cloned.MonthlyWindowStart >= int64(quotaMonthlyWindow.Seconds()) {
-		cloned.MonthlyUsageUSD = 0
-		cloned.MonthlyWindowStart = now
-	}
+	cloned.DailyUsageUSD, cloned.DailyWindowStart = rollUsageWindow(cloned.DailyUsageUSD, cloned.DailyWindowStart, cloned.StartsAt, now, quotaDailyWindow)
+	cloned.WeeklyUsageUSD, cloned.WeeklyWindowStart = rollUsageWindow(cloned.WeeklyUsageUSD, cloned.WeeklyWindowStart, cloned.StartsAt, now, quotaWeeklyWindow)
+	cloned.MonthlyUsageUSD, cloned.MonthlyWindowStart = rollUsageWindow(cloned.MonthlyUsageUSD, cloned.MonthlyWindowStart, cloned.StartsAt, now, quotaMonthlyWindow)
 	return &cloned
+}
+
+func rollUsageWindow(used float64, windowStart, anchor, now int64, period time.Duration) (float64, int64) {
+	periodSec := int64(period.Seconds())
+	if periodSec <= 0 {
+		return used, windowStart
+	}
+	if anchor <= 0 {
+		anchor = windowStart
+	}
+	if anchor <= 0 {
+		anchor = now
+	}
+	currentStart := alignedWindowStart(anchor, now, periodSec)
+	if windowStart <= 0 {
+		return used, currentStart
+	}
+	if windowStart < currentStart {
+		return 0, currentStart
+	}
+	if windowStart != currentStart {
+		return used, currentStart
+	}
+	return used, windowStart
+}
+
+func alignedWindowStart(anchor, now, periodSec int64) int64 {
+	if now <= anchor {
+		return anchor
+	}
+	return anchor + ((now-anchor)/periodSec)*periodSec
 }
 
 func checkQuotaAgainstGroup(subscription *UserSubscription, group *SubscriptionGroup, estimatedCost float64) *QuotaCheckResult {

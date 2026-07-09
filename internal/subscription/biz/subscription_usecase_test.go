@@ -502,10 +502,11 @@ func TestSubscriptionUsecase_GetProgressRollsWindowAndResetsNextRefresh(t *testi
 	if progress.DailyUsed.Used != 0 {
 		t.Fatalf("daily used = %v, want 0 after roll", progress.DailyUsed.Used)
 	}
-	// After rolling, the new window starts at nowSec, so next_refresh = nowSec + 24h.
+	// After rolling, the new window stays aligned to the subscription start
+	// anchor, so next_refresh is t0 + 48h rather than now + 24h.
 	dailySec := int64(quotaDailyWindow.Seconds())
-	if progress.DailyUsed.NextRefresh != nowSec+dailySec {
-		t.Fatalf("daily next_refresh = %d, want %d (rolled window)", progress.DailyUsed.NextRefresh, nowSec+dailySec)
+	if progress.DailyUsed.NextRefresh != t0+2*dailySec {
+		t.Fatalf("daily next_refresh = %d, want %d (anchored rolled window)", progress.DailyUsed.NextRefresh, t0+2*dailySec)
 	}
 	// Weekly window did NOT roll (25h < 7d); usage persists and next_refresh is
 	// still the original window_start (t0) + 7d.

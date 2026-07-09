@@ -34,7 +34,6 @@ describe('SubscriptionsPage', () => {
             daily_used: { used: 5, limit: 10, remaining: 5, next_refresh: 1800000000 },
             monthly_used: { used: 20, limit: 100, remaining: 80, next_refresh: 1800000000 },
             weekly_used: { used: 2, limit: null, remaining: 0 },
-            monthly_used: { used: 20, limit: 100, remaining: 80 },
             remaining_seconds: 86400 * 3,
           },
         }),
