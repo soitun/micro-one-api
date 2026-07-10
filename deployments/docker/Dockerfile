@@ -1,10 +1,10 @@
 # Multi-stage build for security
 # Usage:
 #   docker build --build-arg SERVICE_NAME=relay-gateway \
-#                --build-arg SERVICE_PATH=./app/relay/interface/cmd/relay-gateway \
+#                --build-arg SERVICE_PATH=./cmd/relay-gateway \
 #                -f Dockerfile ../..
 ARG SERVICE_NAME=relay-gateway
-ARG SERVICE_PATH=./app/relay/interface/cmd/relay-gateway
+ARG SERVICE_PATH=./cmd/relay-gateway
 
 # ---------------------------------------------------------------------------
 # Stage 1: web-builder
@@ -87,9 +87,9 @@ RUN make proto-tools && make proto
 COPY --from=web-builder /web/dist /tmp/web-dist
 ARG SERVICE_NAME
 RUN if [ "$SERVICE_NAME" = "admin-api" ]; then \
-      rm -rf /app/app/admin/admin/internal/server/static/web && \
-      mkdir -p /app/app/admin/admin/internal/server/static/web && \
-      cp -a /tmp/web-dist/. /app/app/admin/admin/internal/server/static/web/; \
+      rm -rf /app/app/admin/internal/server/static/web && \
+      mkdir -p /app/app/admin/internal/server/static/web && \
+      cp -a /tmp/web-dist/. /app/app/admin/internal/server/static/web/; \
     fi
 
 # CGO is required by github.com/mattn/go-sqlite3 so the lite deployment

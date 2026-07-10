@@ -41,16 +41,31 @@ log_step() {
 # Map service name to build path
 service_path() {
     case "$1" in
-        relay-gateway)      echo "./app/relay/interface/cmd/relay-gateway" ;;
-        admin-api)          echo "./app/admin/admin/cmd/admin-api" ;;
-        identity-service)   echo "./app/identity/service/cmd/identity-service" ;;
-        channel-service)    echo "./app/channel/service/cmd/channel-service" ;;
-        billing-service)    echo "./app/billing/service/cmd/billing-service" ;;
-        config-service)     echo "./app/config/service/cmd/config-service" ;;
-        log-service)        echo "./app/log/service/cmd/log-service" ;;
-        monitor-worker)     echo "./app/monitor/job/cmd/monitor-worker" ;;
-        notify-worker)      echo "./app/notify/job/cmd/notify-worker" ;;
+        relay-gateway)      echo "./cmd/relay-gateway" ;;
+        admin-api)          echo "./app/admin/cmd/admin" ;;
+        identity-service)   echo "./app/identity/cmd/identity" ;;
+        channel-service)    echo "./app/channel/cmd/channel" ;;
+        billing-service)    echo "./app/billing/cmd/billing" ;;
+        config-service)     echo "./app/config/cmd/config" ;;
+        log-service)        echo "./app/log/cmd/log" ;;
+        monitor-worker)     echo "./app/monitor/cmd/monitor" ;;
+        notify-worker)      echo "./app/notify/cmd/notify" ;;
         *)                  echo "" ;;
+    esac
+}
+
+service_dockerfile() {
+    case "${1}" in
+        relay-gateway)      echo "Dockerfile" ;;
+        admin-api)          echo "app/admin/Dockerfile" ;;
+        identity-service)   echo "app/identity/Dockerfile" ;;
+        channel-service)    echo "app/channel/Dockerfile" ;;
+        billing-service)    echo "app/billing/Dockerfile" ;;
+        config-service)     echo "app/config/Dockerfile" ;;
+        log-service)        echo "app/log/Dockerfile" ;;
+        monitor-worker)     echo "app/monitor/Dockerfile" ;;
+        notify-worker)      echo "app/notify/Dockerfile" ;;
+        *)                  echo "Unknown service: ${1}" >&2; exit 1 ;;
     esac
 }
 
@@ -93,7 +108,7 @@ build_image() {
     (cd ${project_dir} && docker buildx build \
         --platform linux/amd64 \
         --load \
-        -f deployments/docker/Dockerfile \
+        -f $(service_dockerfile ${service}) \
         --build-arg SERVICE_NAME=${service} --build-arg SERVICE_PATH=$(service_path ${service}) \
         -t ${image_name} \
         .)

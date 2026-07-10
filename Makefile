@@ -75,15 +75,15 @@ proto: api config
 
 SERVICE ?= relay-gateway
 
-SERVICE_PATH_relay-gateway := ./app/relay/interface/cmd/relay-gateway
-SERVICE_PATH_admin-api := ./app/admin/admin/cmd/admin-api
-SERVICE_PATH_identity-service := ./app/identity/service/cmd/identity-service
-SERVICE_PATH_channel-service := ./app/channel/service/cmd/channel-service
-SERVICE_PATH_billing-service := ./app/billing/service/cmd/billing-service
-SERVICE_PATH_config-service := ./app/config/service/cmd/config-service
-SERVICE_PATH_log-service := ./app/log/service/cmd/log-service
-SERVICE_PATH_monitor-worker := ./app/monitor/job/cmd/monitor-worker
-SERVICE_PATH_notify-worker := ./app/notify/job/cmd/notify-worker
+SERVICE_PATH_relay-gateway := ./cmd/relay-gateway
+SERVICE_PATH_admin-api := ./app/admin/cmd/admin
+SERVICE_PATH_identity-service := ./app/identity/cmd/identity
+SERVICE_PATH_channel-service := ./app/channel/cmd/channel
+SERVICE_PATH_billing-service := ./app/billing/cmd/billing
+SERVICE_PATH_config-service := ./app/config/cmd/config
+SERVICE_PATH_log-service := ./app/log/cmd/log
+SERVICE_PATH_monitor-worker := ./app/monitor/cmd/monitor
+SERVICE_PATH_notify-worker := ./app/notify/cmd/notify
 SERVICE_PATH = $(SERVICE_PATH_$(SERVICE))
 
 .PHONY: build-service
@@ -103,9 +103,9 @@ web-dist:
 .PHONY: web-build
 # build web frontend and copy it into the embedded admin-api asset directory
 web-build: web-dist
-	rm -rf app/admin/admin/internal/server/static/web
-	mkdir -p app/admin/admin/internal/server/static/web
-	cp -r web/dist/* app/admin/admin/internal/server/static/web/
+	rm -rf app/admin/internal/server/static/web
+	mkdir -p app/admin/internal/server/static/web
+	cp -r web/dist/* app/admin/internal/server/static/web/
 
 .PHONY: generate
 # generate
@@ -132,14 +132,14 @@ test-unit: proto
 run-identity:
 	IDENTITY_GRPC_ADDR=127.0.0.1:9001 \
 	IDENTITY_SQL_DSN="" \
-	go run ./app/identity/service/cmd/identity-service
+	go run ./app/identity/cmd/identity
 
 .PHONY: run-channel
 # run channel-service
 run-channel:
 	CHANNEL_GRPC_ADDR=127.0.0.1:9002 \
 	CHANNEL_SQL_DSN="" \
-	go run ./app/channel/service/cmd/channel-service
+	go run ./app/channel/cmd/channel
 
 .PHONY: run-relay
 # run relay-gateway
@@ -148,7 +148,7 @@ run-relay:
 	CHANNEL_GRPC_ENDPOINT=127.0.0.1:9002 \
 	RELAY_HTTP_ADDR=:8080 \
 	RELAY_PROVIDER_TIMEOUT=30s \
-	go run ./app/relay/interface/cmd/relay-gateway
+	go run ./cmd/relay-gateway
 
 .PHONY: run-all
 # run all services
@@ -178,12 +178,12 @@ stop-all:
 .PHONY: dev-test-identity
 # test identity-service
 dev-test-identity:
-	go test -v ./app/identity/service/internal/biz/
+	go test -v ./app/identity/internal/biz/
 
 .PHONY: dev-test-channel
 # test channel-service
 dev-test-channel:
-	go test -v ./app/channel/service/internal/biz/
+	go test -v ./app/channel/internal/biz/
 
 .PHONY: dev-test-provider
 # test relay provider
@@ -193,7 +193,7 @@ dev-test-provider:
 .PHONY: dev-test-integration
 # run integration tests
 dev-test-integration:
-	go test -v ./app/relay/interface/internal/integration/
+	go test -v ./internal/integration/
 
 .PHONY: dev-test-all
 # run all development tests

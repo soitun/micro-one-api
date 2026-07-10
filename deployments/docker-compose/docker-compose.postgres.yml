@@ -67,10 +67,10 @@ services:
   identity-service:
     build:
       context: ../..
-      dockerfile: deployments/docker/Dockerfile
+      dockerfile: app/identity/Dockerfile
       args:
         SERVICE_NAME: identity-service
-        SERVICE_PATH: ./app/identity/service/cmd/identity-service
+        SERVICE_PATH: ./app/identity/cmd/identity
     container_name: identity-service
     environment:
       - CONF_PATH=/configs/identity-service.yaml
@@ -105,10 +105,10 @@ services:
   channel-service:
     build:
       context: ../..
-      dockerfile: deployments/docker/Dockerfile
+      dockerfile: app/channel/Dockerfile
       args:
         SERVICE_NAME: channel-service
-        SERVICE_PATH: ./app/channel/service/cmd/channel-service
+        SERVICE_PATH: ./app/channel/cmd/channel
     container_name: channel-service
     environment:
       - CONF_PATH=/configs/channel-service.yaml
@@ -143,10 +143,10 @@ services:
   billing-service:
     build:
       context: ../..
-      dockerfile: deployments/docker/Dockerfile
+      dockerfile: app/billing/Dockerfile
       args:
         SERVICE_NAME: billing-service
-        SERVICE_PATH: ./app/billing/service/cmd/billing-service
+        SERVICE_PATH: ./app/billing/cmd/billing
     container_name: billing-service
     environment:
       - CONF_PATH=/configs/billing-service.yaml
@@ -192,10 +192,10 @@ services:
   config-service:
     build:
       context: ../..
-      dockerfile: deployments/docker/Dockerfile
+      dockerfile: app/config/Dockerfile
       args:
         SERVICE_NAME: config-service
-        SERVICE_PATH: ./app/config/service/cmd/config-service
+        SERVICE_PATH: ./app/config/cmd/config
     container_name: config-service
     environment:
       - CONF_PATH=/configs/config-service.yaml
@@ -225,10 +225,10 @@ services:
   log-service:
     build:
       context: ../..
-      dockerfile: deployments/docker/Dockerfile
+      dockerfile: app/log/Dockerfile
       args:
         SERVICE_NAME: log-service
-        SERVICE_PATH: ./app/log/service/cmd/log-service
+        SERVICE_PATH: ./app/log/cmd/log
     container_name: log-service
     environment:
       - CONF_PATH=/configs/log-service.yaml
@@ -257,10 +257,10 @@ services:
   monitor-worker:
     build:
       context: ../..
-      dockerfile: deployments/docker/Dockerfile
+      dockerfile: app/monitor/Dockerfile
       args:
         SERVICE_NAME: monitor-worker
-        SERVICE_PATH: ./app/monitor/job/cmd/monitor-worker
+        SERVICE_PATH: ./app/monitor/cmd/monitor
     container_name: monitor-worker
     environment:
       - CONF_PATH=/configs/monitor-worker.yaml
@@ -289,10 +289,10 @@ services:
   notify-worker:
     build:
       context: ../..
-      dockerfile: deployments/docker/Dockerfile
+      dockerfile: app/notify/Dockerfile
       args:
         SERVICE_NAME: notify-worker
-        SERVICE_PATH: ./app/notify/job/cmd/notify-worker
+        SERVICE_PATH: ./app/notify/cmd/notify
     container_name: notify-worker
     environment:
       - CONF_PATH=/configs/notify-worker.yaml
@@ -332,10 +332,10 @@ services:
   relay-gateway:
     build:
       context: ../..
-      dockerfile: deployments/docker/Dockerfile
+      dockerfile: Dockerfile
       args:
         SERVICE_NAME: relay-gateway
-        SERVICE_PATH: ./app/relay/interface/cmd/relay-gateway
+        SERVICE_PATH: ./cmd/relay-gateway
     container_name: relay-gateway
     environment:
       - CONF_PATH=/configs/relay-gateway.yaml
@@ -377,10 +377,10 @@ services:
   admin-api:
     build:
       context: ../..
-      dockerfile: deployments/docker/Dockerfile
+      dockerfile: app/admin/Dockerfile
       args:
         SERVICE_NAME: admin-api
-        SERVICE_PATH: ./app/admin/admin/cmd/admin-api
+        SERVICE_PATH: ./app/admin/cmd/admin
         VITE_RECHARGE_AMOUNT_MULTIPLIER: ${RECHARGE_AMOUNT_MULTIPLIER:-10}
     container_name: admin-api
     environment:

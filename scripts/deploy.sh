@@ -206,16 +206,31 @@ REUSE_EXISTING_TAR="${DEPLOY_REUSE_EXISTING_TAR:-1}"
 # 服务名到入口路径映射
 service_path() {
     case "$1" in
-        relay-gateway)      echo "./app/relay/interface/cmd/relay-gateway" ;;
-        admin-api)          echo "./app/admin/admin/cmd/admin-api" ;;
-        identity-service)   echo "./app/identity/service/cmd/identity-service" ;;
-        channel-service)    echo "./app/channel/service/cmd/channel-service" ;;
-        billing-service)    echo "./app/billing/service/cmd/billing-service" ;;
-        config-service)     echo "./app/config/service/cmd/config-service" ;;
-        log-service)        echo "./app/log/service/cmd/log-service" ;;
-        monitor-worker)     echo "./app/monitor/job/cmd/monitor-worker" ;;
-        notify-worker)      echo "./app/notify/job/cmd/notify-worker" ;;
+        relay-gateway)      echo "./cmd/relay-gateway" ;;
+        admin-api)          echo "./app/admin/cmd/admin" ;;
+        identity-service)   echo "./app/identity/cmd/identity" ;;
+        channel-service)    echo "./app/channel/cmd/channel" ;;
+        billing-service)    echo "./app/billing/cmd/billing" ;;
+        config-service)     echo "./app/config/cmd/config" ;;
+        log-service)        echo "./app/log/cmd/log" ;;
+        monitor-worker)     echo "./app/monitor/cmd/monitor" ;;
+        notify-worker)      echo "./app/notify/cmd/notify" ;;
         *)                  echo "" ;;
+    esac
+}
+
+service_dockerfile() {
+    case "${1}" in
+        relay-gateway)      echo "Dockerfile" ;;
+        admin-api)          echo "app/admin/Dockerfile" ;;
+        identity-service)   echo "app/identity/Dockerfile" ;;
+        channel-service)    echo "app/channel/Dockerfile" ;;
+        billing-service)    echo "app/billing/Dockerfile" ;;
+        config-service)     echo "app/config/Dockerfile" ;;
+        log-service)        echo "app/log/Dockerfile" ;;
+        monitor-worker)     echo "app/monitor/Dockerfile" ;;
+        notify-worker)      echo "app/notify/Dockerfile" ;;
+        *)                  echo "Unknown service: ${1}" >&2; exit 1 ;;
     esac
 }
 
@@ -240,7 +255,7 @@ build_service() {
             --platform "${TARGET_PLATFORM}" \
             --build-arg "SERVICE_NAME=${SERVICE}" \
             --build-arg "SERVICE_PATH=$(service_path "${SERVICE}")" \
-            --file "${REPO_ROOT}/deployments/docker/Dockerfile" \
+            --file "${REPO_ROOT}/$(service_dockerfile "${SERVICE}")" \
             --tag "micro-one-api/${SERVICE}:latest" \
             --load \
             "${REPO_ROOT}"; then
