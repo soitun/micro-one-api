@@ -45,6 +45,22 @@ fi
 log_info "Prerequisites OK"
 echo ""
 
+# Map service name to build path
+service_path() {
+    case "$1" in
+        relay-gateway)      echo "./app/relay/interface/cmd/relay-gateway" ;;
+        admin-api)          echo "./app/admin/admin/cmd/admin-api" ;;
+        identity-service)   echo "./app/identity/service/cmd/identity-service" ;;
+        channel-service)    echo "./app/channel/service/cmd/channel-service" ;;
+        billing-service)    echo "./app/billing/service/cmd/billing-service" ;;
+        config-service)     echo "./app/config/service/cmd/config-service" ;;
+        log-service)        echo "./app/log/service/cmd/log-service" ;;
+        monitor-worker)     echo "./app/monitor/job/cmd/monitor-worker" ;;
+        notify-worker)      echo "./app/notify/job/cmd/notify-worker" ;;
+        *)                  echo "" ;;
+    esac
+}
+
 # Function to build and deploy a service
 deploy_service() {
     local service=$1
@@ -61,7 +77,7 @@ deploy_service() {
         --load \
         --progress=plain \
         -f deployments/docker/Dockerfile \
-        --build-arg SERVICE_NAME=${service} \
+        --build-arg SERVICE_NAME=${service} --build-arg SERVICE_PATH=$(service_path ${service}) \
         -t ${image_name} \
         .)
 

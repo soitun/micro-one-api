@@ -1,0 +1,1 @@
+function e({page:e,pageSize:t,search:n,sortKey:r,sortDirection:i,filters:a={}}){let o=new URLSearchParams;o.set(`page`,String(e)),o.set(`page_size`,String(t)),n?.trim()&&o.set(`keyword`,n.trim()),r&&i&&(o.set(`sort`,r),o.set(`order`,i));for(let[e,t]of Object.entries(a))t!=null&&t!==``&&o.set(e,String(t));return o}export{e as t};

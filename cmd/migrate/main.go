@@ -27,8 +27,8 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/mattn/go-sqlite3"
 
-	"micro-one-api/internal/pkg/migrate"
-	"micro-one-api/internal/pkg/xdb"
+	"micro-one-api/platform/database/migrate"
+	"micro-one-api/platform/database/xdb"
 )
 
 const defaultBaseline = "022_create_schema_migrations"

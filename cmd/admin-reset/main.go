@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
-	"micro-one-api/internal/pkg/xdb"
+	"micro-one-api/platform/database/xdb"
 )
 
 const defaultGroup = "default"

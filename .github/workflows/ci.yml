@@ -41,6 +41,9 @@ jobs:
       - name: Run tests
         run: make test
 
+      - name: Check architecture boundaries
+        run: ./scripts/check-architecture.sh
+
       - name: Verify generated files are current
         run: |
           if [ -n "$(git status --porcelain)" ]; then
@@ -84,16 +87,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - identity-service
-          - channel-service
-          - billing-service
-          - admin-api
-          - config-service
-          - log-service
-          - monitor-worker
-          - notify-worker
-          - relay-gateway
+        include:
+          - service: identity-service
+            path: ./app/identity/service/cmd/identity-service
+          - service: channel-service
+            path: ./app/channel/service/cmd/channel-service
+          - service: billing-service
+            path: ./app/billing/service/cmd/billing-service
+          - service: admin-api
+            path: ./app/admin/admin/cmd/admin-api
+          - service: config-service
+            path: ./app/config/service/cmd/config-service
+          - service: log-service
+            path: ./app/log/service/cmd/log-service
+          - service: monitor-worker
+            path: ./app/monitor/job/cmd/monitor-worker
+          - service: notify-worker
+            path: ./app/notify/job/cmd/notify-worker
+          - service: relay-gateway
+            path: ./app/relay/interface/cmd/relay-gateway
         platform: [ linux/amd64, linux/arm64 ]
     steps:
       - name: Checkout code
@@ -113,5 +125,6 @@ jobs:
           platforms: ${{ matrix.platform }}
           build-args: |
             SERVICE_NAME=${{ matrix.service }}
+            SERVICE_PATH=${{ matrix.path }}
           push: false
           tags: micro-one-api/${{ matrix.service }}:ci

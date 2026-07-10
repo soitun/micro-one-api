@@ -203,6 +203,22 @@ BUILD_RETRIES="${DEPLOY_BUILD_RETRIES:-3}"
 # 是否复用已经构建好的 .tar
 REUSE_EXISTING_TAR="${DEPLOY_REUSE_EXISTING_TAR:-1}"
 
+# 服务名到入口路径映射
+service_path() {
+    case "$1" in
+        relay-gateway)      echo "./app/relay/interface/cmd/relay-gateway" ;;
+        admin-api)          echo "./app/admin/admin/cmd/admin-api" ;;
+        identity-service)   echo "./app/identity/service/cmd/identity-service" ;;
+        channel-service)    echo "./app/channel/service/cmd/channel-service" ;;
+        billing-service)    echo "./app/billing/service/cmd/billing-service" ;;
+        config-service)     echo "./app/config/service/cmd/config-service" ;;
+        log-service)        echo "./app/log/service/cmd/log-service" ;;
+        monitor-worker)     echo "./app/monitor/job/cmd/monitor-worker" ;;
+        notify-worker)      echo "./app/notify/job/cmd/notify-worker" ;;
+        *)                  echo "" ;;
+    esac
+}
+
 # 构建单个服务的函数（支持重试）
 build_service() {
     local SERVICE="$1"
@@ -223,6 +239,7 @@ build_service() {
         if docker buildx build \
             --platform "${TARGET_PLATFORM}" \
             --build-arg "SERVICE_NAME=${SERVICE}" \
+            --build-arg "SERVICE_PATH=$(service_path "${SERVICE}")" \
             --file "${REPO_ROOT}/deployments/docker/Dockerfile" \
             --tag "micro-one-api/${SERVICE}:latest" \
             --load \

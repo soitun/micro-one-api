@@ -4,10 +4,10 @@ VERSION := $(shell git describe --tags --always 2>/dev/null || git rev-parse --s
 
 ifeq ($(GOHOSTOS), windows)
 Git_Bash := $(subst \,/,$(subst cmd\,bin\bash.exe,$(dir $(shell where git))))
-INTERNAL_PROTO_FILES := $(shell $(Git_Bash) -c "find internal -name '*.proto'")
+INTERNAL_PROTO_FILES := $(shell $(Git_Bash) -c "find app -name "*.proto"")
 API_PROTO_FILES := $(shell $(Git_Bash) -c "find api -name '*.proto' ! -path 'api/openapi.yaml'")
 else
-INTERNAL_PROTO_FILES := $(shell find internal -name '*.proto')
+INTERNAL_PROTO_FILES := $(shell find app -name "*.proto")
 API_PROTO_FILES := $(shell find api -name '*.proto')
 endif
 PROTO_SYSTEM_INCLUDE_DIRS := $(strip $(foreach dir,/usr/include /usr/local/include /opt/homebrew/include,$(if $(wildcard $(dir)/google/protobuf/descriptor.proto),--proto_path=$(dir))))
@@ -34,10 +34,10 @@ proto-tools:
 # generate internal proto
 config:
 ifneq ($(strip $(INTERNAL_PROTO_FILES)),)
-	protoc --proto_path=./internal \
+	protoc --proto_path=./app \
 		--proto_path=./third_party \
 		$(PROTO_SYSTEM_INCLUDE_DIRS) \
-		--go_out=paths=source_relative:./internal \
+		--go_out=paths=source_relative:./app \
 		$(INTERNAL_PROTO_FILES)
 else
 	@echo "no internal proto files"
@@ -72,6 +72,25 @@ api-check: api
 proto: api config
 
 .PHONY: build
+
+SERVICE ?= relay-gateway
+
+SERVICE_PATH_relay-gateway := ./app/relay/interface/cmd/relay-gateway
+SERVICE_PATH_admin-api := ./app/admin/admin/cmd/admin-api
+SERVICE_PATH_identity-service := ./app/identity/service/cmd/identity-service
+SERVICE_PATH_channel-service := ./app/channel/service/cmd/channel-service
+SERVICE_PATH_billing-service := ./app/billing/service/cmd/billing-service
+SERVICE_PATH_config-service := ./app/config/service/cmd/config-service
+SERVICE_PATH_log-service := ./app/log/service/cmd/log-service
+SERVICE_PATH_monitor-worker := ./app/monitor/job/cmd/monitor-worker
+SERVICE_PATH_notify-worker := ./app/notify/job/cmd/notify-worker
+SERVICE_PATH = $(SERVICE_PATH_$(SERVICE))
+
+.PHONY: build-service
+# build a single service binary by SERVICE name (e.g. make build-service SERVICE=config-service)
+build-service:
+	@test -n "$(SERVICE_PATH)" || (echo "unknown SERVICE=$(SERVICE)" && exit 1)
+	go build -o bin/$(SERVICE) $(SERVICE_PATH)
 # build
 build: proto web-build
 	go build ./...
@@ -84,9 +103,9 @@ web-dist:
 .PHONY: web-build
 # build web frontend and copy it into the embedded admin-api asset directory
 web-build: web-dist
-	rm -rf internal/admin/server/static/web
-	mkdir -p internal/admin/server/static/web
-	cp -r web/dist/* internal/admin/server/static/web/
+	rm -rf app/admin/admin/internal/server/static/web
+	mkdir -p app/admin/admin/internal/server/static/web
+	cp -r web/dist/* app/admin/admin/internal/server/static/web/
 
 .PHONY: generate
 # generate
@@ -113,14 +132,14 @@ test-unit: proto
 run-identity:
 	IDENTITY_GRPC_ADDR=127.0.0.1:9001 \
 	IDENTITY_SQL_DSN="" \
-	go run ./cmd/identity-service
+	go run ./app/identity/service/cmd/identity-service
 
 .PHONY: run-channel
 # run channel-service
 run-channel:
 	CHANNEL_GRPC_ADDR=127.0.0.1:9002 \
 	CHANNEL_SQL_DSN="" \
-	go run ./cmd/channel-service
+	go run ./app/channel/service/cmd/channel-service
 
 .PHONY: run-relay
 # run relay-gateway
@@ -129,7 +148,7 @@ run-relay:
 	CHANNEL_GRPC_ENDPOINT=127.0.0.1:9002 \
 	RELAY_HTTP_ADDR=:8080 \
 	RELAY_PROVIDER_TIMEOUT=30s \
-	go run ./cmd/relay-gateway
+	go run ./app/relay/interface/cmd/relay-gateway
 
 .PHONY: run-all
 # run all services
@@ -159,22 +178,22 @@ stop-all:
 .PHONY: dev-test-identity
 # test identity-service
 dev-test-identity:
-	go test -v ./internal/identity/biz/
+	go test -v ./app/identity/service/internal/biz/
 
 .PHONY: dev-test-channel
 # test channel-service
 dev-test-channel:
-	go test -v ./internal/channel/biz/
+	go test -v ./app/channel/service/internal/biz/
 
 .PHONY: dev-test-provider
 # test relay provider
 dev-test-provider:
-	go test -v ./internal/relay/provider/
+	go test -v ./domain/upstream/provider/
 
 .PHONY: dev-test-integration
 # run integration tests
 dev-test-integration:
-	go test -v ./test/integration/
+	go test -v ./app/relay/interface/internal/integration/
 
 .PHONY: dev-test-all
 # run all development tests

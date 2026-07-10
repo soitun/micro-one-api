@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	applogger "micro-one-api/internal/pkg/logger"
-	relayprovider "micro-one-api/internal/relay/provider"
+	applogger "micro-one-api/platform/logging"
+	relayprovider "micro-one-api/domain/upstream/provider"
 )
 
 func init() {

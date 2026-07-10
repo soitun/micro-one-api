@@ -1,6 +1,10 @@
 # Multi-stage build for security
-# Usage: docker build --build-arg SERVICE_NAME=relay-gateway -f Dockerfile ../..
+# Usage:
+#   docker build --build-arg SERVICE_NAME=relay-gateway \
+#                --build-arg SERVICE_PATH=./app/relay/interface/cmd/relay-gateway \
+#                -f Dockerfile ../..
 ARG SERVICE_NAME=relay-gateway
+ARG SERVICE_PATH=./app/relay/interface/cmd/relay-gateway
 
 # ---------------------------------------------------------------------------
 # Stage 1: web-builder
@@ -83,18 +87,19 @@ RUN make proto-tools && make proto
 COPY --from=web-builder /web/dist /tmp/web-dist
 ARG SERVICE_NAME
 RUN if [ "$SERVICE_NAME" = "admin-api" ]; then \
-      rm -rf /app/internal/admin/server/static/web && \
-      mkdir -p /app/internal/admin/server/static/web && \
-      cp -a /tmp/web-dist/. /app/internal/admin/server/static/web/; \
+      rm -rf /app/app/admin/admin/internal/server/static/web && \
+      mkdir -p /app/app/admin/admin/internal/server/static/web && \
+      cp -a /tmp/web-dist/. /app/app/admin/admin/internal/server/static/web/; \
     fi
 
 # CGO is required by github.com/mattn/go-sqlite3 so the lite deployment
 # (DATABASE_DRIVER=sqlite3) works. Because this stage runs on the target
 # platform, Go's host detection yields the correct GOOS/GOARCH and the
 # platform-native gcc is used — no manual CC/CXX selection is needed.
+ARG SERVICE_PATH
 RUN CGO_ENABLED=1 go build \
       -ldflags='-s -w -extldflags "-static"' \
-      -o /app/bin/service ./cmd/${SERVICE_NAME}
+      -o /app/bin/service ${SERVICE_PATH}
 
 # ---------------------------------------------------------------------------
 # Stage 4: runtime

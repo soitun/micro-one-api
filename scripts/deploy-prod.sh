@@ -38,6 +38,22 @@ log_step() {
 }
 
 # Get all available services from docker-compose
+# Map service name to build path
+service_path() {
+    case "$1" in
+        relay-gateway)      echo "./app/relay/interface/cmd/relay-gateway" ;;
+        admin-api)          echo "./app/admin/admin/cmd/admin-api" ;;
+        identity-service)   echo "./app/identity/service/cmd/identity-service" ;;
+        channel-service)    echo "./app/channel/service/cmd/channel-service" ;;
+        billing-service)    echo "./app/billing/service/cmd/billing-service" ;;
+        config-service)     echo "./app/config/service/cmd/config-service" ;;
+        log-service)        echo "./app/log/service/cmd/log-service" ;;
+        monitor-worker)     echo "./app/monitor/job/cmd/monitor-worker" ;;
+        notify-worker)      echo "./app/notify/job/cmd/notify-worker" ;;
+        *)                  echo "" ;;
+    esac
+}
+
 get_all_services() {
     echo "identity-service channel-service billing-service admin-api config-service log-service monitor-worker notify-worker relay-gateway"
 }
@@ -78,7 +94,7 @@ build_image() {
         --platform linux/amd64 \
         --load \
         -f deployments/docker/Dockerfile \
-        --build-arg SERVICE_NAME=${service} \
+        --build-arg SERVICE_NAME=${service} --build-arg SERVICE_PATH=$(service_path ${service}) \
         -t ${image_name} \
         .)
 

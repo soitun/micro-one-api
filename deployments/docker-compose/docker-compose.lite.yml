@@ -67,6 +67,7 @@ services:
       dockerfile: deployments/docker/Dockerfile
       args:
         SERVICE_NAME: identity-service
+        SERVICE_PATH: ./app/identity/service/cmd/identity-service
     container_name: identity-service
     environment:
       - CONF_PATH=/configs/identity-service.yaml
@@ -106,6 +107,7 @@ services:
       dockerfile: deployments/docker/Dockerfile
       args:
         SERVICE_NAME: channel-service
+        SERVICE_PATH: ./app/channel/service/cmd/channel-service
     container_name: channel-service
     environment:
       - CONF_PATH=/configs/channel-service.yaml
@@ -145,6 +147,7 @@ services:
       dockerfile: deployments/docker/Dockerfile
       args:
         SERVICE_NAME: billing-service
+        SERVICE_PATH: ./app/billing/service/cmd/billing-service
     container_name: billing-service
     environment:
       - CONF_PATH=/configs/billing-service.yaml
@@ -195,6 +198,7 @@ services:
       dockerfile: deployments/docker/Dockerfile
       args:
         SERVICE_NAME: config-service
+        SERVICE_PATH: ./app/config/service/cmd/config-service
     container_name: config-service
     environment:
       - CONF_PATH=/configs/config-service.yaml
@@ -229,6 +233,7 @@ services:
       dockerfile: deployments/docker/Dockerfile
       args:
         SERVICE_NAME: log-service
+        SERVICE_PATH: ./app/log/service/cmd/log-service
     container_name: log-service
     environment:
       - CONF_PATH=/configs/log-service.yaml
@@ -262,6 +267,7 @@ services:
       dockerfile: deployments/docker/Dockerfile
       args:
         SERVICE_NAME: monitor-worker
+        SERVICE_PATH: ./app/monitor/job/cmd/monitor-worker
     container_name: monitor-worker
     environment:
       - CONF_PATH=/configs/monitor-worker.yaml
@@ -295,6 +301,7 @@ services:
       dockerfile: deployments/docker/Dockerfile
       args:
         SERVICE_NAME: notify-worker
+        SERVICE_PATH: ./app/notify/job/cmd/notify-worker
     container_name: notify-worker
     environment:
       - CONF_PATH=/configs/notify-worker.yaml
@@ -339,6 +346,7 @@ services:
       dockerfile: deployments/docker/Dockerfile
       args:
         SERVICE_NAME: relay-gateway
+        SERVICE_PATH: ./app/relay/interface/cmd/relay-gateway
     container_name: relay-gateway
     environment:
       - CONF_PATH=/configs/relay-gateway.yaml
@@ -383,6 +391,7 @@ services:
       dockerfile: deployments/docker/Dockerfile
       args:
         SERVICE_NAME: admin-api
+        SERVICE_PATH: ./app/admin/admin/cmd/admin-api
         VITE_RECHARGE_AMOUNT_MULTIPLIER: ${RECHARGE_AMOUNT_MULTIPLIER:-10}
     container_name: admin-api
     environment:
