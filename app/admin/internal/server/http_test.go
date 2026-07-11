@@ -17,6 +17,7 @@ import (
 	channelv1 "micro-one-api/api/channel/v1"
 	commonv1 "micro-one-api/api/common/v1"
 	identityv1 "micro-one-api/api/identity/v1"
+	adminbiz "micro-one-api/app/admin/internal/biz"
 	"micro-one-api/app/admin/internal/service"
 	subscriptionbiz "micro-one-api/domain/subscription/biz"
 	subscriptiondata "micro-one-api/domain/subscription/data"
@@ -527,11 +528,11 @@ type adminHTTPSystemOptionsStore struct {
 	values map[string]string
 }
 
-func (s *adminHTTPSystemOptionsStore) Get(key string) (string, error) {
+func (s *adminHTTPSystemOptionsStore) Get(ctx context.Context, key string) (string, error) {
 	return s.values[key], nil
 }
 
-func (s *adminHTTPSystemOptionsStore) Set(key, value string) error {
+func (s *adminHTTPSystemOptionsStore) Set(ctx context.Context, key, value string) error {
 	s.values[key] = value
 	return nil
 }
@@ -541,8 +542,8 @@ func newAdminHTTPTestServer(identity identityv1.IdentityServiceClient, channel c
 	return NewHTTPServer(":0", adminSvc)
 }
 
-func newAdminHTTPTestServerWithOptions(identity identityv1.IdentityServiceClient, channel channelv1.ChannelServiceClient, billing billingv1.BillingServiceClient, store service.SystemOptionsStore) http.Handler {
-	adminSvc := service.NewAdminService(billing, identity, channel, store)
+func newAdminHTTPTestServerWithOptions(identity identityv1.IdentityServiceClient, channel channelv1.ChannelServiceClient, billing billingv1.BillingServiceClient, store *adminHTTPSystemOptionsStore) http.Handler {
+	adminSvc := service.NewAdminService(billing, identity, channel, adminbiz.NewSystemOptionsUsecase(store))
 	return NewHTTPServer(":0", adminSvc)
 }
 
@@ -551,8 +552,8 @@ func newAdminHTTPTestServerWithIdentityEndpoint(identityEndpoint string) http.Ha
 	return NewHTTPServer(":0", adminSvc, identityEndpoint)
 }
 
-func newAdminHTTPOptionTestServer(store service.SystemOptionsStore) http.Handler {
-	adminSvc := service.NewAdminService(nil, nil, nil, store)
+func newAdminHTTPOptionTestServer(store *adminHTTPSystemOptionsStore) http.Handler {
+	adminSvc := service.NewAdminService(nil, nil, nil, adminbiz.NewSystemOptionsUsecase(store))
 	return NewHTTPServer(":0", adminSvc)
 }
 
