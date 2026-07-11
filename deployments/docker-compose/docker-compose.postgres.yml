@@ -73,7 +73,7 @@ services:
         SERVICE_PATH: ./app/identity/cmd/identity
     container_name: identity-service
     environment:
-      - CONF_PATH=/configs/identity-service.yaml
+      - CONF_PATH=/configs/config.yaml
       - DATABASE_DRIVER=${DATABASE_DRIVER:-postgres}
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
@@ -111,7 +111,7 @@ services:
         SERVICE_PATH: ./app/channel/cmd/channel
     container_name: channel-service
     environment:
-      - CONF_PATH=/configs/channel-service.yaml
+      - CONF_PATH=/configs/config.yaml
       - DATABASE_DRIVER=${DATABASE_DRIVER:-postgres}
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
@@ -149,7 +149,7 @@ services:
         SERVICE_PATH: ./app/billing/cmd/billing
     container_name: billing-service
     environment:
-      - CONF_PATH=/configs/billing-service.yaml
+      - CONF_PATH=/configs/config.yaml
       - DATABASE_DRIVER=${DATABASE_DRIVER:-postgres}
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
@@ -198,7 +198,7 @@ services:
         SERVICE_PATH: ./app/config/cmd/config
     container_name: config-service
     environment:
-      - CONF_PATH=/configs/config-service.yaml
+      - CONF_PATH=/configs/config.yaml
       - DATABASE_DRIVER=${DATABASE_DRIVER:-postgres}
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
@@ -231,7 +231,7 @@ services:
         SERVICE_PATH: ./app/log/cmd/log
     container_name: log-service
     environment:
-      - CONF_PATH=/configs/log-service.yaml
+      - CONF_PATH=/configs/config.yaml
       - DATABASE_DRIVER=${DATABASE_DRIVER:-postgres}
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
@@ -263,7 +263,7 @@ services:
         SERVICE_PATH: ./app/monitor/cmd/monitor
     container_name: monitor-worker
     environment:
-      - CONF_PATH=/configs/monitor-worker.yaml
+      - CONF_PATH=/configs/config.yaml
       - DATABASE_DRIVER=${DATABASE_DRIVER:-postgres}
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
@@ -295,7 +295,7 @@ services:
         SERVICE_PATH: ./app/notify/cmd/notify
     container_name: notify-worker
     environment:
-      - CONF_PATH=/configs/notify-worker.yaml
+      - CONF_PATH=/configs/config.yaml
       - DATABASE_DRIVER=${DATABASE_DRIVER:-postgres}
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
@@ -338,7 +338,7 @@ services:
         SERVICE_PATH: ./cmd/relay-gateway
     container_name: relay-gateway
     environment:
-      - CONF_PATH=/configs/relay-gateway.yaml
+      - CONF_PATH=/configs/config.yaml
       - IDENTITY_GRPC_ENDPOINT=identity-service:9001
       - CHANNEL_GRPC_ENDPOINT=channel-service:9002
       - BILLING_GRPC_ENDPOINT=billing-service:9004
@@ -384,7 +384,7 @@ services:
         VITE_RECHARGE_AMOUNT_MULTIPLIER: ${RECHARGE_AMOUNT_MULTIPLIER:-10}
     container_name: admin-api
     environment:
-      - CONF_PATH=/configs/admin-api.yaml
+      - CONF_PATH=/configs/config.yaml
       - DATABASE_DRIVER=${DATABASE_DRIVER:-postgres}
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379

@@ -20,30 +20,30 @@ import (
 	"micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
 	logv1 "micro-one-api/api/log/v1"
+	relayprovider "micro-one-api/domain/upstream/provider"
 	relaybiz "micro-one-api/internal/biz"
 	relaycfg "micro-one-api/internal/conf"
 	relaydata "micro-one-api/internal/data"
 	relayidentity "micro-one-api/internal/identity"
-	relayprovider "micro-one-api/domain/upstream/provider"
-	relayservice "micro-one-api/internal/service"
 	"micro-one-api/internal/server"
+	relayservice "micro-one-api/internal/service"
+	apptimeout "micro-one-api/pkg/timeout"
 	appaudit "micro-one-api/platform/audit"
-	appauth "micro-one-api/platform/security/auth"
 	appcache "micro-one-api/platform/cache"
+	"micro-one-api/platform/database/xdb"
 	"micro-one-api/platform/events"
 	appgrpc "micro-one-api/platform/grpc"
 	applogger "micro-one-api/platform/logging"
+	"micro-one-api/platform/metrics"
 	appmiddleware "micro-one-api/platform/middleware"
 	appregistry "micro-one-api/platform/registry"
-	apptimeout "micro-one-api/pkg/timeout"
+	appauth "micro-one-api/platform/security/auth"
 	apptls "micro-one-api/platform/tls"
-	"micro-one-api/platform/database/xdb"
-	"micro-one-api/platform/metrics"
 
-	relayadaptor "micro-one-api/internal/adaptor"
-	relaycredential "micro-one-api/domain/upstream/credential"
 	subscriptionbiz "micro-one-api/domain/subscription/biz"
 	subscriptiondata "micro-one-api/domain/subscription/data"
+	relaycredential "micro-one-api/domain/upstream/credential"
+	relayadaptor "micro-one-api/internal/adaptor"
 )
 
 // ProviderSet declares the relay-gateway providers. loadConfig lives in
@@ -66,12 +66,16 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	))
 }
 
-func newApp(cfg *relaycfg.Config) (*kratos.App, func()) {
+func newApp(cfg *relaycfg.Config) (*kratos.App, func(), error) {
 	tlsConfig := apptls.LoadTLSConfig()
 	enableAuth := os.Getenv("ENABLE_AUTH") != "false"
 	var serviceAuth *appauth.ServiceAuthConfig
 	if enableAuth {
-		serviceAuth, _ = appauth.LoadServiceAuthConfig()
+		var err error
+		serviceAuth, err = appauth.LoadServiceAuthConfig()
+		if err != nil {
+			return nil, nil, fmt.Errorf("load service auth config: %w", err)
+		}
 	}
 
 	providerTimeout := apptimeout.GetUpstreamTimeout()
@@ -81,8 +85,14 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func()) {
 		}
 	}
 
-	discovery, _ := appregistry.NewDiscovery(cfg.Registry)
-	registrar, _ := appregistry.NewRegistrar(cfg.Registry)
+	discovery, err := appregistry.NewDiscovery(cfg.Registry)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create discovery: %w", err)
+	}
+	registrar, err := appregistry.NewRegistrar(cfg.Registry)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create registrar: %w", err)
+	}
 
 	resolver := appregistry.NewResolver(discovery)
 	resolver.SetStatic("identity-service", cfg.Clients.Identity.Endpoint)
@@ -96,21 +106,57 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func()) {
 	var billingClient billingv1.BillingServiceClient
 	var logClient logv1.LogServiceClient
 
-	identityEndpoint, _ := resolver.ResolveGRPC(context.Background(), "identity-service")
-	channelEndpoint, _ := resolver.ResolveGRPC(context.Background(), "channel-service")
-	billingEndpoint, _ := resolver.ResolveGRPC(context.Background(), "billing-service")
-	logEndpoint, _ := resolver.ResolveGRPC(context.Background(), "log-service")
+	identityEndpoint, err := resolver.ResolveGRPC(context.Background(), "identity-service")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve identity-service endpoint: %w", err)
+	}
+	channelEndpoint, err := resolver.ResolveGRPC(context.Background(), "channel-service")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve channel-service endpoint: %w", err)
+	}
+	billingEndpoint, err := resolver.ResolveGRPC(context.Background(), "billing-service")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve billing-service endpoint: %w", err)
+	}
+	logEndpoint, err := resolver.ResolveGRPC(context.Background(), "log-service")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve log-service endpoint: %w", err)
+	}
 
 	if enableAuth && tlsConfig.Enabled {
-		identityConn, _ = createAuthenticatedClient(identityEndpoint, tlsConfig, serviceAuth)
-		channelConn, _ = createAuthenticatedClient(channelEndpoint, tlsConfig, serviceAuth)
-		billingConn, _ = createAuthenticatedClient(billingEndpoint, tlsConfig, serviceAuth)
-		logConn, _ = createAuthenticatedClient(logEndpoint, tlsConfig, serviceAuth)
+		identityConn, err = createAuthenticatedClient(identityEndpoint, tlsConfig, serviceAuth)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create identity gRPC client: %w", err)
+		}
+		channelConn, err = createAuthenticatedClient(channelEndpoint, tlsConfig, serviceAuth)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create channel gRPC client: %w", err)
+		}
+		billingConn, err = createAuthenticatedClient(billingEndpoint, tlsConfig, serviceAuth)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create billing gRPC client: %w", err)
+		}
+		logConn, err = createAuthenticatedClient(logEndpoint, tlsConfig, serviceAuth)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create log gRPC client: %w", err)
+		}
 	} else {
-		identityConn, _ = grpc.NewClient(identityEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		channelConn, _ = grpc.NewClient(channelEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		billingConn, _ = grpc.NewClient(billingEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		logConn, _ = grpc.NewClient(logEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		identityConn, err = grpc.NewClient(identityEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, nil, fmt.Errorf("create identity gRPC client: %w", err)
+		}
+		channelConn, err = grpc.NewClient(channelEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, nil, fmt.Errorf("create channel gRPC client: %w", err)
+		}
+		billingConn, err = grpc.NewClient(billingEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, nil, fmt.Errorf("create billing gRPC client: %w", err)
+		}
+		logConn, err = grpc.NewClient(logEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, nil, fmt.Errorf("create log gRPC client: %w", err)
+		}
 	}
 
 	identityClient = identityv1.NewIdentityServiceClient(identityConn)
@@ -184,12 +230,18 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func()) {
 	redisClient := xdb.NewRedisClient(redisAddr, redisPassword)
 	eventBus := events.NewConfiguredEventBus(redisClient, "relay-gateway")
 	authLoader := appcache.NewAuthCacheLoader(identityClient, nil, resilienceTimeout)
-	authCache, _ := appcache.NewAuthCache(redisClient, nil, authLoader.Load)
+	authCache, err := appcache.NewAuthCache(redisClient, nil, authLoader.Load)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create auth cache: %w", err)
+	}
 	identityClient = relaydata.NewCachedIdentityClient(identityClient, authCache)
 
 	if cfg.ChannelCache.GetChannelCacheEnabled() {
 		channelLoader := appcache.NewChannelCacheLoader(channelClient, nil, resilienceTimeout)
-		channelCache, _ := appcache.NewChannelCache(redisClient, nil, channelLoader.Load)
+		channelCache, err := appcache.NewChannelCache(redisClient, nil, channelLoader.Load)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create channel cache: %w", err)
+		}
 		channelClient = relaydata.NewCachedChannelClient(channelClient, channelCache)
 	}
 
@@ -236,7 +288,10 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func()) {
 
 	var routeMiddleware []func(http.Handler) http.Handler
 	if cfg.Subscription.GetSubscriptionEnabled() {
-		subscriptionRepo, _ := subscriptiondata.NewRepositoryFromEnv(os.Getenv("SQL_DRIVER"))
+		subscriptionRepo, subErr := subscriptiondata.NewRepositoryFromEnv(os.Getenv("SQL_DRIVER"))
+		if subErr != nil {
+			return nil, nil, fmt.Errorf("create subscription repository: %w", subErr)
+		}
 		subscriptionUc := subscriptionbiz.NewSubscriptionUsecase(subscriptionRepo, subscriptionRepo)
 		httpServer.SetSubscriptionUsecase(subscriptionUc)
 		routeMiddleware = append(routeMiddleware, httpServer.SubscriptionQuotaMiddleware)
@@ -255,6 +310,9 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func()) {
 	httpServer.UseRouteMiddleware(routeMiddleware...)
 
 	{
+		// WebSocket timeouts are optional: an unparseable value defaults to
+		// the zero duration, which the HTTP server treats as "use builtin
+		// default". This is an explicit, safe degradation.
 		wsWrite, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSWriteTimeout())
 		wsIdle, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSIdleTimeout())
 		wsDial, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSDialTimeout())
@@ -274,12 +332,11 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func()) {
 	grpcSvc := relayservice.NewRelayGrpcService(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
 	var relayGRPCOpts []grpc.ServerOption
 	if cfg.MTLS.Enabled {
-		mtlsOpts, err := appgrpc.MTLSServerOptions(cfg.MTLS.CertFile, cfg.MTLS.KeyFile, cfg.MTLS.CAFile)
-		if err != nil {
-			applogger.Log.Error("create relay mTLS server options", zap.Error(err))
-		} else {
-			relayGRPCOpts = append(relayGRPCOpts, mtlsOpts...)
+		mtlsOpts, mtlsErr := appgrpc.MTLSServerOptions(cfg.MTLS.CertFile, cfg.MTLS.KeyFile, cfg.MTLS.CAFile)
+		if mtlsErr != nil {
+			return nil, nil, fmt.Errorf("create relay mTLS server options: %w", mtlsErr)
 		}
+		relayGRPCOpts = append(relayGRPCOpts, mtlsOpts...)
 	}
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, grpcSvc, relayGRPCOpts...)
 
@@ -314,6 +371,5 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func()) {
 		logConn.Close()
 	}
 
-	_ = fmt.Sprintf
-	return app, cleanup
+	return app, cleanup, nil
 }

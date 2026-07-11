@@ -57,7 +57,10 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	app, cleanup := newApp(config)
+	app, cleanup, err := newApp(config)
+	if err != nil {
+		return nil, nil, err
+	}
 	return app, func() {
 		cleanup()
 	}, nil
@@ -79,12 +82,16 @@ var ProviderSet = wire.NewSet(
 	newApp,
 )
 
-func newApp(cfg *conf.Config) (*kratos.App, func()) {
+func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	tlsConfig := tls.LoadTLSConfig()
 	enableAuth := os.Getenv("ENABLE_AUTH") != "false"
 	var serviceAuth *auth.ServiceAuthConfig
 	if enableAuth {
-		serviceAuth, _ = auth.LoadServiceAuthConfig()
+		var err error
+		serviceAuth, err = auth.LoadServiceAuthConfig()
+		if err != nil {
+			return nil, nil, fmt.Errorf("load service auth config: %w", err)
+		}
 	}
 
 	providerTimeout := timeout.GetUpstreamTimeout()
@@ -94,8 +101,14 @@ func newApp(cfg *conf.Config) (*kratos.App, func()) {
 		}
 	}
 
-	discovery, _ := registry.NewDiscovery(cfg.Registry)
-	registrar, _ := registry.NewRegistrar(cfg.Registry)
+	discovery, err := registry.NewDiscovery(cfg.Registry)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create discovery: %w", err)
+	}
+	registrar, err := registry.NewRegistrar(cfg.Registry)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create registrar: %w", err)
+	}
 
 	resolver := registry.NewResolver(discovery)
 	resolver.SetStatic("identity-service", cfg.Clients.Identity.Endpoint)
@@ -109,21 +122,57 @@ func newApp(cfg *conf.Config) (*kratos.App, func()) {
 	var billingClient billingv1.BillingServiceClient
 	var logClient logv1.LogServiceClient
 
-	identityEndpoint, _ := resolver.ResolveGRPC(context.Background(), "identity-service")
-	channelEndpoint, _ := resolver.ResolveGRPC(context.Background(), "channel-service")
-	billingEndpoint, _ := resolver.ResolveGRPC(context.Background(), "billing-service")
-	logEndpoint, _ := resolver.ResolveGRPC(context.Background(), "log-service")
+	identityEndpoint, err := resolver.ResolveGRPC(context.Background(), "identity-service")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve identity-service endpoint: %w", err)
+	}
+	channelEndpoint, err := resolver.ResolveGRPC(context.Background(), "channel-service")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve channel-service endpoint: %w", err)
+	}
+	billingEndpoint, err := resolver.ResolveGRPC(context.Background(), "billing-service")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve billing-service endpoint: %w", err)
+	}
+	logEndpoint, err := resolver.ResolveGRPC(context.Background(), "log-service")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve log-service endpoint: %w", err)
+	}
 
 	if enableAuth && tlsConfig.Enabled {
-		identityConn, _ = createAuthenticatedClient(identityEndpoint, tlsConfig, serviceAuth)
-		channelConn, _ = createAuthenticatedClient(channelEndpoint, tlsConfig, serviceAuth)
-		billingConn, _ = createAuthenticatedClient(billingEndpoint, tlsConfig, serviceAuth)
-		logConn, _ = createAuthenticatedClient(logEndpoint, tlsConfig, serviceAuth)
+		identityConn, err = createAuthenticatedClient(identityEndpoint, tlsConfig, serviceAuth)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create identity gRPC client: %w", err)
+		}
+		channelConn, err = createAuthenticatedClient(channelEndpoint, tlsConfig, serviceAuth)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create channel gRPC client: %w", err)
+		}
+		billingConn, err = createAuthenticatedClient(billingEndpoint, tlsConfig, serviceAuth)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create billing gRPC client: %w", err)
+		}
+		logConn, err = createAuthenticatedClient(logEndpoint, tlsConfig, serviceAuth)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create log gRPC client: %w", err)
+		}
 	} else {
-		identityConn, _ = grpc.NewClient(identityEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		channelConn, _ = grpc.NewClient(channelEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		billingConn, _ = grpc.NewClient(billingEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		logConn, _ = grpc.NewClient(logEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		identityConn, err = grpc.NewClient(identityEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, nil, fmt.Errorf("create identity gRPC client: %w", err)
+		}
+		channelConn, err = grpc.NewClient(channelEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, nil, fmt.Errorf("create channel gRPC client: %w", err)
+		}
+		billingConn, err = grpc.NewClient(billingEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, nil, fmt.Errorf("create billing gRPC client: %w", err)
+		}
+		logConn, err = grpc.NewClient(logEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, nil, fmt.Errorf("create log gRPC client: %w", err)
+		}
 	}
 
 	identityClient = identityv1.NewIdentityServiceClient(identityConn)
@@ -193,12 +242,18 @@ func newApp(cfg *conf.Config) (*kratos.App, func()) {
 	redisClient := xdb.NewRedisClient(redisAddr, redisPassword)
 	eventBus := events.NewConfiguredEventBus(redisClient, "relay-gateway")
 	authLoader := cache.NewAuthCacheLoader(identityClient, nil, resilienceTimeout)
-	authCache, _ := cache.NewAuthCache(redisClient, nil, authLoader.Load)
+	authCache, err := cache.NewAuthCache(redisClient, nil, authLoader.Load)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create auth cache: %w", err)
+	}
 	identityClient = data.NewCachedIdentityClient(identityClient, authCache)
 
 	if cfg.ChannelCache.GetChannelCacheEnabled() {
 		channelLoader := cache.NewChannelCacheLoader(channelClient, nil, resilienceTimeout)
-		channelCache, _ := cache.NewChannelCache(redisClient, nil, channelLoader.Load)
+		channelCache, err := cache.NewChannelCache(redisClient, nil, channelLoader.Load)
+		if err != nil {
+			return nil, nil, fmt.Errorf("create channel cache: %w", err)
+		}
 		channelClient = data.NewCachedChannelClient(channelClient, channelCache)
 	}
 
@@ -247,7 +302,10 @@ func newApp(cfg *conf.Config) (*kratos.App, func()) {
 
 	var routeMiddleware []func(http.Handler) http.Handler
 	if cfg.Subscription.GetSubscriptionEnabled() {
-		subscriptionRepo, _ := data2.NewRepositoryFromEnv(os.Getenv("SQL_DRIVER"))
+		subscriptionRepo, subErr := data2.NewRepositoryFromEnv(os.Getenv("SQL_DRIVER"))
+		if subErr != nil {
+			return nil, nil, fmt.Errorf("create subscription repository: %w", subErr)
+		}
 		subscriptionUc := biz2.NewSubscriptionUsecase(subscriptionRepo, subscriptionRepo)
 		httpServer.SetSubscriptionUsecase(subscriptionUc)
 		routeMiddleware = append(routeMiddleware, httpServer.SubscriptionQuotaMiddleware)
@@ -266,6 +324,7 @@ func newApp(cfg *conf.Config) (*kratos.App, func()) {
 	httpServer.UseRouteMiddleware(routeMiddleware...)
 
 	{
+
 		wsWrite, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSWriteTimeout())
 		wsIdle, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSIdleTimeout())
 		wsDial, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSDialTimeout())
@@ -285,13 +344,11 @@ func newApp(cfg *conf.Config) (*kratos.App, func()) {
 	grpcSvc := service.NewRelayGrpcService(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
 	var relayGRPCOpts []grpc.ServerOption
 	if cfg.MTLS.Enabled {
-		mtlsOpts, err := grpc2.MTLSServerOptions(cfg.MTLS.CertFile, cfg.MTLS.KeyFile, cfg.MTLS.CAFile)
-		if err != nil {
-			logger.Log.
-				Error("create relay mTLS server options", zap.Error(err))
-		} else {
-			relayGRPCOpts = append(relayGRPCOpts, mtlsOpts...)
+		mtlsOpts, mtlsErr := grpc2.MTLSServerOptions(cfg.MTLS.CertFile, cfg.MTLS.KeyFile, cfg.MTLS.CAFile)
+		if mtlsErr != nil {
+			return nil, nil, fmt.Errorf("create relay mTLS server options: %w", mtlsErr)
 		}
+		relayGRPCOpts = append(relayGRPCOpts, mtlsOpts...)
 	}
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, grpcSvc, relayGRPCOpts...)
 
@@ -323,6 +380,5 @@ func newApp(cfg *conf.Config) (*kratos.App, func()) {
 		logConn.Close()
 	}
 
-	_ = fmt.Sprintf
-	return app, cleanup
+	return app, cleanup, nil
 }

@@ -50,7 +50,7 @@ spec:
           readOnlyRootFilesystem: true
         env:
         - name: CONF_PATH
-          value: "configs/admin-api.yaml"
+          value: "/configs/config.yaml"
         - name: IDENTITY_GRPC_ENDPOINT
           valueFrom:
             configMapKeyRef:

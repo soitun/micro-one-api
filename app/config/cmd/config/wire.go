@@ -8,8 +8,8 @@ import (
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/google/wire"
 
-	configcfg "micro-one-api/app/config/internal/conf"
 	"micro-one-api/app/config/internal/biz"
+	configcfg "micro-one-api/app/config/internal/conf"
 	"micro-one-api/app/config/internal/data"
 	"micro-one-api/app/config/internal/server"
 	"micro-one-api/app/config/internal/service"

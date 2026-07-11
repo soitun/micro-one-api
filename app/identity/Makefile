@@ -3,6 +3,7 @@
 ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || echo ../..)
 SERVICE := $(notdir $(CURDIR))
 CMD_DIR := ./app/$(SERVICE)/cmd/$(SERVICE)
+CONF_DIR := $(ROOT)/app/$(SERVICE)/configs/config.yaml
 
 .PHONY: api config build run test tidy proto generate wire wire-check
 api:
@@ -12,7 +13,7 @@ config:
 build:
 	cd $(ROOT) && go build ./app/$(SERVICE)/...
 run:
-	cd $(ROOT) && go run $(CMD_DIR)
+	cd $(ROOT) && CONF_PATH=$(CONF_DIR) go run $(CMD_DIR)
 test:
 	cd $(ROOT) && go test ./app/$(SERVICE)/...
 tidy:

@@ -156,6 +156,7 @@ test-unit: proto
 .PHONY: run-identity
 # run identity-service
 run-identity:
+	CONF_PATH=./app/identity/configs/config.yaml \
 	IDENTITY_GRPC_ADDR=127.0.0.1:9001 \
 	IDENTITY_SQL_DSN="" \
 	go run ./app/identity/cmd/identity
@@ -163,6 +164,7 @@ run-identity:
 .PHONY: run-channel
 # run channel-service
 run-channel:
+	CONF_PATH=./app/channel/configs/config.yaml \
 	CHANNEL_GRPC_ADDR=127.0.0.1:9002 \
 	CHANNEL_SQL_DSN="" \
 	go run ./app/channel/cmd/channel
@@ -170,6 +172,7 @@ run-channel:
 .PHONY: run-relay
 # run relay-gateway
 run-relay:
+	CONF_PATH=./cmd/relay-gateway/configs/config.yaml \
 	IDENTITY_GRPC_ENDPOINT=127.0.0.1:9001 \
 	CHANNEL_GRPC_ENDPOINT=127.0.0.1:9002 \
 	RELAY_HTTP_ADDR=:8080 \

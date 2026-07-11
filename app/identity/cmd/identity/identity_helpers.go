@@ -15,8 +15,8 @@ import (
 	"micro-one-api/app/identity/internal/biz"
 	identitycfg "micro-one-api/app/identity/internal/conf"
 	"micro-one-api/app/identity/internal/server"
-	"micro-one-api/platform/security" // package name is `oauth`
 	applogger "micro-one-api/platform/logging"
+	"micro-one-api/platform/security" // package name is `oauth`
 )
 
 // bootstrapAdmin creates the initial admin user if the users table is empty.

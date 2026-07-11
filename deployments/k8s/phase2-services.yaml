@@ -48,7 +48,7 @@ spec:
           privileged: false
         env:
         - name: CONF_PATH
-          value: "configs/config-service.yaml"
+          value: "/configs/config.yaml"
         - name: DATABASE_DSN
           valueFrom:
             secretKeyRef:
@@ -155,7 +155,7 @@ spec:
           privileged: false
         env:
         - name: CONF_PATH
-          value: "configs/log-service.yaml"
+          value: "/configs/config.yaml"
         - name: DATABASE_DSN
           valueFrom:
             secretKeyRef:
@@ -256,7 +256,7 @@ spec:
           privileged: false
         env:
         - name: CONF_PATH
-          value: "configs/monitor-worker.yaml"
+          value: "/configs/config.yaml"
         - name: DATABASE_DSN
           valueFrom:
             secretKeyRef:
@@ -357,7 +357,7 @@ spec:
           privileged: false
         env:
         - name: CONF_PATH
-          value: "configs/notify-worker.yaml"
+          value: "/configs/config.yaml"
         - name: DATABASE_DSN
           valueFrom:
             secretKeyRef:

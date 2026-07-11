@@ -13,6 +13,7 @@ import (
 	"micro-one-api/api/billing/v1"
 	"micro-one-api/api/channel/v1"
 	"micro-one-api/api/identity/v1"
+	"micro-one-api/app/admin/internal/biz"
 	"micro-one-api/app/admin/internal/conf"
 	"micro-one-api/app/admin/internal/server"
 	"micro-one-api/app/admin/internal/service"
@@ -39,8 +40,8 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	identityServiceClient := provideIdentityClient(mainClientsResult)
 	channelServiceClient := provideChannelClient(mainClientsResult)
 	mainSystemOptionsResult := newSystemOptionsRepo(config)
-	systemOptionsStore := provideSystemOptionsStore(mainSystemOptionsResult)
-	adminService := service.NewAdminService(billingServiceClient, identityServiceClient, channelServiceClient, systemOptionsStore)
+	systemOptionsUsecase := newSystemOptionsUsecase(mainSystemOptionsResult)
+	adminService := service.NewAdminService(billingServiceClient, identityServiceClient, channelServiceClient, systemOptionsUsecase)
 	mainRegistrarResult := provideRegistrar(config)
 	app, cleanup := newApp(config, mainClientsResult, mainSubscriptionResult, adminService, mainRegistrarResult)
 	return app, func() {
@@ -53,11 +54,11 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 var ProviderSet = wire.NewSet(
 	newClients,
 	newSystemOptionsRepo,
+	newSystemOptionsUsecase,
 	newSubscriptionUsecases,
 	provideIdentityClient,
 	provideChannelClient,
-	provideBillingClient,
-	provideSystemOptionsStore, service.NewAdminService, provideRegistrar,
+	provideBillingClient, service.NewAdminService, provideRegistrar,
 )
 
 func provideIdentityClient(c *clientsResult) identityv1.IdentityServiceClient {
@@ -68,7 +69,12 @@ func provideChannelClient(c *clientsResult) channelv1.ChannelServiceClient { ret
 
 func provideBillingClient(c *clientsResult) billingv1.BillingServiceClient { return c.billingClient }
 
-func provideSystemOptionsStore(r systemOptionsResult) service.SystemOptionsStore { return r.Repo }
+func newSystemOptionsUsecase(r systemOptionsResult) *biz.SystemOptionsUsecase {
+	if r.Repo == nil {
+		return nil
+	}
+	return biz.NewSystemOptionsUsecase(r.Repo)
+}
 
 type registrarResult struct {
 	Registrar registry.Registrar

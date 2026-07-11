@@ -11,6 +11,7 @@ import (
 	billingv1 "micro-one-api/api/billing/v1"
 	channelv1 "micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
+	"micro-one-api/app/admin/internal/biz"
 	admincfg "micro-one-api/app/admin/internal/conf"
 	"micro-one-api/app/admin/internal/server"
 	"micro-one-api/app/admin/internal/service"
@@ -21,19 +22,26 @@ import (
 var ProviderSet = wire.NewSet(
 	newClients,
 	newSystemOptionsRepo,
+	newSystemOptionsUsecase,
 	newSubscriptionUsecases,
 	provideIdentityClient,
 	provideChannelClient,
 	provideBillingClient,
-	provideSystemOptionsStore,
 	service.NewAdminService,
 	provideRegistrar,
 )
 
-func provideIdentityClient(c *clientsResult) identityv1.IdentityServiceClient { return c.identityClient }
-func provideChannelClient(c *clientsResult) channelv1.ChannelServiceClient   { return c.channelClient }
-func provideBillingClient(c *clientsResult) billingv1.BillingServiceClient   { return c.billingClient }
-func provideSystemOptionsStore(r systemOptionsResult) service.SystemOptionsStore { return r.Repo }
+func provideIdentityClient(c *clientsResult) identityv1.IdentityServiceClient {
+	return c.identityClient
+}
+func provideChannelClient(c *clientsResult) channelv1.ChannelServiceClient { return c.channelClient }
+func provideBillingClient(c *clientsResult) billingv1.BillingServiceClient { return c.billingClient }
+func newSystemOptionsUsecase(r systemOptionsResult) *biz.SystemOptionsUsecase {
+	if r.Repo == nil {
+		return nil
+	}
+	return biz.NewSystemOptionsUsecase(r.Repo)
+}
 
 type registrarResult struct {
 	Registrar kregistry.Registrar

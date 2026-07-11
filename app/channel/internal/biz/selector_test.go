@@ -5,7 +5,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
 )
 
 func TestSlidingWindow_AddAndP95(t *testing.T) {

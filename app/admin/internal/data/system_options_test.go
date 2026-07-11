@@ -1,6 +1,7 @@
 package data
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -32,23 +33,24 @@ func openTestSQLite(t *testing.T) *sql.DB {
 func TestSystemOptionsRepo_SQLite3_RoundTrip(t *testing.T) {
 	db := openTestSQLite(t)
 	repo := NewSystemOptionsRepo(db)
+	ctx := context.Background()
 
 	// Empty initially.
-	v, err := repo.Get("site_title")
+	v, err := repo.Get(ctx, "site_title")
 	require.NoError(t, err)
 	assert.Equal(t, "", v, "empty table should return empty string")
 
 	// Insert via Set.
-	require.NoError(t, repo.Set("site_title", "Micro One API"))
+	require.NoError(t, repo.Set(ctx, "site_title", "Micro One API"))
 
 	// Read back.
-	v, err = repo.Get("site_title")
+	v, err = repo.Get(ctx, "site_title")
 	require.NoError(t, err)
 	assert.Equal(t, "Micro One API", v)
 
 	// Upsert: Set again with a new value.
-	require.NoError(t, repo.Set("site_title", "Updated"))
-	v, err = repo.Get("site_title")
+	require.NoError(t, repo.Set(ctx, "site_title", "Updated"))
+	v, err = repo.Get(ctx, "site_title")
 	require.NoError(t, err)
 	assert.Equal(t, "Updated", v, "Set should upsert the existing row")
 }
@@ -85,8 +87,9 @@ func TestSystemOptionsRepo_DefaultIsSQLite3(t *testing.T) {
 	repo := NewSystemOptionsRepo(db)
 	assert.Equal(t, "sqlite3", repo.driver)
 	assert.False(t, repo.pgBind)
-	require.NoError(t, repo.Set("k", "v"))
-	got, err := repo.Get("k")
+	ctx := context.Background()
+	require.NoError(t, repo.Set(ctx, "k", "v"))
+	got, err := repo.Get(ctx, "k")
 	require.NoError(t, err)
 	assert.Equal(t, "v", got)
 }

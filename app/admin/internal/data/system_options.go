@@ -1,13 +1,19 @@
 package data
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
 	"time"
+
+	"micro-one-api/app/admin/internal/biz"
 )
 
-// SystemOption represents a system configuration entry.
+// Compile-time assertion: SystemOptionsRepo implements biz.SystemOptionsRepo.
+var _ biz.SystemOptionsRepo = (*SystemOptionsRepo)(nil)
+
+// SystemOption is kept for backwards compatibility within the data package.
 type SystemOption struct {
 	Key   string
 	Value string
@@ -41,14 +47,14 @@ func NewSystemOptionsRepoWithDriver(db *sql.DB, driver string) *SystemOptionsRep
 }
 
 // Get returns the value for a given key, or empty string if not found.
-func (r *SystemOptionsRepo) Get(key string) (string, error) {
+func (r *SystemOptionsRepo) Get(ctx context.Context, key string) (string, error) {
 	var value string
 	// Postgres pgx uses $1 instead of ?; other drivers accept ?.
 	query := "SELECT option_value FROM system_options WHERE option_key = ?"
 	if r.pgBind {
 		query = "SELECT option_value FROM system_options WHERE option_key = $1"
 	}
-	err := r.db.QueryRow(query, key).Scan(&value)
+	err := r.db.QueryRowContext(ctx, query, key).Scan(&value)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -63,7 +69,7 @@ func (r *SystemOptionsRepo) Get(key string) (string, error) {
 // MySQL:    INSERT ... ON DUPLICATE KEY UPDATE
 // SQLite3:  INSERT ... ON CONFLICT (option_key) DO UPDATE SET ...
 // Postgres: INSERT ... ON CONFLICT (option_key) DO UPDATE SET ...
-func (r *SystemOptionsRepo) Set(key, value string) error {
+func (r *SystemOptionsRepo) Set(ctx context.Context, key, value string) error {
 	var query string
 	if r.pgBind {
 		query = `INSERT INTO system_options (option_key, option_value, updated_at)
@@ -83,7 +89,7 @@ func (r *SystemOptionsRepo) Set(key, value string) error {
 		         ON DUPLICATE KEY UPDATE option_value = VALUES(option_value),
 		                             updated_at = VALUES(updated_at)`
 	}
-	_, err := r.db.Exec(query, key, value, time.Now())
+	_, err := r.db.ExecContext(ctx, query, key, value, time.Now())
 	if err != nil {
 		return fmt.Errorf("set system option %s: %w", key, err)
 	}
@@ -91,8 +97,8 @@ func (r *SystemOptionsRepo) Set(key, value string) error {
 }
 
 // GetAll returns all system options.
-func (r *SystemOptionsRepo) GetAll() ([]SystemOption, error) {
-	rows, err := r.db.Query("SELECT option_key, option_value FROM system_options")
+func (r *SystemOptionsRepo) GetAll(ctx context.Context) ([]SystemOption, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT option_key, option_value FROM system_options")
 	if err != nil {
 		return nil, fmt.Errorf("list system options: %w", err)
 	}

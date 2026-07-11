@@ -50,7 +50,7 @@ spec:
           readOnlyRootFilesystem: true
         env:
         - name: CONF_PATH
-          value: "configs/billing-service.yaml"
+          value: "/configs/config.yaml"
         - name: DATABASE_DSN
           valueFrom:
             secretKeyRef:

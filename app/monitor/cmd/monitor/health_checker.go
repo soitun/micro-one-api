@@ -9,8 +9,8 @@ import (
 
 	channelv1 "micro-one-api/api/channel/v1"
 	"micro-one-api/app/monitor/internal/biz"
-	monitordata "micro-one-api/app/monitor/internal/data"
 	monitorcfg "micro-one-api/app/monitor/internal/conf"
+	monitordata "micro-one-api/app/monitor/internal/data"
 	applogger "micro-one-api/platform/logging"
 
 	"go.uber.org/zap"

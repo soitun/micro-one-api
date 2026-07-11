@@ -14,9 +14,9 @@ import (
 	"github.com/go-kratos/kratos/v2"
 	kregistry "github.com/go-kratos/kratos/v2/registry"
 	"github.com/google/wire"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"go.uber.org/zap"
 
 	notifyv1 "micro-one-api/api/notify/v1"
 	"micro-one-api/app/billing/internal/biz"
@@ -24,10 +24,10 @@ import (
 	"micro-one-api/app/billing/internal/data"
 	"micro-one-api/app/billing/internal/server"
 	"micro-one-api/app/billing/internal/service"
-	applogger "micro-one-api/platform/logging"
-	appregistry "micro-one-api/platform/registry"
 	subscriptionbiz "micro-one-api/domain/subscription/biz"
 	subscriptiondata "micro-one-api/domain/subscription/data"
+	applogger "micro-one-api/platform/logging"
+	appregistry "micro-one-api/platform/registry"
 )
 
 var ProviderSet = wire.NewSet(

@@ -15,12 +15,13 @@ import (
 	billingv1 "micro-one-api/api/billing/v1"
 	channelv1 "micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
+	"micro-one-api/app/admin/internal/biz"
 	admincfg "micro-one-api/app/admin/internal/conf"
 	"micro-one-api/app/admin/internal/data"
 	"micro-one-api/app/admin/internal/service"
+	"micro-one-api/platform/database/xdb"
 	applogger "micro-one-api/platform/logging"
 	appregistry "micro-one-api/platform/registry"
-	"micro-one-api/platform/database/xdb"
 
 	subscriptionbiz "micro-one-api/domain/subscription/biz"
 	subscriptiondata "micro-one-api/domain/subscription/data"
@@ -95,7 +96,7 @@ func newClients(cfg *admincfg.Config) (*clientsResult, error) {
 
 // systemOptionsResult wraps the optional system-options store.
 type systemOptionsResult struct {
-	Repo service.SystemOptionsStore
+	Repo biz.SystemOptionsRepo
 }
 
 // newSystemOptionsRepo opens the system-options DB if configured, returning

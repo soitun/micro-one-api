@@ -17,8 +17,9 @@ import (
 	channelv1 "micro-one-api/api/channel/v1"
 	commonv1 "micro-one-api/api/common/v1"
 	identityv1 "micro-one-api/api/identity/v1"
-	relayprovider "micro-one-api/domain/upstream/provider"
+	adminbiz "micro-one-api/app/admin/internal/biz"
 	subscriptionbiz "micro-one-api/domain/subscription/biz"
+	relayprovider "micro-one-api/domain/upstream/provider"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,18 +32,12 @@ type AdminService struct {
 	billingClient   billingv1.BillingServiceClient
 	identityClient  identityv1.IdentityServiceClient
 	channelClient   channelv1.ChannelServiceClient
-	systemOptsRepo  SystemOptionsStore
+	systemOptsUc    *adminbiz.SystemOptionsUsecase
 	httpClient      *http.Client
 	providerFactory *relayprovider.ProviderFactory
 	subscriptionUc  *subscriptionbiz.SubscriptionUsecase
 	groupUc         *subscriptionbiz.GroupUsecase
 	planUc          *subscriptionbiz.PlanUsecase
-}
-
-// SystemOptionsStore is the interface for system options persistence.
-type SystemOptionsStore interface {
-	Get(key string) (string, error)
-	Set(key, value string) error
 }
 
 type OneAPIOption struct {
@@ -60,13 +55,13 @@ func NewAdminService(
 	billingClient billingv1.BillingServiceClient,
 	identityClient identityv1.IdentityServiceClient,
 	channelClient channelv1.ChannelServiceClient,
-	systemOptsRepo SystemOptionsStore,
+	systemOptsUc *adminbiz.SystemOptionsUsecase,
 ) *AdminService {
 	return &AdminService{
 		billingClient:   billingClient,
 		identityClient:  identityClient,
 		channelClient:   channelClient,
-		systemOptsRepo:  systemOptsRepo,
+		systemOptsUc:    systemOptsUc,
 		httpClient:      &http.Client{Timeout: 10 * time.Second},
 		providerFactory: relayprovider.NewProviderFactory(10 * time.Second),
 	}
@@ -1600,27 +1595,27 @@ var oneAPIOptionLegacyAliases = map[string]string{
 	"AmountPerUnit":    "QuotaPerUnit",
 }
 
-func (s *AdminService) ListOneAPIOptions(context.Context) ([]OneAPIOption, error) {
+func (s *AdminService) ListOneAPIOptions(ctx context.Context) ([]OneAPIOption, error) {
 	values := make(map[string]string, len(oneAPIOptionDefaults))
 	for key, value := range oneAPIOptionDefaults {
 		values[key] = value
 	}
-	if s.systemOptsRepo != nil {
+	if s.systemOptsUc != nil {
 		for key := range values {
-			if v, err := s.systemOptsRepo.Get(key); err == nil && v != "" {
+			if v, err := s.systemOptsUc.Get(ctx, key); err == nil && v != "" {
 				values[key] = v
 				continue
 			}
 			if legacyKey := oneAPIOptionLegacyAliases[key]; legacyKey != "" {
-				if v, err := s.systemOptsRepo.Get(legacyKey); err == nil && v != "" {
+				if v, err := s.systemOptsUc.Get(ctx, legacyKey); err == nil && v != "" {
 					values[key] = v
 				}
 			}
 		}
-		if v, err := s.systemOptsRepo.Get("site_title"); err == nil && v != "" && values["SystemName"] == oneAPIOptionDefaults["SystemName"] {
+		if v, err := s.systemOptsUc.Get(ctx, "site_title"); err == nil && v != "" && values["SystemName"] == oneAPIOptionDefaults["SystemName"] {
 			values["SystemName"] = v
 		}
-		if v, err := s.systemOptsRepo.Get("registration_enabled"); err == nil && v != "" && values["RegisterEnabled"] == oneAPIOptionDefaults["RegisterEnabled"] {
+		if v, err := s.systemOptsUc.Get(ctx, "registration_enabled"); err == nil && v != "" && values["RegisterEnabled"] == oneAPIOptionDefaults["RegisterEnabled"] {
 			values["RegisterEnabled"] = v
 		}
 	}
@@ -1639,13 +1634,13 @@ func (s *AdminService) ListOneAPIOptions(context.Context) ([]OneAPIOption, error
 	return options, nil
 }
 
-func (s *AdminService) GetOneAPIOption(_ context.Context, key string) (string, error) {
-	if s.systemOptsRepo != nil {
-		if v, err := s.systemOptsRepo.Get(key); err == nil && v != "" {
+func (s *AdminService) GetOneAPIOption(ctx context.Context, key string) (string, error) {
+	if s.systemOptsUc != nil {
+		if v, err := s.systemOptsUc.Get(ctx, key); err == nil && v != "" {
 			return v, nil
 		}
 		if legacyKey := oneAPIOptionLegacyAliases[key]; legacyKey != "" {
-			if v, err := s.systemOptsRepo.Get(legacyKey); err == nil && v != "" {
+			if v, err := s.systemOptsUc.Get(ctx, legacyKey); err == nil && v != "" {
 				return v, nil
 			}
 		}
@@ -1686,7 +1681,7 @@ func (s *AdminService) UpsertGroup(ctx context.Context, group string, ratio floa
 		return nil, err
 	}
 	ratios[group] = ratio
-	if err := s.saveGroupRatios(ratios); err != nil {
+	if err := s.saveGroupRatios(ctx, ratios); err != nil {
 		return nil, err
 	}
 	return &GroupConfig{Group: group, Ratio: ratio}, nil
@@ -1709,7 +1704,7 @@ func (s *AdminService) DeleteGroup(ctx context.Context, group string) (*GroupCon
 	if _, ok := ratios["default"]; !ok {
 		ratios["default"] = 1
 	}
-	if err := s.saveGroupRatios(ratios); err != nil {
+	if err := s.saveGroupRatios(ctx, ratios); err != nil {
 		return nil, err
 	}
 	return &GroupConfig{Group: group, Ratio: ratio}, nil
@@ -1729,8 +1724,8 @@ func (s *AdminService) groupRatios(ctx context.Context) (map[string]float64, err
 	return ratios, nil
 }
 
-func (s *AdminService) saveGroupRatios(ratios map[string]float64) error {
-	if s.systemOptsRepo == nil {
+func (s *AdminService) saveGroupRatios(ctx context.Context, ratios map[string]float64) error {
+	if s.systemOptsUc == nil {
 		return fmt.Errorf("system options storage not configured")
 	}
 	keys := make([]string, 0, len(ratios))
@@ -1746,11 +1741,11 @@ func (s *AdminService) saveGroupRatios(ratios map[string]float64) error {
 	if err != nil {
 		return err
 	}
-	return s.systemOptsRepo.Set("GroupRatio", string(payload))
+	return s.systemOptsUc.Set(ctx, "GroupRatio", string(payload))
 }
 
-func (s *AdminService) UpdateOneAPIOption(_ context.Context, key, value string) (*adminv1.UpdateSystemOptionsResponse, error) {
-	if s.systemOptsRepo == nil {
+func (s *AdminService) UpdateOneAPIOption(ctx context.Context, key, value string) (*adminv1.UpdateSystemOptionsResponse, error) {
+	if s.systemOptsUc == nil {
 		return &adminv1.UpdateSystemOptionsResponse{
 			Success: false,
 			Message: "system options storage not configured",
@@ -1762,7 +1757,7 @@ func (s *AdminService) UpdateOneAPIOption(_ context.Context, key, value string) 
 			Message: "option key is required",
 		}, nil
 	}
-	if err := s.systemOptsRepo.Set(key, value); err != nil {
+	if err := s.systemOptsUc.Set(ctx, key, value); err != nil {
 		return &adminv1.UpdateSystemOptionsResponse{
 			Success: false,
 			Message: fmt.Sprintf("failed to save %s: %v", key, err),
@@ -1770,9 +1765,9 @@ func (s *AdminService) UpdateOneAPIOption(_ context.Context, key, value string) 
 	}
 	switch key {
 	case "SystemName":
-		_ = s.systemOptsRepo.Set("site_title", value)
+		_ = s.systemOptsUc.Set(ctx, "site_title", value)
 	case "RegisterEnabled":
-		_ = s.systemOptsRepo.Set("registration_enabled", value)
+		_ = s.systemOptsUc.Set(ctx, "registration_enabled", value)
 	}
 	return &adminv1.UpdateSystemOptionsResponse{
 		Success: true,
@@ -1784,11 +1779,11 @@ func (s *AdminService) GetSystemOptions(ctx context.Context, req *adminv1.GetSys
 	siteTitle := "One-API"
 	registrationEnabled := true
 
-	if s.systemOptsRepo != nil {
-		if v, err := s.systemOptsRepo.Get("site_title"); err == nil && v != "" {
+	if s.systemOptsUc != nil {
+		if v, err := s.systemOptsUc.Get(ctx, "site_title"); err == nil && v != "" {
 			siteTitle = v
 		}
-		if v, err := s.systemOptsRepo.Get("registration_enabled"); err == nil && v != "" {
+		if v, err := s.systemOptsUc.Get(ctx, "registration_enabled"); err == nil && v != "" {
 			registrationEnabled = v == "true"
 		}
 	}
@@ -1802,7 +1797,7 @@ func (s *AdminService) GetSystemOptions(ctx context.Context, req *adminv1.GetSys
 }
 
 func (s *AdminService) UpdateSystemOptions(ctx context.Context, req *adminv1.UpdateSystemOptionsRequest) (*adminv1.UpdateSystemOptionsResponse, error) {
-	if s.systemOptsRepo == nil {
+	if s.systemOptsUc == nil {
 		return &adminv1.UpdateSystemOptionsResponse{
 			Success: false,
 			Message: "system options storage not configured",
@@ -1816,7 +1811,7 @@ func (s *AdminService) UpdateSystemOptions(ctx context.Context, req *adminv1.Upd
 		}, nil
 	}
 
-	if err := s.systemOptsRepo.Set("site_title", req.Options.SiteTitle); err != nil {
+	if err := s.systemOptsUc.Set(ctx, "site_title", req.Options.SiteTitle); err != nil {
 		return &adminv1.UpdateSystemOptionsResponse{
 			Success: false,
 			Message: fmt.Sprintf("failed to save site_title: %v", err),
@@ -1827,7 +1822,7 @@ func (s *AdminService) UpdateSystemOptions(ctx context.Context, req *adminv1.Upd
 	if req.Options.RegistrationEnabled {
 		registrationValue = "true"
 	}
-	if err := s.systemOptsRepo.Set("registration_enabled", registrationValue); err != nil {
+	if err := s.systemOptsUc.Set(ctx, "registration_enabled", registrationValue); err != nil {
 		return &adminv1.UpdateSystemOptionsResponse{
 			Success: false,
 			Message: fmt.Sprintf("failed to save registration_enabled: %v", err),

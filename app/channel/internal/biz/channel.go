@@ -14,7 +14,6 @@ import (
 
 	"micro-one-api/platform/events"
 
-
 	"github.com/bytedance/sonic"
 )
 
@@ -572,7 +571,6 @@ func (uc *ChannelUsecase) RecordHealth(ctx context.Context, event ChannelHealthE
 	uc.notifyUnavailable(ctx, &previousSnapshot, channel, event)
 	return nil
 }
-
 
 func (uc *ChannelUsecase) DeleteChannel(ctx context.Context, channelID int64) error {
 	if err := uc.repo.DeleteChannel(ctx, channelID); err != nil {
