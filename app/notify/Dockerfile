@@ -114,6 +114,9 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app/bin/service /service
 COPY --from=builder /app/app/notify/configs /configs
 
+# Default config path; overridable via -e CONF_PATH=... at runtime.
+ENV CONF_PATH=/configs/config.yaml
+
 USER 65534:65534
 
 EXPOSE 8080

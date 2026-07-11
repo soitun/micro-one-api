@@ -4,7 +4,6 @@ import (
 	"context"
 
 	channelv1 "micro-one-api/api/channel/v1"
-	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/app/monitor/internal/biz"
 )
 
@@ -78,5 +77,3 @@ func (a *ChannelProbeAdapter) RecordChannelHealth(ctx context.Context, channelID
 // Ensure the adapter satisfies the biz interface.
 var _ biz.ChannelProbeClient = (*ChannelProbeAdapter)(nil)
 
-// Suppress unused import warning for commonv1 (used for type assertions in tests).
-var _ = commonv1.ChannelSummary{}

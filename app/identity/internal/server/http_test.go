@@ -1692,7 +1692,7 @@ type identityHTTPBillingClient struct {
 	createOrderResponse *billingv1.PaymentOrderResponse
 	redeemCode          string
 	topUpCalls          []capturedTopUp
-	createOrderCalls    []billingv1.CreatePaymentOrderRequest
+	createOrderCalls    []*billingv1.CreatePaymentOrderRequest
 	lastLedgerRequest   *billingv1.ListLedgerRequest
 	lastPaymentListReq  *billingv1.ListPaymentOrdersRequest
 	lastPaymentGetReq   *billingv1.GetPaymentOrderByTradeNoRequest
@@ -1759,7 +1759,7 @@ func (c *identityHTTPBillingClient) RedeemCode(ctx context.Context, req *billing
 }
 
 func (c *identityHTTPBillingClient) CreatePaymentOrder(ctx context.Context, req *billingv1.CreatePaymentOrderRequest, opts ...grpc.CallOption) (*billingv1.PaymentOrderResponse, error) {
-	c.createOrderCalls = append(c.createOrderCalls, *req)
+	c.createOrderCalls = append(c.createOrderCalls, req)
 	if c.createOrderResponse == nil {
 		return &billingv1.PaymentOrderResponse{Success: true, Order: &billingv1.PaymentOrder{TradeNo: "PAY-TEST", PayUrl: "mock://payment/PAY-TEST"}}, nil
 	}

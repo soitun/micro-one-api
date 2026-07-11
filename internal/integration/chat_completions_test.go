@@ -456,7 +456,10 @@ func TestChatCompletions_MissingBody(t *testing.T) {
 		req, _ := http.NewRequest("POST", relayURL+"/v1/chat/completions", bytes.NewBufferString(body))
 		req.Header.Set("Authorization", "Bearer test-token")
 		req.Header.Set("Content-Type", "application/json")
-		resp, _ := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d", resp.StatusCode)
@@ -467,7 +470,10 @@ func TestChatCompletions_MissingBody(t *testing.T) {
 		req, _ := http.NewRequest("POST", relayURL+"/v1/chat/completions", bytes.NewBufferString("not json"))
 		req.Header.Set("Authorization", "Bearer test-token")
 		req.Header.Set("Content-Type", "application/json")
-		resp, _ := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d", resp.StatusCode)
@@ -477,7 +483,10 @@ func TestChatCompletions_MissingBody(t *testing.T) {
 	t.Run("WrongMethod", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", relayURL+"/v1/chat/completions", nil)
 		req.Header.Set("Authorization", "Bearer test-token")
-		resp, _ := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Fatalf("expected 405, got %d", resp.StatusCode)
