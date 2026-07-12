@@ -6,7 +6,7 @@
 
 本项目面向需要统一管理多个上游模型供应商、钱包余额、访问令牌、账务和运营后台的场景。它不是上游服务的替代品，也不提供任何第三方模型账号、订阅或 API Key。
 
-> 📣 **最新发布**:[v0.6.0 发布公告](./docs/release-v0.6.0.md)(订阅用量查询、套餐生命周期、账号治理与发布可运维性) · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.6.0)
+> 📣 **最新发布**:[v0.7.0 发布公告](./docs/release-v0.7.0.md)(Kratos 大仓结构迁移、基础设施分层、架构边界守卫) · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.7.0)
 
 ## 功能概览
 
@@ -46,12 +46,17 @@
 | 目录 | 说明 |
 |------|------|
 | `api/` | gRPC、HTTP 和 OpenAPI 相关 proto 定义及生成代码 |
-| `cmd/` | 各服务入口 |
-| `configs/` | 服务配置文件 |
-| `internal/` | 各服务业务实现和公共包 |
+| `app/` | 子服务大仓（admin/billing/channel/config/identity/log/monitor/notify），各含 `cmd/`、`internal/`、`configs/`、`Dockerfile`、`Makefile` |
+| `cmd/` | 根服务入口（`relay-gateway/`、`migrate/`、`admin-reset/`） |
+| `configs/` | relay-gateway 配置文件 |
+| `internal/` | relay-gateway 业务实现和 `conf` 配置 proto |
+| `domain/` | 共享域库（`subscription` 订阅域、`upstream` 上游 provider），跨服务嵌入 |
+| `platform/` | 基础设施层（cache/database/grpc/http/logging/metrics/middleware/registry/security/tls/tracing/websocket） |
+| `pkg/` | 纯工具包（errors/safecast/safefile/timeout 等） |
 | `migrations/` | MySQL schema 迁移 |
 | `web/` | 管理后台前端 |
 | `deployments/` | Docker、Docker Compose 和 Kubernetes 部署文件 |
+| `scripts/` | 构建脚本、部署脚本、架构检查脚本 |
 | `docs/` | 部署运维文档 |
 | `test/` | 集成测试和端到端测试 |
 
@@ -116,19 +121,11 @@ make web-dist
 
 完整部署说明见 [docs/deployment.md](./docs/deployment.md)。
 
-### 升级到 v0.6.0
+### 升级到 v0.7.0
 
-v0.6.0 新增数据库迁移 `057-059`，覆盖支付订单套餐快照、订阅订单关联、fixed 策略额度重置运行记录和单用户单 active 订阅唯一约束。升级前请先备份数据库，并检查是否存在重复 active subscription：
+v0.7.0 是 Kratos 大仓结构迁移版本，**不涉及数据库迁移和 API 破坏性变更**。升级步骤为重建镜像并滚动重启，详见 [docs/release-v0.7.0.md](./docs/release-v0.7.0.md)。
 
-```sql
-SELECT user_id, COUNT(*) AS active_count
-FROM user_subscriptions
-WHERE status = 'active'
-GROUP BY user_id
-HAVING COUNT(*) > 1;
-```
-
-迁移与验证步骤见 [docs/release-v0.6.0.md](./docs/release-v0.6.0.md)。
+> v0.6.0 及更早版本的数据库迁移说明见 [docs/release-v0.6.0.md](./docs/release-v0.6.0.md)。
 
 ## API 示例
 

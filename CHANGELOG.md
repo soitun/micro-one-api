@@ -7,6 +7,70 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-12
+
+v0.7.0 是 v0.6.1 之后的 Kratos 大仓结构迁移版本。范围覆盖 `v0.6.1..v0.7.0` 共 9 次提交、560 个文件、+8.6k/-3.2k 行。本版为纯结构性重构，不涉及 API 破坏性变更，不新增数据库迁移。
+
+### Added
+- 新增 `app/` 大仓结构：8 个子服务（admin/billing/channel/config/identity/log/monitor/notify）各含独立 `cmd/`、`internal/`、`configs/config.yaml`、`Dockerfile` 和 `Makefile`，共用根 `go.mod`。
+- 新增 `platform/` 基础设施层：15 个基础设施包（audit/cache/config/database/events/grpc/http/logging/metrics/middleware/registry/security/tls/tracing/websocket），从原 `internal/pkg/` 提取。
+- 新增 `domain/` 共享域库：`domain/subscription`（订阅域 biz+data，admin/billing/relay 共享）和 `domain/upstream`（上游 provider+credential），含 `domain/subscription/README.md` 边界与所有权说明。
+- 新增 `scripts/check-architecture.sh` 架构边界守卫：7 条层级依赖规则（service→data、biz→service、biz→data、biz→DTO、data→service、data→DTO）+ wireinject 编译检查，集成到 CI。
+- 新增 `AGENTS.md` 仓库级编码规约：DTO/DO/PO 三层模型与层间依赖箭头规则、加资源清单和测试策略。
+- 新增 per-service `Makefile`（`make wire` / `make wire-check` / `make build`）和 root Makefile `wire` / `wire-check` target。
+- 新增 admin `biz` 层（`SystemOption` DO、`SystemOptionsRepo` interface、`SystemOptionsUsecase`），将原 `service.SystemOptionsStore` 重构为符合 DTO→DO→PO 分层。
+
+### Changed
+- **Kratos 大仓结构迁移**：relay-gateway 保留为根 `cmd/relay-gateway/` + `internal/`；其余 8 个服务迁移到 `app/<service>/cmd/<service>/` + `app/<service>/internal/{biz,data,server,service}`。
+- **配置布局重构**：原 `configs/<service>.yaml` 删除，各服务改为 `app/<service>/configs/config.yaml`；relay-gateway 使用根 `configs/config.yaml`。所有 Dockerfile 设 `ENV CONF_PATH=/configs/config.yaml`。
+- **Dockerfile 拆分**：原根 Dockerfile 保留用于 relay-gateway，新增 8 个 `app/*/Dockerfile` 每服务独立构建；`deployments/docker/Dockerfile` 同步更新。
+- `api/relay` 重命名为 `api/relay-gateway`；`internal/config` 重命名为 `internal/conf`。
+- 导入路径更新：234 处 Go import 路径跨 132 文件更新以匹配新结构。
+- `make wire` 全量重生成 9 个 `wire_gen.go`，完全可复现。
+- `check-architecture.sh` 更新为支持 flat 结构 + root `internal/`。
+- CI 工作流更新：Docker matrix 使用 `include` + path，新增架构检查 step 和生成文件新鲜度验证 step。
+
+### Fixed
+- 修复前端 web API 502/404 错误：`SubscriptionPlansPage.tsx` 移除冗余 `/api` 前缀（baseURL 已含 `/api`）；`http.go` 路由顺序修正（`operation-report` 在 prefix handler 前注册）；新增缺失的 `/admin/subscription-plans` SPA 页面路由。
+- 修复 `go vet` lock-copy 告警：proto message 含 `sync.Mutex` 不可按值拷贝，改用指针。
+- 修复 `go vet` "using resp before checking for errors" 告警：先捕获 err 再解引用 resp。
+- 修复 relay-gateway `wire.go`：`newApp()` 返回 error，启动期 discovery/registrar/gRPC client/cache/subscription repo/mTLS 错误正确传播，mTLS 改为 fail-closed。
+- 修复 admin `http_test.go`：适配 `service.SystemOptionsStore` → `biz.SystemOptionsRepo + SystemOptionsUsecase` 重构。
+- Docker Compose 新增 `SSL_CERT_FILE` 环境变量和 `ca-certificates` 卷挂载，修复 relay-gateway 容器内上游 HTTPS 调用。
+
+## [0.6.1] - 2026-07-09
+
+### Fixed
+- 修复 admin logo 静态资源 404（`8c6da60`）。
+- 刷新 v0.6.0 品牌和 README（`76628b8`）。
+
+## [0.6.0] - 2026-07-09
+
+### Added
+- 新增 `/v1/subscription/usage` API：返回用户订阅额度、已用量、剩余额度和下一次刷新时间。
+- 新增管理后台订阅套餐管理页（`SubscriptionPlansPage.tsx`），支持套餐创建、上下架、价格与有效期配置。
+- 支付订单新增 `plan_snapshot`，订单发放与后续套餐上下架/删除解耦。
+- 新增订阅订单续费幂等、退款撤销/缩短订阅、订单到订阅确定性关联。
+- 新增订阅账号治理自动化：fixed 策略 daily/weekly 额度重置、账号恢复、额度告警、治理指标与 runbook。
+- 新增 Relay 订阅路径压测脚本、报告生成与压测 runbook。
+- 新增单用户单 active 订阅数据库唯一约束（`059`）。
+
+### Changed
+- 订阅额度刷新锚点修正为自然日/自然周窗口，并返回 next-refresh times。
+- 订阅运营报表新增 usage/fallback ratio。
+- 默认订阅用户 RPM 限制保持关闭。
+
+### Fixed
+- 支付提交阶段吸收实际订阅用量，避免预估用量和最终账本不一致。
+- 修复退款路径在用户已购买新订阅后错误回退到"当前 active 订阅"的风险。
+- 修复并发创建 active subscription 时可能绕过业务层检查的问题。
+
+### Security
+- gosec SAST：0 issues。
+- govulncheck SCA：0 vulnerabilities。
+- gitleaks secret scan：0 leaks。
+- 临时 replace `github.com/go-kratos/kratos/v2` 到包含 CVE-2026-6993 修复的提交。
+
 ## [0.5.0] - 2026-07-05
 
 ### Added
