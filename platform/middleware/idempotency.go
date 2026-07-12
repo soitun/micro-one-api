@@ -181,7 +181,6 @@ func (im *IdempotencyMiddleware) Handler(next http.Handler) http.Handler {
 		if cachedResp := im.getCachedResponse(r.Context(), normalizedKey); cachedResp != nil {
 			im.writeCachedResponse(w, r, cachedResp)
 			applogger.Log.Info("Idempotency replay",
-				zap.String("key", normalizedKey),
 				zap.String("method", r.Method),
 				zap.String("path", r.URL.Path),
 			)
@@ -226,7 +225,7 @@ func (im *IdempotencyMiddleware) getCachedResponse(ctx context.Context, key stri
 			}
 			if applogger.Log != nil {
 				applogger.Log.Debug("failed to unmarshal idempotency response from Redis",
-					zap.String("key", key), zap.Error(err))
+					zap.Error(err))
 			}
 		}
 	}
@@ -251,7 +250,7 @@ func (im *IdempotencyMiddleware) cacheResponse(ctx context.Context, key string, 
 			}
 			if err := im.redis.Set(ctx, redisKey, data, ttl).Err(); err != nil && applogger.Log != nil {
 				applogger.Log.Debug("failed to store idempotency response in Redis",
-					zap.String("key", key), zap.Error(err))
+					zap.Error(err))
 			}
 		}
 	}
