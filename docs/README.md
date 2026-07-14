@@ -5,6 +5,7 @@
 ```
 docs/
 ├── README.md            ← 本索引
+├── TODO.md              ← 当前待办、优先级与验收标准
 ├── deployment.md        ← 部署运维文档（最高频查阅，保留在根目录）
 ├── community-promotion-blog.md  ← 社区宣传博客
 ├── logo-design.md       ← Logo 设计说明
@@ -20,6 +21,7 @@ docs/
 | 我想... | 看这里 |
 |---------|--------|
 | 部署 / 升级服务 | [deployment.md](./deployment.md) |
+| 查看当前待办和优先级 | [TODO.md](./TODO.md) |
 | 查看某版本发布内容 | [releases/](./releases/) |
 | 排查订阅系统生产故障 | [runbooks/subscription-production-runbook.md](./runbooks/subscription-production-runbook.md) |
 | 理解整体架构 | [design/ARCHITECTURE_REFACTOR.md](./design/ARCHITECTURE_REFACTOR.md) |
