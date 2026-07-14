@@ -33,7 +33,7 @@ func NewHTTPServer(addr string, svc *service.MonitorService) *khttp.Server {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
 	})
-	srv.HandleFunc("/v1/alert-rules/", func(w http.ResponseWriter, r *http.Request) {
+	srv.HandlePrefix("/v1/alert-rules/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			svc.HandleGetAlertRule(w, r)
@@ -44,7 +44,7 @@ func NewHTTPServer(addr string, svc *service.MonitorService) *khttp.Server {
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
-	})
+	}))
 	srv.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		metrics.Handler().ServeHTTP(w, r)
 	})

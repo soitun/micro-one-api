@@ -75,7 +75,7 @@ func NewHTTPServer(addr string, svc *service.LogService, identityClients ...iden
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
 	}))
-	srv.HandleFunc("/v1/logs/", ServiceAuth(func(w http.ResponseWriter, r *http.Request) {
+	srv.HandlePrefix("/v1/logs/", ServiceAuth(func(w http.ResponseWriter, r *http.Request) {
 		svc.HandleGetLog(w, r)
 	}))
 	srv.HandleFunc("/api/log/self", func(w http.ResponseWriter, r *http.Request) {
