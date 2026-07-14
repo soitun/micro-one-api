@@ -1601,6 +1601,11 @@ func (uc *BillingUsecase) ListLedgers(ctx context.Context, userID string, page, 
 	return uc.ledgerRepo.ListLedgers(ctx, userID, page, pageSize)
 }
 
+// GetLedgerByID returns a single ledger entry by its primary key.
+func (uc *BillingUsecase) GetLedgerByID(ctx context.Context, id int64) (*Ledger, error) {
+	return uc.ledgerRepo.GetLedgerByID(ctx, id)
+}
+
 // AggregateLedgerByDate delegates to the ledger repo.
 func (uc *BillingUsecase) AggregateLedgerByDate(ctx context.Context, userID, ledgerType string, startTime, endTime time.Time) ([]*DailyAggregate, []*ModelAggregate, error) {
 	return uc.ledgerRepo.AggregateLedgerByDate(ctx, userID, ledgerType, startTime, endTime)

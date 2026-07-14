@@ -368,6 +368,61 @@ func (s *AdminService) ListUserLedger(ctx context.Context, req *adminv1.ListUser
 	}, nil
 }
 
+// GetLedgerEntry returns one complete billing ledger entry for the admin API.
+func (s *AdminService) GetLedgerEntry(ctx context.Context, id int64) (map[string]interface{}, error) {
+	resp, err := s.billingClient.GetLedgerEntry(ctx, &billingv1.GetLedgerEntryRequest{Id: id})
+	if err != nil {
+		return nil, err
+	}
+	entry := resp.GetEntry()
+	if entry == nil {
+		return nil, fmt.Errorf("ledger entry not found")
+	}
+	var createdAt int64
+	if entry.GetCreatedAt() != nil {
+		createdAt = entry.GetCreatedAt().AsTime().Unix()
+	}
+	return map[string]interface{}{
+		"id":                      entry.GetId(),
+		"userId":                  entry.GetUserId(),
+		"user_id":                 entry.GetUserId(),
+		"username":                entry.GetUsername(),
+		"type":                    entry.GetType(),
+		"amount":                  entry.GetAmount(),
+		"balanceAfter":            entry.GetBalanceAfter(),
+		"referenceId":             entry.GetReferenceId(),
+		"request_id":              entry.GetReferenceId(),
+		"remark":                  entry.GetRemark(),
+		"message":                 entry.GetRemark(),
+		"createdAt":               createdAt,
+		"created_at":              createdAt,
+		"tokenName":               entry.GetTokenName(),
+		"token_name":              entry.GetTokenName(),
+		"modelName":               entry.GetModelName(),
+		"model_name":              entry.GetModelName(),
+		"quota":                   entry.GetQuota(),
+		"promptTokens":            entry.GetPromptTokens(),
+		"prompt_tokens":           entry.GetPromptTokens(),
+		"completionTokens":        entry.GetCompletionTokens(),
+		"completion_tokens":       entry.GetCompletionTokens(),
+		"cacheReadTokens":         entry.GetCacheReadTokens(),
+		"cache_read_tokens":       entry.GetCacheReadTokens(),
+		"channelId":               entry.GetChannelId(),
+		"channel":                 entry.GetChannelId(),
+		"subscriptionAccountId":   entry.GetSubscriptionAccountId(),
+		"subscription_account_id": entry.GetSubscriptionAccountId(),
+		"elapsedTime":             entry.GetElapsedTime(),
+		"elapsed_time":            entry.GetElapsedTime(),
+		"isStream":                entry.GetIsStream(),
+		"is_stream":               entry.GetIsStream(),
+		"endpoint":                entry.GetEndpoint(),
+		"costSource":              entry.GetCostSource(),
+		"subscriptionCost":        entry.GetSubscriptionCost(),
+		"balanceCost":             entry.GetBalanceCost(),
+		"ledgerDedupeKey":         entry.GetLedgerDedupeKey(),
+	}, nil
+}
+
 func (s *AdminService) ListPaymentOrders(ctx context.Context, req *billingv1.ListPaymentOrdersRequest) (*billingv1.ListPaymentOrdersResponse, error) {
 	if s.billingClient == nil {
 		return &billingv1.ListPaymentOrdersResponse{}, nil
@@ -2022,6 +2077,7 @@ func (s *AdminService) ListLedgerEntries(ctx context.Context, req *adminv1.ListL
 			"subscriptionCost":      entry.GetSubscriptionCost(),
 			"balanceCost":           entry.GetBalanceCost(),
 			"ledgerDedupeKey":       entry.GetLedgerDedupeKey(),
+			"username":              entry.GetUsername(),
 		})
 	}
 

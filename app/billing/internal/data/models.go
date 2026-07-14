@@ -80,6 +80,10 @@ type ledgerModel struct {
 	BalanceCost      int64     `gorm:"column:balance_cost"`
 	LedgerDedupeKey  string    `gorm:"uniqueIndex:idx_ledger_dedupe_key;column:ledger_dedupe_key"`
 	CreatedAt        time.Time `gorm:"index;column:created_at"`
+	// Username is not a real column — it is scanned from the users table
+	// via a LEFT JOIN in list/get queries. It must be tagged with `-:migration`
+	// so GORM AutoMigrate does not try to add it to billing_ledgers.
+	Username string `gorm:"->;-:migration"`
 }
 
 func (ledgerModel) TableName() string { return "billing_ledgers" }

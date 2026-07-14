@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	billingv1 "micro-one-api/api/billing/v1"
 	channelv1 "micro-one-api/api/channel/v1"
@@ -23,6 +24,8 @@ import (
 	subscriptiondata "micro-one-api/domain/subscription/data"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -313,6 +316,12 @@ type adminHTTPBillingClient struct {
 	paymentGetLastReq  *billingv1.GetPaymentOrderByTradeNoRequest
 	paymentCreateReq   *billingv1.CreatePaymentOrderRequest
 	aggregateReqs      []*billingv1.AggregateUsageRequest
+	ledgerEntries      []*commonv1.LedgerEntry
+	ledgerTotal        int64
+	ledgerListLastReq  *billingv1.ListLedgerRequest
+	ledgerGetEntry     *commonv1.LedgerEntry
+	ledgerGetErr       error
+	ledgerGetLastID    int64
 }
 
 func (c *adminHTTPBillingClient) TopUpQuota(ctx context.Context, req *billingv1.TopUpQuotaRequest, opts ...grpc.CallOption) (*billingv1.TopUpQuotaResponse, error) {
@@ -370,13 +379,27 @@ func (c *adminHTTPBillingClient) DeleteRedeemCode(ctx context.Context, req *bill
 }
 
 func (c *adminHTTPBillingClient) ListLedger(ctx context.Context, req *billingv1.ListLedgerRequest, opts ...grpc.CallOption) (*billingv1.ListLedgerResponse, error) {
-	return &billingv1.ListLedgerResponse{
-		Entries: []*commonv1.LedgerEntry{
+	c.ledgerListLastReq = req
+	entries := c.ledgerEntries
+	total := c.ledgerTotal
+	if entries == nil {
+		entries = []*commonv1.LedgerEntry{
 			{UserId: "42", Type: "topup", Amount: 100, BalanceAfter: 600, CreatedAt: timestamppb.Now()},
 			{UserId: "42", Type: "consume", Amount: -25, BalanceAfter: 575, CreatedAt: timestamppb.Now()},
-		},
-		Total: 2,
-	}, nil
+		}
+	}
+	if total == 0 {
+		total = int64(len(entries))
+	}
+	return &billingv1.ListLedgerResponse{Entries: entries, Total: total}, nil
+}
+
+func (c *adminHTTPBillingClient) GetLedgerEntry(ctx context.Context, req *billingv1.GetLedgerEntryRequest, opts ...grpc.CallOption) (*billingv1.GetLedgerEntryResponse, error) {
+	c.ledgerGetLastID = req.GetId()
+	if c.ledgerGetErr != nil {
+		return nil, c.ledgerGetErr
+	}
+	return &billingv1.GetLedgerEntryResponse{Entry: c.ledgerGetEntry}, nil
 }
 
 func (c *adminHTTPBillingClient) AggregateUsage(ctx context.Context, req *billingv1.AggregateUsageRequest, opts ...grpc.CallOption) (*billingv1.AggregateUsageResponse, error) {
@@ -2333,14 +2356,18 @@ func TestAdminHTTPLogStats(t *testing.T) {
 
 func TestAdminHTTPOneAPILogRoutes(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
-	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
+	billingClient := &adminHTTPBillingClient{ledgerTotal: 42}
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, billingClient)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/log/?p=0&type=topup", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/log/?p=0&page_size=20&type=topup", nil)
 	req.Header.Set("Authorization", "Bearer admin-token")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) || !strings.Contains(rec.Body.String(), `"type":"topup"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success":true`) || !strings.Contains(rec.Body.String(), `"type":"topup"`) || !strings.Contains(rec.Body.String(), `"total":42`) || !strings.Contains(rec.Body.String(), `"logs":[`) {
 		t.Fatalf("log list response mismatch: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if billingClient.ledgerListLastReq == nil || billingClient.ledgerListLastReq.GetPage() != 1 || billingClient.ledgerListLastReq.GetPageSize() != 20 {
+		t.Fatalf("ListLedger request mismatch: %+v", billingClient.ledgerListLastReq)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/log/search?user_id=42&type=consume", nil)
@@ -2419,24 +2446,27 @@ func TestAdminHTTPOneAPILogDeleteRequiresEndTime(t *testing.T) {
 	}
 }
 
-func TestAdminHTTPOneAPILogDetailProxiesToLogService(t *testing.T) {
+func TestAdminHTTPOneAPILogDetailUsesBillingLedger(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
-	t.Setenv("SERVICE_TOKEN", "service-token")
-
-	var gotAuth string
-	logService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/v1/logs/123" {
-			t.Fatalf("unexpected log-service request: %s %s", r.Method, r.URL.Path)
-		}
-		gotAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":123,"type":"consume","message":"ok"}`))
-	}))
-	defer logService.Close()
-	t.Setenv("LOG_HTTP_ENDPOINT", logService.URL)
-
-	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
-	req := httptest.NewRequest(http.MethodGet, "/api/log/123", nil)
+	billingClient := &adminHTTPBillingClient{ledgerGetEntry: &commonv1.LedgerEntry{
+		Id:               "7538",
+		UserId:           "1",
+		Username:         "admin",
+		Type:             "consume",
+		ReferenceId:      "res-7538",
+		Remark:           "billing detail",
+		ModelName:        "gpt-4o-mini",
+		TokenName:        "prod-key",
+		Quota:            100,
+		PromptTokens:     11,
+		CompletionTokens: 13,
+		ChannelId:        7,
+		ElapsedTime:      250,
+		IsStream:         true,
+		CreatedAt:        timestamppb.New(time.Unix(1760000000, 0)),
+	}}
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, billingClient)
+	req := httptest.NewRequest(http.MethodGet, "/api/log/7538", nil)
 	req.Header.Set("Authorization", "Bearer admin-token")
 	rec := httptest.NewRecorder()
 
@@ -2445,32 +2475,31 @@ func TestAdminHTTPOneAPILogDetailProxiesToLogService(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
-	if gotAuth != "Bearer service-token" {
-		t.Fatalf("auth = %q", gotAuth)
+	if billingClient.ledgerGetLastID != 7538 {
+		t.Fatalf("GetLedgerEntry id = %d, want 7538", billingClient.ledgerGetLastID)
 	}
-	for _, want := range []string{`"success":true`, `"id":123`, `"type":"consume"`} {
+	for _, want := range []string{`"success":true`, `"id":"7538"`, `"username":"admin"`, `"model_name":"gpt-4o-mini"`, `"elapsed_time":250`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("detail response missing %s: %s", want, rec.Body.String())
 		}
 	}
 }
 
-func TestAdminHTTPOneAPILogDetailRequiresConfiguredLogService(t *testing.T) {
+func TestAdminHTTPOneAPILogDetailReturnsNotFound(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "admin-token")
-	t.Setenv("SERVICE_TOKEN", "service-token")
-
-	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, &adminHTTPBillingClient{})
-	req := httptest.NewRequest(http.MethodGet, "/api/log/123", nil)
+	billingClient := &adminHTTPBillingClient{ledgerGetErr: status.Error(codes.NotFound, "ledger entry not found")}
+	srv := newAdminHTTPTestServer(&adminHTTPIdentityClient{}, &adminHTTPChannelClient{}, billingClient)
+	req := httptest.NewRequest(http.MethodGet, "/api/log/999999", nil)
 	req.Header.Set("Authorization", "Bearer admin-token")
 	rec := httptest.NewRecorder()
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want 501, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "log detail is not configured") {
-		t.Fatalf("detail configuration response mismatch: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "ledger entry not found") {
+		t.Fatalf("detail not-found response mismatch: %s", rec.Body.String())
 	}
 }
 

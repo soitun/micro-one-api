@@ -29,6 +29,8 @@ import (
 	"micro-one-api/platform/http"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 //go:embed all:static/web
@@ -2957,7 +2959,7 @@ func handleOneAPILogByID(w http.ResponseWriter, r *http.Request, svc *service.Ad
 		writeJSON(w, http.StatusBadRequest, apiResponse(false, "invalid log id", nil))
 		return
 	}
-	handleOneAPIGetLog(w, r, idText)
+	handleOneAPIGetLog(w, r, svc, idText)
 }
 
 func handleOneAPIDeleteLogs(w http.ResponseWriter, r *http.Request) {
@@ -2995,34 +2997,22 @@ func handleOneAPIDeleteLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, apiResponse(true, "", payload))
 }
 
-func handleOneAPIGetLog(w http.ResponseWriter, r *http.Request, idText string) {
-	serviceToken := os.Getenv("SERVICE_TOKEN")
-	targetURL, err := logServiceURLFromEnv("/v1/logs/" + idText)
-	if err != nil || serviceToken == "" {
-		writeJSON(w, http.StatusNotImplemented, apiResponse(false, "log detail is not configured", nil))
+func handleOneAPIGetLog(w http.ResponseWriter, r *http.Request, svc *service.AdminService, idText string) {
+	id, err := strconv.ParseInt(idText, 10, 64)
+	if err != nil || id <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiResponse(false, "invalid log id", nil))
 		return
 	}
-	resp, err := doLogServiceRequest(r.Context(), http.MethodGet, targetURL, serviceToken)
+	entry, err := svc.GetLedgerEntry(r.Context(), id)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, apiResponse(false, "log service unavailable", nil))
+		if status.Code(err) == codes.NotFound {
+			writeJSON(w, http.StatusNotFound, apiResponse(false, "ledger entry not found", nil))
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, apiResponse(false, "failed to get log detail", nil))
 		return
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, apiResponse(false, "failed to read log service response", nil))
-		return
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		writeJSON(w, resp.StatusCode, apiResponse(false, string(body), nil))
-		return
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{"raw": string(body)}))
-		return
-	}
-	writeJSON(w, http.StatusOK, apiResponse(true, "", payload))
+	writeJSON(w, http.StatusOK, apiResponse(true, "", entry))
 }
 
 func logServiceURLFromEnv(path string) (*url.URL, error) {
@@ -3090,7 +3080,7 @@ func isAllowedLogServiceOrigin(scheme, host string) bool {
 }
 
 func handleOneAPIListLogs(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
-	entries, _, err := svc.ListLedgerEntries(r.Context(), &adminv1.ListLogsRequest{
+	entries, total, err := svc.ListLedgerEntries(r.Context(), &adminv1.ListLogsRequest{
 		Page:      oneAPIPage(r),
 		PageSize:  oneAPIPageSize(r),
 		UserId:    r.URL.Query().Get("user_id"),
@@ -3102,7 +3092,10 @@ func handleOneAPIListLogs(w http.ResponseWriter, r *http.Request, svc *service.A
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, apiResponse(true, "", entries))
+	writeJSON(w, http.StatusOK, apiResponse(true, "", map[string]interface{}{
+		"logs":  entries,
+		"total": total,
+	}))
 }
 
 func handleOneAPIExportLogs(w http.ResponseWriter, r *http.Request, svc *service.AdminService) {
