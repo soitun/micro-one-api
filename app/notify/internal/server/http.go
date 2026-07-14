@@ -23,9 +23,9 @@ func NewHTTPServer(addr string, svc *service.NotifyService) *khttp.Server {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
 	})
-	srv.HandleFunc("/v1/notifications/", func(w http.ResponseWriter, r *http.Request) {
+	srv.HandlePrefix("/v1/notifications/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		svc.HandleGetNotification(w, r)
-	})
+	}))
 	srv.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		metrics.Handler().ServeHTTP(w, r)
 	})

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -12,6 +13,8 @@ import (
 	"micro-one-api/app/billing/internal/biz"
 	"micro-one-api/pkg/safecast"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -400,12 +403,52 @@ func (s *BillingService) ListLedger(ctx context.Context, req *billingv1.ListLedg
 			SubscriptionCost:      ledger.SubscriptionCost,
 			BalanceCost:           ledger.BalanceCost,
 			LedgerDedupeKey:       ledger.LedgerDedupeKey,
+			Username:              ledger.Username,
 		}
 	}
 
 	return &billingv1.ListLedgerResponse{
 		Entries: entries,
 		Total:   total,
+	}, nil
+}
+
+func (s *BillingService) GetLedgerEntry(ctx context.Context, req *billingv1.GetLedgerEntryRequest) (*billingv1.GetLedgerEntryResponse, error) {
+	ledger, err := s.uc.GetLedgerByID(ctx, req.GetId())
+	if err != nil {
+		if errors.Is(err, biz.ErrLedgerNotFound) {
+			return nil, status.Errorf(codes.NotFound, "ledger entry not found")
+		}
+		return nil, status.Errorf(codes.Internal, "failed to get ledger entry: %v", err)
+	}
+
+	return &billingv1.GetLedgerEntryResponse{
+		Entry: &commonv1.LedgerEntry{
+			Id:                    fmt.Sprintf("%d", ledger.ID),
+			UserId:                ledger.UserID,
+			Amount:                ledger.Amount,
+			BalanceAfter:          ledger.BalanceAfter,
+			Type:                  ledger.Type,
+			ReferenceId:           ledger.ReferenceID,
+			Remark:                ledger.Remark,
+			CreatedAt:             toProtoTimestamp(ledger.CreatedAt),
+			TokenName:             ledger.TokenName,
+			ModelName:             ledger.ModelName,
+			Quota:                 ledger.Quota,
+			PromptTokens:          ledger.PromptTokens,
+			CompletionTokens:      ledger.CompletionTokens,
+			CacheReadTokens:       ledger.CacheReadTokens,
+			ChannelId:             ledger.ChannelID,
+			SubscriptionAccountId: ledger.SubscriptionAccountID,
+			ElapsedTime:           ledger.ElapsedTime,
+			IsStream:              ledger.IsStream,
+			Endpoint:              ledger.Endpoint,
+			CostSource:            ledger.CostSource,
+			SubscriptionCost:      ledger.SubscriptionCost,
+			BalanceCost:           ledger.BalanceCost,
+			LedgerDedupeKey:       ledger.LedgerDedupeKey,
+			Username:              ledger.Username,
+		},
 	}, nil
 }
 

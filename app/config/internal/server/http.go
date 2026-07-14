@@ -13,7 +13,7 @@ import (
 // NewHTTPServer wires HTTP transport for config-service.
 func NewHTTPServer(addr string, svc *service.ConfigService) *khttp.Server {
 	srv := khttp.NewServer(xhttp.SafeKratosServerOptions(khttp.Address(addr))...)
-	srv.HandleFunc("/v1/configs/", func(w http.ResponseWriter, r *http.Request) {
+	srv.HandlePrefix("/v1/configs/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			rest := r.URL.Path[len("/v1/configs/"):]
@@ -29,7 +29,7 @@ func NewHTTPServer(addr string, svc *service.ConfigService) *khttp.Server {
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
-	})
+	}))
 	srv.HandleFunc("/api/notice", svc.HandleOneAPIContent("system", "notice", ""))
 	srv.HandleFunc("/api/about", svc.HandleOneAPIContent("system", "about", ""))
 	srv.HandleFunc("/api/home_page_content", svc.HandleOneAPIContent("system", "home_page_content", ""))

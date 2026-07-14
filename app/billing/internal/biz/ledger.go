@@ -59,6 +59,7 @@ type Ledger struct {
 	// pipeline never produce duplicate rows. Legacy paths (recharge, refund)
 	// fall back to ReferenceID for compatibility.
 	LedgerDedupeKey string
+	Username        string // resolved from users table at read time
 	CreatedAt       time.Time
 }
 

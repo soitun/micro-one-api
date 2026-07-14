@@ -188,6 +188,15 @@ func (m *mockLedgerRepo) CreateLedger(ctx context.Context, ledger *Ledger) error
 	return nil
 }
 
+func (m *mockLedgerRepo) GetLedgerByID(ctx context.Context, id int64) (*Ledger, error) {
+	for _, ledger := range m.ledgers {
+		if int64(ledger.ID) == id {
+			return ledger, nil
+		}
+	}
+	return nil, ErrLedgerNotFound
+}
+
 func (m *mockLedgerRepo) ListLedgers(ctx context.Context, userID string, page, pageSize int32) ([]*Ledger, int64, error) {
 	return m.ledgers, int64(len(m.ledgers)), nil
 }

@@ -122,6 +122,9 @@ func (r *recordingLedgerRepo) CreateLedger(ctx context.Context, ledger *Ledger) 
 func (r *recordingLedgerRepo) CreateLedgerInTx(ctx context.Context, tx *gormdb.DB, ledger *Ledger) error {
 	return r.CreateLedger(ctx, ledger)
 }
+func (r *recordingLedgerRepo) GetLedgerByID(ctx context.Context, id int64) (*Ledger, error) {
+	return nil, ErrLedgerNotFound
+}
 func (r *recordingLedgerRepo) ListLedgers(ctx context.Context, userID string, page, pageSize int32) ([]*Ledger, int64, error) {
 	return nil, 0, nil
 }

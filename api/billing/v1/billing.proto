@@ -23,6 +23,7 @@ service BillingService {
   rpc UpdateRedeemCode(UpdateRedeemCodeRequest) returns (UpdateRedeemCodeResponse);
   rpc DeleteRedeemCode(DeleteRedeemCodeRequest) returns (DeleteRedeemCodeResponse);
   rpc ListLedger(ListLedgerRequest) returns (ListLedgerResponse);
+  rpc GetLedgerEntry(GetLedgerEntryRequest) returns (GetLedgerEntryResponse);
   rpc BatchGetAccountSnapshots(BatchGetAccountSnapshotsRequest) returns (BatchGetAccountSnapshotsResponse);
   rpc CreatePaymentOrder(CreatePaymentOrderRequest) returns (PaymentOrderResponse);
   rpc GetPaymentOrderByTradeNo(GetPaymentOrderByTradeNoRequest) returns (PaymentOrderResponse);
@@ -277,6 +278,14 @@ message ListLedgerRequest {
 message ListLedgerResponse {
   repeated common.v1.LedgerEntry entries = 1;
   int64 total = 2;
+}
+
+message GetLedgerEntryRequest {
+  int64 id = 1;  // billing_ledgers.id
+}
+
+message GetLedgerEntryResponse {
+  common.v1.LedgerEntry entry = 1;
 }
 
 // ========== 支付订单 ==========

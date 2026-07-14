@@ -4,6 +4,7 @@ import "errors"
 
 var (
 	ErrAccountNotFound      = errors.New("account not found")
+	ErrLedgerNotFound       = errors.New("ledger not found")
 	ErrInsufficientQuota    = errors.New("insufficient quota")
 	ErrReservationNotFound  = errors.New("reservation not found")
 	ErrReservationExpired   = errors.New("reservation expired")

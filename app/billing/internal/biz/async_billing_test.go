@@ -44,6 +44,9 @@ func (*ledgerErr) Error() string { return "stub ledger error" }
 
 // Implement the remaining LedgerRepo methods so stubLedgerRepo satisfies the
 // interface (not used by these tests).
+func (r *stubLedgerRepo) GetLedgerByID(ctx context.Context, id int64) (*Ledger, error) {
+	return nil, ErrLedgerNotFound
+}
 func (r *stubLedgerRepo) ListLedgers(ctx context.Context, userID string, page, pageSize int32) ([]*Ledger, int64, error) {
 	return nil, 0, nil
 }

@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -89,6 +90,23 @@ func absLedgerAmount(amount int64) int64 {
 	return amount
 }
 
+// GetLedgerByID returns a single ledger entry by its primary key, enriched
+// with the username from the users table.
+func (r *ledgerRepo) GetLedgerByID(ctx context.Context, id int64) (*biz.Ledger, error) {
+	var m ledgerModel
+	if err := r.data.db.WithContext(ctx).Model(&ledgerModel{}).
+		Select("billing_ledgers.*, users.username AS username").
+		Joins("LEFT JOIN users ON users.id = billing_ledgers.user_id").
+		Where("billing_ledgers.id = ?", id).
+		First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, biz.ErrLedgerNotFound
+		}
+		return nil, err
+	}
+	return ledgerFromModel(&m), nil
+}
+
 func (r *ledgerRepo) ListLedgers(ctx context.Context, userID string, page, pageSize int32) ([]*biz.Ledger, int64, error) {
 	var models []ledgerModel
 	var total int64
@@ -104,13 +122,15 @@ func (r *ledgerRepo) ListLedgers(ctx context.Context, userID string, page, pageS
 		return nil, 0, err
 	}
 
-	fetchQuery := r.data.db.WithContext(ctx)
+	fetchQuery := r.data.db.WithContext(ctx).Model(&ledgerModel{}).
+		Select("billing_ledgers.*, users.username AS username").
+		Joins("LEFT JOIN users ON users.id = billing_ledgers.user_id")
 	if userID != "" {
-		fetchQuery = fetchQuery.Where("user_id = ?", userID)
+		fetchQuery = fetchQuery.Where("billing_ledgers.user_id = ?", userID)
 	}
 
 	if err := fetchQuery.
-		Order("created_at DESC").
+		Order("billing_ledgers.created_at DESC").
 		Limit(int(pageSize)).
 		Offset(int(offset)).
 		Find(&models).Error; err != nil {
@@ -158,8 +178,23 @@ func (r *ledgerRepo) listLedgersInternal(ctx context.Context, userID string, pag
 		return nil, 0, err
 	}
 
-	if err := query.
-		Order("created_at DESC").
+	fetchQuery := r.data.db.WithContext(ctx).Model(&ledgerModel{}).
+		Select("billing_ledgers.*, users.username AS username").
+		Joins("LEFT JOIN users ON users.id = billing_ledgers.user_id")
+	if userID != "" {
+		fetchQuery = fetchQuery.Where("billing_ledgers.user_id = ?", userID)
+	}
+	if ledgerType != "" {
+		fetchQuery = fetchQuery.Where("billing_ledgers.type = ?", ledgerType)
+	}
+	if !startTime.IsZero() {
+		fetchQuery = fetchQuery.Where("billing_ledgers.created_at >= ?", startTime)
+	}
+	if !endTime.IsZero() {
+		fetchQuery = fetchQuery.Where("billing_ledgers.created_at <= ?", endTime)
+	}
+	if err := fetchQuery.
+		Order("billing_ledgers.created_at DESC").
 		Limit(int(pageSize)).
 		Offset(offset).
 		Find(&models).Error; err != nil {
@@ -189,8 +224,11 @@ func (r *ledgerRepo) ListLedgersBySubscriptionAccount(ctx context.Context, subsc
 		return nil, 0, err
 	}
 
-	if err := query.
-		Order("created_at DESC").
+	if err := r.data.db.WithContext(ctx).Model(&ledgerModel{}).
+		Select("billing_ledgers.*, users.username AS username").
+		Joins("LEFT JOIN users ON users.id = billing_ledgers.user_id").
+		Where("billing_ledgers.subscription_account_id = ?", subscriptionAccountID).
+		Order("billing_ledgers.created_at DESC").
 		Limit(int(pageSize)).
 		Offset(offset).
 		Find(&models).Error; err != nil {
@@ -531,6 +569,7 @@ func ledgerFromModel(model *ledgerModel) *biz.Ledger {
 		SubscriptionCost:      model.SubscriptionCost,
 		BalanceCost:           model.BalanceCost,
 		LedgerDedupeKey:       model.LedgerDedupeKey,
+		Username:              model.Username,
 		CreatedAt:             model.CreatedAt,
 	}
 }

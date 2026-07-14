@@ -80,9 +80,9 @@ func NewHTTPServerWithRegistrationPolicy(addr string, uc *biz.IdentityUsecase, o
 				"providers": oauthRegistry.Names(),
 			})
 		})
-		srv.HandleFunc("/v1/oauth/", func(w http.ResponseWriter, r *http.Request) {
+		srv.HandlePrefix("/v1/oauth/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			handleOAuth(w, r, oauthRegistry, uc)
-		})
+		}))
 	}
 	srv.HandleFunc("/api/oauth/state", handleOAuthState)
 	for _, providerName := range []string{"oidc", "lark", "wechat"} {

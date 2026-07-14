@@ -47,6 +47,14 @@ func setupLedgerTestDB(t *testing.T) *gorm.DB {
 	`).Error
 	require.NoError(t, err)
 
+	err = db.Exec(`
+		CREATE TABLE users (
+			id INTEGER PRIMARY KEY,
+			username TEXT NOT NULL
+		)
+	`).Error
+	require.NoError(t, err)
+
 	return db
 }
 
@@ -127,6 +135,31 @@ func TestLedgerRepo_ListLedgers(t *testing.T) {
 	assert.Len(t, ledgers, 3)
 	assert.Equal(t, int64(3), total)
 	assert.Equal(t, "user1", ledgers[0].UserID)
+}
+
+func TestLedgerRepo_GetAndListLedgersIncludeUsername(t *testing.T) {
+	db := setupLedgerTestDB(t)
+	defer func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	}()
+
+	require.NoError(t, db.Exec(`INSERT INTO users (id, username) VALUES (1, 'admin')`).Error)
+	require.NoError(t, db.Exec(`
+		INSERT INTO billing_ledgers (id, user_id, amount, balance_after, type, created_at)
+		VALUES (7538, '1', -100, 900, 'consume', ?)
+	`, time.Now()).Error)
+
+	repo := NewLedgerRepo(&Data{db: db})
+	entry, err := repo.GetLedgerByID(context.Background(), 7538)
+	require.NoError(t, err)
+	assert.Equal(t, "admin", entry.Username)
+
+	entries, total, err := repo.ListLedgers(context.Background(), "1", 1, 20)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, int64(1), total)
+	assert.Equal(t, "admin", entries[0].Username)
 }
 
 func TestLedgerRepo_ListLedgers_Pagination(t *testing.T) {
