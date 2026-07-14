@@ -62,13 +62,11 @@ ADD INDEX idx_status_expired (status, expired_time);
 -- billing_reservations table indexes
 -- ============================================================================
 
--- Index for user reservation queries
-ALTER TABLE billing_reservations
-ADD INDEX idx_user_id_status (user_id, status);
+-- The user/status index is created by 044_add_reservation_subscription_fields.sql.
 
 -- Index for expired reservation cleanup
 ALTER TABLE billing_reservations
-ADD INDEX idx_expires_at (expires_at);
+ADD INDEX idx_expired_at (expired_at);
 
 -- ============================================================================
 -- Verification queries
@@ -98,5 +96,4 @@ ADD INDEX idx_expires_at (expires_at);
 -- ALTER TABLE channels DROP INDEX idx_group_status;
 -- ALTER TABLE channels DROP INDEX idx_group_status_priority;
 -- ALTER TABLE tokens DROP INDEX idx_status_expired;
--- ALTER TABLE billing_reservations DROP INDEX idx_user_id_status;
--- ALTER TABLE billing_reservations DROP INDEX idx_expires_at;
+-- ALTER TABLE billing_reservations DROP INDEX idx_expired_at;

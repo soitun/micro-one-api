@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- deployment.yaml
+- identity-service.yaml
+- channel-service.yaml
+- billing-service.yaml
+- admin-api.yaml
+- phase2-services.yaml
+- network-policies.yaml
+- ingress.yaml
+
+images:
+- name: your-registry/relay-gateway
+  newTag: v0.7.2
+- name: your-registry/identity-service
+  newTag: v0.7.2
+- name: your-registry/channel-service
+  newTag: v0.7.2
+- name: your-registry/billing-service
+  newTag: v0.7.2
+- name: your-registry/admin-api
+  newTag: v0.7.2
+- name: your-registry/config-service
+  newTag: v0.7.2
+- name: your-registry/log-service
+  newTag: v0.7.2
+- name: your-registry/monitor-worker
+  newTag: v0.7.2
+- name: your-registry/notify-worker
+  newTag: v0.7.2

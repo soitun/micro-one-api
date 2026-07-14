@@ -30,11 +30,10 @@ spec:
         fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
-        readOnlyRootFilesystem: true
       containers:
       - name: relay-gateway
-        image: your-registry/relay-gateway:latest
-        imagePullPolicy: Always
+        image: your-registry/relay-gateway:v0.7.2
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
           protocol: TCP
@@ -48,6 +47,33 @@ spec:
           privileged: false
           readOnlyRootFilesystem: true
         env:
+        - name: CONF_PATH
+          value: "/configs/config.yaml"
+        - name: DATABASE_DRIVER
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: database-driver
+        - name: DATABASE_DSN
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: dsn
+        - name: REDIS_ADDR
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: redis-addr
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: password
+        - name: SERVICE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: service-token-secret
+              key: token
         - name: IDENTITY_GRPC_ENDPOINT
           valueFrom:
             configMapKeyRef:
@@ -63,6 +89,11 @@ spec:
             configMapKeyRef:
               name: app-config
               key: billing-grpc-endpoint
+        - name: LOG_GRPC_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: log-grpc-endpoint
         - name: RATE_LIMIT_REQUESTS_PER_SECOND
           valueFrom:
             configMapKeyRef:
@@ -92,7 +123,7 @@ spec:
             cpu: "500m"
         livenessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: 8080
             scheme: HTTP
           initialDelaySeconds: 30
@@ -102,7 +133,7 @@ spec:
           successThreshold: 1
         readinessProbe:
           httpGet:
-            path: /health
+            path: /healthz
             port: 8080
             scheme: HTTP
           initialDelaySeconds: 10
@@ -149,11 +180,17 @@ metadata:
   name: app-config
   namespace: one-api
 data:
+  database-driver: "mysql"
   identity-grpc-endpoint: "identity-service:9001"
   identity-http-endpoint: "http://identity-service:8001"
   channel-grpc-endpoint: "channel-service:9002"
   billing-grpc-endpoint: "billing-service:9004"
+  billing-http-endpoint: "http://billing-service:8004"
+  channel-http-endpoint: "http://channel-service:8002"
+  log-grpc-endpoint: "log-service:9006"
   log-http-endpoint: "http://log-service:8006"
+  notify-grpc-endpoint: "notify-worker:9008"
+  notify-http-endpoint: "http://notify-worker:8008"
   redis-addr: "redis:6379"
   rate-limit-rps: "100"
   rate-limit-burst: "200"
@@ -176,7 +213,7 @@ spec:
   - from:
     - namespaceSelector:
         matchLabels:
-          name: ingress-nginx
+          kubernetes.io/metadata.name: ingress-nginx
     ports:
     - protocol: TCP
       port: 8080
@@ -214,6 +251,23 @@ spec:
     ports:
     - protocol: TCP
       port: 9004
+  # Allow communication with log service
+  - to:
+    - podSelector:
+        matchLabels:
+          app: log-service
+    ports:
+    - protocol: TCP
+      port: 9006
+  # Allow database, Redis, and upstream HTTPS access
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 3306
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 443
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

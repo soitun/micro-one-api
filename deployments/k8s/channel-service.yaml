@@ -29,11 +29,10 @@ spec:
         fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
-        readOnlyRootFilesystem: true
       containers:
       - name: channel-service
-        image: your-registry/channel-service:latest
-        imagePullPolicy: Always
+        image: your-registry/channel-service:v0.7.2
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9002
           protocol: TCP
@@ -56,11 +55,26 @@ spec:
             secretKeyRef:
               name: db-credentials
               key: dsn
+        - name: DATABASE_DRIVER
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: database-driver
         - name: REDIS_ADDR
           valueFrom:
             configMapKeyRef:
               name: app-config
               key: redis-addr
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: password
+        - name: NOTIFY_GRPC_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: notify-grpc-endpoint
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:

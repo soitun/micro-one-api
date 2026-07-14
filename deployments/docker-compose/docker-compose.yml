@@ -11,7 +11,6 @@ services:
       MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
     volumes:
       - mysql_data:/var/lib/mysql
-      - ../../migrations:/docker-entrypoint-initdb.d
     networks:
       - backend
     restart: unless-stopped
@@ -37,6 +36,21 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.migrate
+    container_name: micro-one-api-migrate
+    environment:
+      - MIGRATIONS_DRIVER=mysql
+      - MIGRATIONS_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: "no"
+
   # ────────────── Backend Services ──────────────
 
   identity-service:
@@ -61,8 +75,8 @@ services:
       - LOG_LEVEL=info
       - LOG_FORMAT=json
     depends_on:
-      mysql:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     networks:
@@ -96,8 +110,8 @@ services:
       - CHANNEL_HEALTH_ALERT_NOTIFY_TYPE=${CHANNEL_HEALTH_ALERT_NOTIFY_TYPE:-webhook}
       - CHANNEL_HEALTH_ALERT_RECIPIENTS=${CHANNEL_HEALTH_ALERT_RECIPIENTS:-[""]}
     depends_on:
-      mysql:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       notify-worker:
@@ -147,8 +161,8 @@ services:
       - SERVICE_TOKEN=${SERVICE_TOKEN:?SERVICE_TOKEN is required}
       - LOG_FORMAT=json
     depends_on:
-      mysql:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       notify-worker:
@@ -225,12 +239,11 @@ services:
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-      - SERVICE_TOKEN=${SERVICE_TOKEN:?SERVICE_TOKEN is required}
       - LOG_LEVEL=info
       - LOG_FORMAT=json
     depends_on:
-      mysql:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     networks:
@@ -261,8 +274,8 @@ services:
       - LOG_LEVEL=info
       - LOG_FORMAT=json
     depends_on:
-      mysql:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     networks:
@@ -292,8 +305,8 @@ services:
       - LOG_LEVEL=info
       - LOG_FORMAT=json
     depends_on:
-      mysql:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     networks:
@@ -332,8 +345,8 @@ services:
       - NOTIFY_DISPATCH_BATCH=${NOTIFY_DISPATCH_BATCH:-20}
       - NOTIFY_MAX_RETRY=${NOTIFY_MAX_RETRY:-3}
     depends_on:
-      mysql:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     networks:
@@ -394,8 +407,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-    volumes:
-      - ./ssl/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
     cap_drop:
       - ALL
     cap_add:

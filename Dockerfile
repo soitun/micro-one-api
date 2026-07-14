@@ -41,6 +41,7 @@ RUN npm run build
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS go-deps
 
 RUN apk add --no-cache git ca-certificates
+ENV GOPROXY=https://proxy.golang.org|https://goproxy.cn|direct
 
 WORKDIR /deps
 
@@ -65,6 +66,7 @@ FROM golang:1.26-alpine AS builder
 RUN apk add --no-cache \
       git ca-certificates make protobuf protobuf-dev \
       build-base sqlite-libs sqlite-dev
+ENV GOPROXY=https://proxy.golang.org|https://goproxy.cn|direct
 
 WORKDIR /app
 

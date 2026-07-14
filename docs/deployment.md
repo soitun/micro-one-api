@@ -32,13 +32,18 @@ Micro-One-API 由 9 个微服务组成：
 ```bash
 cd deployments/docker-compose
 cp .env.example .env
-# 编辑 .env，至少替换数据库、Redis 和服务密钥
+# 编辑 .env，至少替换 MYSQL_ROOT_PASSWORD、DATABASE_DSN、
+# REDIS_PASSWORD、JWT_SECRET_KEY、SERVICE_TOKEN 和 ADMIN_TOKEN。
+# DATABASE_DSN 中的 MySQL 密码必须与 MYSQL_ROOT_PASSWORD 相同。
 
-# 启动全部服务
-docker compose up -d
+# 部署前先验证变量展开和 Compose 结构
+docker compose --env-file .env config --quiet
+
+# 从干净环境构建并启动全部服务
+docker compose --env-file .env up -d --build
 
 # 查看服务状态
-docker compose ps
+docker compose --env-file .env ps
 
 # 查看日志
 docker compose logs -f relay-gateway
@@ -48,10 +53,16 @@ docker compose logs -f relay-gateway
 
 ```bash
 # 健康检查
-curl http://localhost:8080/healthz  # relay-gateway
-curl http://localhost:3000/healthz  # admin-api
-curl http://localhost:8001/healthz  # identity-service
-curl http://localhost:8004/healthz  # billing-service
+curl --fail http://localhost:8080/healthz  # relay-gateway
+curl --fail http://localhost:3000/healthz  # admin-api
+
+# 其余服务只暴露在 backend 网络，从 admin-api 容器内检查
+for endpoint in \
+  identity-service:8001 channel-service:8002 billing-service:8004 \
+  config-service:8005 log-service:8006 monitor-worker:8007 notify-worker:8008; do
+  docker compose --env-file .env exec -T admin-api \
+    wget -qO- "http://${endpoint}/healthz"
+done
 
 # Prometheus metrics
 curl http://localhost:8080/metrics
@@ -67,8 +78,14 @@ curl http://localhost:8080/v1/chat/completions \
 ### 2.4 停止
 
 ```bash
-docker compose down           # 停止服务
-docker compose down -v        # 停止并删除数据卷
+docker compose --env-file .env down           # 停止服务
+docker compose --env-file .env down -v        # 停止并删除数据卷
+```
+
+仓库自带的全新环境 smoke test 会生成临时变量文件、构建镜像、检查九个服务并自动删除容器和数据卷：
+
+```bash
+./scripts/test-docker-compose.sh
 ```
 
 ## 3. Kubernetes 部署（生产）
@@ -77,59 +94,121 @@ docker compose down -v        # 停止并删除数据卷
 
 - Kubernetes 1.25+
 - kubectl 配置完成
+- Kustomize 5+
 - Nginx Ingress Controller 已安装
-- MySQL 和 Redis 可用（集群内或外部）
+- MySQL 8 和启用密码认证的 Redis 可用（集群内或外部），并能通过清单中的 `mysql:3306`、`redis:6379` 地址访问；使用外部地址时先修改 `app-config`
+- 已安装 Go 1.26（执行数据库迁移）
+- 已准备九个服务镜像；本仓库的 Release 流程只发布 GitHub Release，不代替用户推送镜像
 
 ### 3.2 创建命名空间
 
 ```bash
-kubectl create namespace one-api
+kubectl create namespace one-api --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 ### 3.3 创建 Secrets
 
 ```bash
-# MySQL 连接 DSN
-kubectl create secret generic db-secret \
+# MySQL 连接 DSN；名称必须与清单中的 db-credentials 一致
+kubectl create secret generic db-credentials \
   --from-literal=dsn='root:password@tcp(mysql:3306)/oneapi?parseTime=true' \
-  -n one-api
+  -n one-api --dry-run=client -o yaml | kubectl apply -f -
+
+# Redis 密码
+kubectl create secret generic redis-credentials \
+  --from-literal=password='replace-with-the-redis-password' \
+  -n one-api --dry-run=client -o yaml | kubectl apply -f -
+
+# JWT 签名密钥和管理端共享令牌
+kubectl create secret generic app-secrets \
+  --from-literal=jwt-secret-key='replace-with-at-least-32-random-bytes' \
+  --from-literal=admin-token='replace-with-a-long-random-token' \
+  -n one-api --dry-run=client -o yaml | kubectl apply -f -
 
 # Admin API Basic Auth
 htpasswd -c auth admin
 kubectl create secret generic admin-basic-auth \
   --from-file=auth \
-  -n one-api
+  -n one-api --dry-run=client -o yaml | kubectl apply -f -
 
 # TLS 证书
 kubectl create secret tls api-tls-secret \
   --cert=api.yourdomain.com.crt \
   --key=api.yourdomain.com.key \
-  -n one-api
+  -n one-api --dry-run=client -o yaml | kubectl apply -f -
 
-# 服务间 HTTP 调用令牌（admin-api 和 log-service 共享）
+kubectl create secret tls admin-tls-secret \
+  --cert=admin.yourdomain.com.crt \
+  --key=admin.yourdomain.com.key \
+  -n one-api --dry-run=client -o yaml | kubectl apply -f -
+
+# 服务间调用令牌（relay、admin、billing 和 log 必须使用相同值）
 kubectl create secret generic service-token-secret \
   --from-literal=token='replace-with-a-long-random-token' \
-  -n one-api
+  -n one-api --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-### 3.4 部署服务
+所有上述 Secret 都是生产必需项，清单不会以 `optional: true` 忽略缺失值。不要把 Secret 内容写入 YAML 或提交到仓库。
+
+### 3.4 构建并替换镜像
+
+清单中的 `your-registry/<service>:v0.7.2` 是带固定版本的占位镜像。生产环境必须使用不可变版本号或镜像 digest，不要改成浮动的 `latest`。
+
+每个服务的 Dockerfile 和构建参数以 `.github/workflows/ci.yml` 的 `docker` matrix 为准。例如：
 
 ```bash
-# 部署一期服务（5 个核心服务）
-kubectl apply -f deployments/k8s/deployment.yaml
-kubectl apply -f deployments/k8s/identity-service.yaml
-kubectl apply -f deployments/k8s/channel-service.yaml
-kubectl apply -f deployments/k8s/billing-service.yaml
-kubectl apply -f deployments/k8s/admin-api.yaml
+export REGISTRY=registry.example.com/micro-one-api
+export IMAGE_TAG=v0.7.2
 
-# 部署二期服务
-kubectl apply -f deployments/k8s/phase2-services.yaml
-
-# 部署 Ingress
-kubectl apply -f deployments/k8s/ingress.yaml
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f app/identity/Dockerfile \
+  --build-arg SERVICE_NAME=identity-service \
+  --build-arg SERVICE_PATH=./app/identity/cmd/identity \
+  -t "$REGISTRY/identity-service:$IMAGE_TAG" --push .
 ```
 
-### 3.5 验证
+推送九个镜像后，用 Kustomize 一次性替换全部占位名称和标签：
+
+```bash
+cd deployments/k8s
+for service in relay-gateway identity-service channel-service billing-service \
+  admin-api config-service log-service monitor-worker notify-worker; do
+  kustomize edit set image \
+    "your-registry/${service}=${REGISTRY}/${service}:${IMAGE_TAG}"
+done
+cd ../..
+
+# 输出中不应再出现占位 registry 或 latest
+kubectl kustomize deployments/k8s | grep -E 'image:'
+```
+
+`kustomize edit` 会更新本地 `deployments/k8s/kustomization.yaml`；应将环境专用的 registry 覆盖保留在部署系统中，不要提交私有 registry 地址。
+
+### 3.5 执行数据库迁移
+
+在启动应用 Pod 前执行迁移。`MIGRATIONS_DSN` 与 `db-credentials` 中的 `dsn` 必须完全一致。自动迁移会执行编号迁移和 `phase1_indexes.sql`；`phase3_partitioning.sql` 是有额外主键、停机窗口和 MySQL 分区前置条件的可选运维脚本，不会自动执行：
+
+```bash
+MIGRATIONS_DRIVER=mysql \
+MIGRATIONS_DSN='root:password@tcp(mysql:3306)/oneapi?parseTime=true' \
+  go run ./cmd/migrate -dir ./migrations
+```
+
+数据库只能从集群内访问时，使用 `deployments/docker/Dockerfile.migrate` 构建一次性迁移镜像，并通过只引用 `db-credentials` 的 Kubernetes Job 运行同一命令。
+
+### 3.6 部署服务
+
+```bash
+# 首次部署或升级均使用同一个入口
+kubectl apply -k deployments/k8s
+
+# 等待九个 Deployment 逐个完成 rollout
+for deployment in $(kubectl get deployment -n one-api -o name); do
+  kubectl rollout status -n one-api "$deployment" --timeout=10m
+done
+```
+
+### 3.7 验证
 
 ```bash
 # 检查 Pod 状态
@@ -143,7 +222,18 @@ kubectl get ingress -n one-api
 
 # 查看日志
 kubectl logs -f deployment/relay-gateway -n one-api
+
+# 从 admin-api Pod 检查内部 HTTP 接口和共享令牌
+ADMIN_POD=$(kubectl get pod -n one-api -l app=admin-api -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n one-api "$ADMIN_POD" -- wget -qO- http://billing-service:8004/healthz
+kubectl exec -n one-api "$ADMIN_POD" -- wget -qO- http://log-service:8006/healthz
+
+# 本地端口转发验证管理端和 Relay
+kubectl port-forward -n one-api service/admin-api 3000:3000
+kubectl port-forward -n one-api service/relay-gateway 8080:80
 ```
+
+验收时 `kubectl get pods -n one-api` 应全部为 `Running` 且 `READY` 列满额；`admin-api`、`relay-gateway`、`billing-service` 和 `log-service` 的上述检查都必须成功。若启用了 NetworkPolicy，Ingress Controller 所在命名空间必须为 `ingress-nginx`；否则同步修改清单中的命名空间选择器。
 
 ## 4. 环境变量配置
 
@@ -460,7 +550,7 @@ scrape_configs:
 
 ## 8. 数据库迁移
 
-SQL 迁移文件位于仓库根目录的 `migrations/`，Docker Compose 启动 MySQL 时会自动执行。订阅套餐购买需要 `050_create_subscription_plans.sql`；上游订阅账号本地额度需要 `051_add_subscription_account_local_quota.sql`。
+SQL 迁移文件位于仓库根目录的 `migrations/`。Docker Compose 的一次性 `migrate` 服务会先执行迁移，成功后其他应用服务才启动；迁移失败会直接阻止部署继续。订阅套餐购买需要 `050_create_subscription_plans.sql`；上游订阅账号本地额度需要 `051_add_subscription_account_local_quota.sql`。
 
 手动迁移：
 

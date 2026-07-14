@@ -67,6 +67,35 @@ func TestRunner_EmptyDB_AppliesAllInOrder(t *testing.T) {
 	assert.Equal(t, []string{"001_create_widgets", "002_create_gadgets", "010_add_widget_color"}, appliedVersions(t, db))
 }
 
+func TestSplitStatements_PreservesSemicolonsInsideQuotes(t *testing.T) {
+	script := `
+-- leading comment; ignored
+ALTER TABLE accounts
+  ADD COLUMN quota DECIMAL(18,6) COMMENT 'limit in USD; 0 means unlimited';
+INSERT INTO notes (value) VALUES ('it''s; valid'), ("double; quoted"), (` + "`identifier;quoted`" + `);
+`
+
+	statements := splitStatements(script)
+	require.Len(t, statements, 2)
+	assert.Contains(t, statements[0], "'limit in USD; 0 means unlimited'")
+	assert.Contains(t, statements[1], "'it''s; valid'")
+	assert.Contains(t, statements[1], "`identifier;quoted`")
+}
+
+func TestSplitStatements_StripsLineAndBlockComments(t *testing.T) {
+	script := `
+CREATE TABLE first (id INTEGER); -- comment; ignored
+/* block comment; ignored */
+# mysql comment; ignored
+CREATE TABLE second (value TEXT);
+`
+
+	assert.Equal(t, []string{
+		"CREATE TABLE first (id INTEGER)",
+		"CREATE TABLE second (value TEXT)",
+	}, splitStatements(script))
+}
+
 func TestRunner_AlphabeticalNumericSort(t *testing.T) {
 	// "100_xxx" must come after "020_xxx" — zero-padded ordering.
 	db := openSqlite(t)
@@ -78,6 +107,17 @@ func TestRunner_AlphabeticalNumericSort(t *testing.T) {
 	applied, err := runner.Apply(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, []string{"020_a", "100_b"}, applied)
+}
+
+func TestRunner_SkipsOptionalPartitioningScript(t *testing.T) {
+	db := openSqlite(t)
+	dir := t.TempDir()
+	writeMigration(t, dir, "001_create_widgets.sql", `CREATE TABLE widgets (id INTEGER);`)
+	writeMigration(t, dir, "phase3_partitioning.sql", `THIS REQUIRES MYSQL PARTITIONING;`)
+
+	applied, err := New(db, dir).Apply(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"001_create_widgets"}, applied)
 }
 
 func TestRunner_Idempotent_SkipsAppliedMigrations(t *testing.T) {

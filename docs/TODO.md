@@ -8,9 +8,9 @@
 
 ### [ ] 合并 OAuth 回调路由修复
 
-- [ ] 等待 `develop` 提交 `2cb0a23` 的完整 CI 通过。
+- [x] 等待 `develop` 提交 `2cb0a23` 的完整 CI 通过。
 - [ ] 合并到 `main`。
-- [ ] 评估是否发布 `v0.7.2`。
+- [x] 评估是否发布 `v0.7.2`：结论为合并部署修复后发布。
 
 验收标准：
 
@@ -22,15 +22,23 @@
 
 关联 Issue：[部署方式是否同步更新 #5](https://github.com/mengbin92/micro-one-api/issues/5)
 
-- [ ] 统一部署文档与 K8s 清单中的数据库 Secret 名称：`db-secret` / `db-credentials`。
-- [ ] 在文档中补充 `admin-tls-secret` 的创建步骤。
-- [ ] 为 K8s `billing-service` 和 `log-service` 注入 `SERVICE_TOKEN`。
-- [ ] 移除生产必需 Secret 上不合理的 `optional: true`。
-- [ ] 核对 `config-service` 是否确实需要 `SERVICE_TOKEN`，避免将变量配到错误服务。
-- [ ] 文档说明如何替换 `your-registry/<service>:latest`，生产示例避免使用浮动 `latest`。
-- [ ] 核对全部 ConfigMap、Secret、Service、Ingress 名称和端口引用。
+- [x] 统一部署文档与 K8s 清单中的数据库 Secret 名称：使用 `db-credentials`。
+- [x] 在文档中补充 `admin-tls-secret` 的创建步骤。
+- [x] 为 K8s `billing-service` 和 `log-service` 注入 `SERVICE_TOKEN`。
+- [x] 移除生产必需 Secret 上不合理的 `optional: true`。
+- [x] 核对 `config-service` 是否确实需要 `SERVICE_TOKEN`：代码不读取该变量，已从 Compose/K8s 移除。
+- [x] 文档说明如何替换 `your-registry/<service>:v0.7.2`，生产示例使用固定版本而非浮动 `latest`。
+- [x] 核对全部 ConfigMap、Secret、Service、Ingress 名称和端口引用。
 - [ ] 验证全新 Docker Compose 部署。
-- [ ] 使用 kind、k3d 或测试集群执行一次 K8s smoke test。
+- [x] 使用 kind、k3d 或测试集群执行一次 K8s smoke test。
+
+2026-07-14 进度记录：
+
+- `2cb0a23` 的 GitHub CI 和 Security Pipeline 均已通过，`develop` 后续头提交的两条流水线也通过。
+- kind v1.33.1 smoke 中，九个应用及 MySQL/Redis 均达到 `1/1 Running`；Admin Pod 可访问 billing/log 内部接口，共享令牌鉴权成功，Relay `/healthz` 成功。
+- 全新 MySQL 已一次完成 55 项自动迁移；修复了 SQL 字符串内分号解析、`phase1_indexes.sql` 错误列名，并将可选 `phase3_partitioning.sql` 排除出自动迁移。
+- Compose 曾在旧初始化方式下达到 22 项 smoke 全通过，但该过程暴露出 MySQL 初始化失败后重启会掩盖不完整 schema。现已改为强制一次性 `migrate` 服务；最终全新卷复验在镜像构建完成前按当天工作安排中止，因此本项保持未完成。
+- 待续：完成最终 Compose smoke，执行项目基线测试，推送并等待 `develop` CI，合并 `main` 后发布 `v0.7.2`。
 
 验收标准：
 

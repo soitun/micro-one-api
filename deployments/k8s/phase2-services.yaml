@@ -28,11 +28,10 @@ spec:
         fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
-        readOnlyRootFilesystem: true
       containers:
       - name: config-service
-        image: your-registry/config-service:latest
-        imagePullPolicy: Always
+        image: your-registry/config-service:v0.7.2
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9005
           protocol: TCP
@@ -42,6 +41,7 @@ spec:
           name: http
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop:
             - ALL
@@ -54,12 +54,21 @@ spec:
             secretKeyRef:
               name: db-credentials
               key: dsn
-        - name: SERVICE_TOKEN
+        - name: DATABASE_DRIVER
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: database-driver
+        - name: REDIS_ADDR
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: redis-addr
+        - name: REDIS_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: service-token-secret
-              key: token
-              optional: true
+              name: redis-credentials
+              key: password
         resources:
           requests:
             memory: "64Mi"
@@ -135,11 +144,10 @@ spec:
         fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
-        readOnlyRootFilesystem: true
       containers:
       - name: log-service
-        image: your-registry/log-service:latest
-        imagePullPolicy: Always
+        image: your-registry/log-service:v0.7.2
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9006
           protocol: TCP
@@ -149,6 +157,7 @@ spec:
           name: http
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop:
             - ALL
@@ -161,6 +170,16 @@ spec:
             secretKeyRef:
               name: db-credentials
               key: dsn
+        - name: DATABASE_DRIVER
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: database-driver
+        - name: SERVICE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: service-token-secret
+              key: token
         resources:
           requests:
             memory: "128Mi"
@@ -236,11 +255,10 @@ spec:
         fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
-        readOnlyRootFilesystem: true
       containers:
       - name: monitor-worker
-        image: your-registry/monitor-worker:latest
-        imagePullPolicy: Always
+        image: your-registry/monitor-worker:v0.7.2
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9007
           protocol: TCP
@@ -250,6 +268,7 @@ spec:
           name: http
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop:
             - ALL
@@ -262,6 +281,16 @@ spec:
             secretKeyRef:
               name: db-credentials
               key: dsn
+        - name: DATABASE_DRIVER
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: database-driver
+        - name: CHANNEL_GRPC_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: channel-grpc-endpoint
         resources:
           requests:
             memory: "64Mi"
@@ -337,11 +366,10 @@ spec:
         fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
-        readOnlyRootFilesystem: true
       containers:
       - name: notify-worker
-        image: your-registry/notify-worker:latest
-        imagePullPolicy: Always
+        image: your-registry/notify-worker:v0.7.2
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9008
           protocol: TCP
@@ -351,6 +379,7 @@ spec:
           name: http
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop:
             - ALL
@@ -363,6 +392,11 @@ spec:
             secretKeyRef:
               name: db-credentials
               key: dsn
+        - name: DATABASE_DRIVER
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: database-driver
         resources:
           requests:
             memory: "64Mi"

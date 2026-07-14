@@ -23,7 +23,7 @@ spec:
             name: relay-gateway
             port:
               number: 80
-      - path: /health
+      - path: /healthz
         pathType: Exact
         backend:
           service:

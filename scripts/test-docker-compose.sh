@@ -3,8 +3,8 @@
 # Usage: ./scripts/test-docker-compose.sh
 #
 # Prerequisites:
-#   - Docker and docker-compose installed
-#   - Ports 3000, 3306, 6379, 8004, 8080, 9001, 9002, 9004 available
+#   - Docker and Docker Compose v2 installed
+#   - Ports 3000 and 8080 available
 #
 # This script:
 #   1. Starts all services via docker-compose
@@ -18,6 +18,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_DIR="$PROJECT_ROOT/deployments/docker-compose"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
+ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/micro-one-api-compose.XXXXXX")"
+COMPOSE_PROJECT_NAME="micro-one-api-smoke-$$"
+COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+
+cp "$COMPOSE_DIR/.env.example" "$ENV_FILE"
 
 # Colors
 RED='\033[0;31m'
@@ -147,10 +152,26 @@ check_container_running() {
     return 1
 }
 
+check_container_completed() {
+    local container="$1"
+    local status
+    local exit_code
+    status=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null || echo "missing")
+    exit_code=$(docker inspect --format='{{.State.ExitCode}}' "$container" 2>/dev/null || echo "unknown")
+    if [ "$status" = "exited" ] && [ "$exit_code" = "0" ]; then
+        log "$container: OK (completed successfully)"
+        PASSED=$((PASSED + 1))
+        return 0
+    fi
+    fail "$container: expected successful completion, got status=$status exit=$exit_code"
+    FAILED=$((FAILED + 1))
+    return 1
+}
+
 cleanup() {
     log "Tearing down docker-compose..."
-    cd "$COMPOSE_DIR"
-    docker-compose down -v --remove-orphans 2>/dev/null || true
+    "${COMPOSE[@]}" down -v --remove-orphans 2>/dev/null || true
+    rm -f "$ENV_FILE"
 }
 
 trap cleanup EXIT
@@ -158,9 +179,10 @@ trap cleanup EXIT
 # ── Start ──
 
 log "Starting docker-compose environment..."
-cd "$COMPOSE_DIR"
-docker-compose build --quiet
-docker-compose up -d
+"${COMPOSE[@]}" config --quiet
+# Keep BuildKit progress visible so a slow or failed build is diagnosable.
+"${COMPOSE[@]}" --progress plain build
+"${COMPOSE[@]}" up -d
 
 log "Waiting for services to be ready (up to 120s)..."
 
@@ -168,12 +190,39 @@ log "Waiting for services to be ready (up to 120s)..."
 
 check_docker_health "MySQL" "mysql" 30 3
 check_docker_health "Redis" "redis" 30 2
+check_container_completed "micro-one-api-migrate"
 
 # ── Backend service checks (ports not exposed to host, verify container running) ──
 
 check_container_running "identity-service" 30 2
 check_container_running "channel-service" 30 2
 check_container_running "billing-service" 30 2
+check_container_running "admin-api" 30 2
+check_container_running "config-service" 30 2
+check_container_running "log-service" 30 2
+check_container_running "monitor-worker" 30 2
+check_container_running "notify-worker" 30 2
+check_container_running "relay-gateway" 30 2
+
+# Verify every internal HTTP service is reachable over the backend network.
+check_container_health "identity-service /healthz" "admin-api" \
+    "wget -qO- http://identity-service:8001/healthz" 30 2
+check_container_health "channel-service /healthz" "admin-api" \
+    "wget -qO- http://channel-service:8002/healthz" 30 2
+check_container_health "billing-service /healthz" "admin-api" \
+    "wget -qO- http://billing-service:8004/healthz" 30 2
+check_container_health "config-service /healthz" "admin-api" \
+    "wget -qO- http://config-service:8005/healthz" 30 2
+check_container_health "log-service /healthz" "admin-api" \
+    "wget -qO- http://log-service:8006/healthz" 30 2
+check_container_health "monitor-worker /healthz" "admin-api" \
+    "wget -qO- http://monitor-worker:8007/healthz" 30 2
+check_container_health "notify-worker /healthz" "admin-api" \
+    "wget -qO- http://notify-worker:8008/healthz" 30 2
+
+# The protected log API must accept the shared service token.
+check_container_health "log-service authenticated API" "admin-api" \
+    "wget -qO- --header='Authorization: Bearer change-me-to-a-long-random-string' http://log-service:8006/v1/logs" 30 2
 
 # ── API endpoint checks ──
 

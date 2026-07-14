@@ -1,18 +1,18 @@
 # Migrate runner image.
 #
-# Unlike the main service image (which is built with CGO_ENABLED=0 and
-# a scratch base), this image keeps CGO enabled because mattn/go-sqlite3
-# needs it for the SQLite3 driver. The base is alpine rather than scratch
-# to ship the C runtime.
+# This image keeps CGO enabled because mattn/go-sqlite3 needs it for the
+# SQLite3 driver. The builder runs on the target platform so amd64 and arm64
+# images contain a matching binary and C runtime.
 #
 # Picks the migrations directory automatically based on MIGRATIONS_DRIVER:
 #   * sqlite3  -> /migrations/sqlite
 #   * postgres -> /migrations/postgres
 #   * mysql / empty -> /migrations
 
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates build-base
+ENV GOPROXY=https://proxy.golang.org|https://goproxy.cn|direct
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ RUN go mod download && go mod verify
 
 COPY . .
 
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=1 go build \
     -ldflags='-s -w' \
     -o /app/bin/migrate ./cmd/migrate
 

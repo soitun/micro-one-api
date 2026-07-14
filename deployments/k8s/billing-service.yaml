@@ -29,11 +29,10 @@ spec:
         fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
-        readOnlyRootFilesystem: true
       containers:
       - name: billing-service
-        image: your-registry/billing-service:latest
-        imagePullPolicy: Always
+        image: your-registry/billing-service:v0.7.2
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9004
           protocol: TCP
@@ -56,11 +55,31 @@ spec:
             secretKeyRef:
               name: db-credentials
               key: dsn
+        - name: DATABASE_DRIVER
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: database-driver
         - name: REDIS_ADDR
           valueFrom:
             configMapKeyRef:
               name: app-config
               key: redis-addr
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: password
+        - name: SERVICE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: service-token-secret
+              key: token
+        - name: NOTIFY_GRPC_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: notify-grpc-endpoint
         - name: LOG_LEVEL
           valueFrom:
             configMapKeyRef:

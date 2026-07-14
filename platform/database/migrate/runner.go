@@ -249,6 +249,11 @@ func (r *Runner) listMigrationFiles() ([]string, error) {
 			continue
 		}
 		name := e.Name()
+		// Partitioning is an optional, online-maintenance operation. It has
+		// prerequisites that are not valid for every fresh schema.
+		if name == "phase3_partitioning.sql" {
+			continue
+		}
 		if !strings.HasSuffix(strings.ToLower(name), ".sql") {
 			continue
 		}
@@ -383,30 +388,82 @@ func (r *Runner) applyOne(ctx context.Context, path, version string) error {
 	return tx.Commit()
 }
 
-// splitStatements splits a SQL script on top-level semicolons. It strips line
-// comments (-- ...) and skips empty statements. Block comments and string
-// literals are NOT parsed; migrations in this project don't use them.
+// splitStatements splits a SQL script on semicolons outside quoted values and
+// comments. Migration DDL uses semicolons inside COMMENT string literals.
 func splitStatements(sql string) []string {
-	// Strip line comments first.
-	var sb strings.Builder
-	for _, line := range strings.Split(sql, "\n") {
-		idx := strings.Index(line, "--")
-		if idx >= 0 {
-			line = line[:idx]
+	var (
+		out          []string
+		stmt         strings.Builder
+		quote        byte
+		lineComment  bool
+		blockComment bool
+	)
+	flush := func() {
+		if value := strings.TrimSpace(stmt.String()); value != "" {
+			out = append(out, value)
 		}
-		sb.WriteString(line)
-		sb.WriteByte('\n')
+		stmt.Reset()
 	}
-	cleaned := sb.String()
 
-	parts := strings.Split(cleaned, ";")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		s := strings.TrimSpace(p)
-		if s != "" {
-			out = append(out, s)
+	for i := 0; i < len(sql); i++ {
+		current := sql[i]
+		next := byte(0)
+		if i+1 < len(sql) {
+			next = sql[i+1]
+		}
+
+		if lineComment {
+			if current == '\n' {
+				lineComment = false
+				stmt.WriteByte(current)
+			}
+			continue
+		}
+		if blockComment {
+			if current == '*' && next == '/' {
+				blockComment = false
+				i++
+			}
+			continue
+		}
+
+		if quote != 0 {
+			stmt.WriteByte(current)
+			if current == '\\' && quote != '`' && next != 0 {
+				stmt.WriteByte(next)
+				i++
+				continue
+			}
+			if current == quote {
+				if next == quote {
+					stmt.WriteByte(next)
+					i++
+					continue
+				}
+				quote = 0
+			}
+			continue
+		}
+
+		switch {
+		case current == '-' && next == '-':
+			lineComment = true
+			i++
+		case current == '#':
+			lineComment = true
+		case current == '/' && next == '*':
+			blockComment = true
+			i++
+		case current == '\'' || current == '"' || current == '`':
+			quote = current
+			stmt.WriteByte(current)
+		case current == ';':
+			flush()
+		default:
+			stmt.WriteByte(current)
 		}
 	}
+	flush()
 	return out
 }
 

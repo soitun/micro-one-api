@@ -46,6 +46,19 @@ spec:
     ports:
     - protocol: TCP
       port: 6379
+  # Allow identity-service to call billing-service.
+  - to:
+    - podSelector:
+        matchLabels:
+          app: billing-service
+    ports:
+    - protocol: TCP
+      port: 9004
+  # Allow OAuth providers and other external identity integrations.
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -94,6 +107,14 @@ spec:
     ports:
     - protocol: TCP
       port: 443
+  # Allow channel health alerts to reach notify-worker.
+  - to:
+    - podSelector:
+        matchLabels:
+          app: notify-worker
+    ports:
+    - protocol: TCP
+      port: 9008
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -115,6 +136,9 @@ spec:
     - podSelector:
         matchLabels:
           app: admin-api
+    - podSelector:
+        matchLabels:
+          app: identity-service
     ports:
     - protocol: TCP
       port: 9004
@@ -137,6 +161,19 @@ spec:
     ports:
     - protocol: TCP
       port: 6379
+  # Allow payment provider callbacks and queries.
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  # Allow reconciliation alerts to reach notify-worker.
+  - to:
+    - podSelector:
+        matchLabels:
+          app: notify-worker
+    ports:
+    - protocol: TCP
+      port: 9008
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -154,7 +191,7 @@ spec:
   - from:
     - namespaceSelector:
         matchLabels:
-          name: ingress-nginx
+          kubernetes.io/metadata.name: ingress-nginx
     ports:
     - protocol: TCP
       port: 8000
@@ -258,6 +295,10 @@ spec:
     ports:
     - protocol: TCP
       port: 3306
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 6379
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -337,6 +378,14 @@ spec:
     ports:
     - protocol: TCP
       port: 6379
+  # Allow monitor-worker to probe channel-service.
+  - to:
+    - podSelector:
+        matchLabels:
+          app: channel-service
+    ports:
+    - protocol: TCP
+      port: 9002
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -355,6 +404,12 @@ spec:
     - podSelector:
         matchLabels:
           app: admin-api
+    - podSelector:
+        matchLabels:
+          app: channel-service
+    - podSelector:
+        matchLabels:
+          app: billing-service
     ports:
     - protocol: TCP
       port: 9008
@@ -377,3 +432,12 @@ spec:
     ports:
     - protocol: TCP
       port: 6379
+  # Allow webhook and SMTP-over-TLS delivery.
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 465
+    - protocol: TCP
+      port: 587
