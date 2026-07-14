@@ -144,6 +144,7 @@ services:
       - RECON_ALERT_ENABLED=${RECON_ALERT_ENABLED:-true}
       - RECON_ALERT_RECIPIENTS=${RECON_ALERT_RECIPIENTS:-[admin]}
       - RECON_ALERT_INTERVAL=${RECON_ALERT_INTERVAL:-1h}
+      - SERVICE_TOKEN=${SERVICE_TOKEN:?SERVICE_TOKEN is required}
       - LOG_FORMAT=json
     depends_on:
       mysql:
@@ -256,6 +257,7 @@ services:
       - DATABASE_DSN=${DATABASE_DSN:?DATABASE_DSN is required}
       - REDIS_ADDR=redis:6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      - SERVICE_TOKEN=${SERVICE_TOKEN:?SERVICE_TOKEN is required}
       - LOG_LEVEL=info
       - LOG_FORMAT=json
     depends_on:
