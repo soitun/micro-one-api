@@ -20,6 +20,23 @@ Micro-One-API 由 9 个微服务组成：
 - MySQL 8.0 — 主存储
 - Redis 7 — 缓存与分布式限流
 
+### 1.1 部署与文档漂移检查
+
+仓库通过 `scripts/check-deployment-docs.sh` 在 PR 阶段检查：
+
+- MySQL、Lite、PostgreSQL 和 E2E overlay 的 Compose 配置能否完成变量展开。
+- `kustomize build` 能否渲染生产清单，以及渲染结果能否通过 Kubernetes 1.33 schema 的严格校验。
+- 清单引用的 ConfigMap、Secret 和 key 是否已在清单中定义，或在本文档中提供创建命令；生产必需引用不得设置 `optional: true`。
+- 根 README 和 `docs/**/*.md` 中的本地文件链接是否存在。
+
+安装 Docker Compose、Go、Python 3、Kustomize 和 kubeconform 后，可在仓库根目录执行与 CI 相同的检查：
+
+```bash
+./scripts/check-deployment-docs.sh
+```
+
+Secret/ConfigMap 名称、引用 key、创建命令或文件路径变更时，应同步更新部署清单和本文档，否则检查会失败。
+
 ## 2. Docker Compose 部署（开发/测试）
 
 ### 2.1 前置条件

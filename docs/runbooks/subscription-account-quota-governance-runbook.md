@@ -2,7 +2,7 @@
 
 > 对应 `docs/design/subscription-follow-up-roadmap.md` 阶段 4：文档与 Runbook。
 > 适用版本：v0.5.0+（含订阅账号本地额度、5h、RPM、会话窗口、reset 配置、批量管理）。
-> 相关文档：[订阅账号配置与导入实操指南](./subscription-account-setup-guide.md)、[上游账号额度后续工作说明](./subscription-account-quota-follow-up.md)、[Redis 多副本部署 Runbook](./subscription-redis-multi-replica-runbook.md)。
+> 相关文档：[订阅账号配置与导入实操指南](./subscription-account-setup-guide.md)、[上游账号额度后续工作说明](../design/subscription-account-quota-follow-up.md)、[Redis 多副本部署 Runbook](./subscription-redis-multi-replica-runbook.md)。
 
 本 runbook 让新部署人员只按本文档即可完成订阅账号的额度配置、重置、异常恢复与批量治理，并验证账号耗尽后被跳过、恢复后重新进入选路。
 
