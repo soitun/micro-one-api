@@ -9,7 +9,7 @@ docs/
 ├── deployment.md        ← 部署运维文档（最高频查阅，保留在根目录）
 ├── community-promotion-blog.md  ← 社区宣传博客
 ├── logo-design.md       ← Logo 设计说明
-├── assets/              ← 图片资源（logo、社区配图）
+├── assets/              ← 图片资源（logo、社区配图和界面截图）
 ├── releases/            ← 版本发布公告
 ├── runbooks/            ← 运维操作手册（SOP）
 ├── design/              ← 架构设计、技术方案、复盘与路线图
@@ -22,6 +22,7 @@ docs/
 |---------|--------|
 | 部署 / 升级服务 | [deployment.md](./deployment.md) |
 | 查看当前待办和优先级 | [TODO.md](./TODO.md) |
+| 查看产品界面预览 | [根 README 界面预览](../README.md#界面预览) |
 | 查看某版本发布内容 | [releases/](./releases/) |
 | 排查订阅系统生产故障 | [runbooks/subscription-production-runbook.md](./runbooks/subscription-production-runbook.md) |
 | 理解整体架构 | [design/ARCHITECTURE_REFACTOR.md](./design/ARCHITECTURE_REFACTOR.md) |
@@ -40,7 +41,7 @@ docs/
 - [v0.3.0](./releases/release-v0.3.0.md) · [v0.3.1](./releases/release-v0.3.1.md)
 - [v0.4.0](./releases/release-v0.4.0.md) · [v0.4.0 / v0.5.0 联合公告](./releases/release-v0.4.0-v0.5.0.md) · [v0.5.0](./releases/release-v0.5.0.md)
 - [v0.6.0](./releases/release-v0.6.0.md) · [v0.6.1](./releases/release-v0.6.1.md)
-- [v0.7.0](./releases/release-v0.7.0.md)（最新）
+- [v0.7.0](./releases/release-v0.7.0.md) · [v0.7.1](./releases/release-v0.7.1.md) · [v0.7.2](./releases/release-v0.7.2.md)（最新）
 
 ### runbooks/ — 运维操作手册
 

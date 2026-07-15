@@ -1,8 +1,8 @@
 # Micro-One-API v0.2.1 发布公告(含 v0.1.1 / v0.2.0 重要能力回顾)
 
-> 2026-06-12 · 上一版: [v0.2.0](./../CHANGELOG.md) (2026-06-10) · 上上次: [v0.1.1](./../CHANGELOG.md) (2026-05-09) · 上上上次: [v0.1.0](./../CHANGELOG.md) (2026-05-06)
+> 2026-06-12 · 上一版: [v0.2.0](../../CHANGELOG.md) (2026-06-10) · 上上次: [v0.1.1](../../CHANGELOG.md) (2026-05-09) · 上上上次: [v0.1.0](../../CHANGELOG.md) (2026-05-06)
 
-![Micro-One-API community cover](./assets/micro-one-api-community-cover.svg)
+![Micro-One-API community cover](../assets/micro-one-api-community-cover.svg)
 
 本次公告覆盖三个版本,让新读者**通过这一份文档了解 v0.1.0 上线之后的全部重要变化**:
 
@@ -47,7 +47,7 @@ v0.1.0  ─►  v0.1.1  ─►  v0.2.0  ─►  v0.2.1 (本次)
 
 ## v0.2.0 重要能力回顾(2026-06-10)
 
-> 完整 diff 范围 `cd20e88` → `b09a598`,详细列表见 [CHANGELOG.md](./../CHANGELOG.md)。
+> 完整 diff 范围 `cd20e88` → `b09a598`,详细列表见 [CHANGELOG.md](../../CHANGELOG.md)。
 
 ### ✨ 新增
 

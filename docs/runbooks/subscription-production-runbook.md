@@ -3,7 +3,7 @@
 > 对应 `docs/design/subscription-follow-up-roadmap.md` 阶段 4：文档与 Runbook。
 > 范围：订阅系统（套餐、用户订阅、订阅账号、额度治理、Relay 订阅路径）的生产发布、回滚与排障。
 > 相关 runbook：[OAuth 绑定](./subscription-oauth-binding-runbook.md)、[套餐配置](./subscription-plan-runbook.md)、[账号额度治理](./subscription-account-quota-governance-runbook.md)、[Redis 多副本](./subscription-redis-multi-replica-runbook.md)、[Relay 压测](./relay-stress-runbook.md)。
-> 通用部署见 [部署运维文档](./deployment.md)。
+> 通用部署见 [部署运维文档](../deployment.md)。
 
 本 runbook 让新部署人员只按本文档即可完成订阅系统的数据库迁移、滚动发布、回滚与生产排障。release 文档（`docs/releases/release-*.md`）只保留发布摘要，长期操作细节集中在本 runbook 与上述专题 runbook。
 
@@ -32,7 +32,7 @@
 | `PAYMENT_QUOTA_PER_UNIT` | ⬜ | quota↔金额换算，默认 500000 |
 | `NOTIFY_GRPC_ENDPOINT` | ⬜ | 告警投递（额度告警/对账告警） |
 
-完整环境变量参考见 [部署运维文档](./deployment.md) §4。
+完整环境变量参考见 [部署运维文档](../deployment.md) §4。
 
 ## 三、数据库迁移（必读）
 
@@ -312,13 +312,13 @@ SHOW PROCESSLIST;          -- 找 migration 连接
 
 | 文档 | 范围 |
 | --- | --- |
-| [订阅系统后续规划路线图](./subscription-follow-up-roadmap.md) | 总路线图与阶段划分 |
+| [订阅系统后续规划路线图](../design/subscription-follow-up-roadmap.md) | 总路线图与阶段划分 |
 | [订阅账号配置与导入实操指南](./subscription-account-setup-guide.md) | 字段对照 + 脚本导入实操 |
-| [上游账号额度后续工作说明](./subscription-account-quota-follow-up.md) | 额度实现边界与数据流 |
-| [订阅优先扣费设计](./subscription-priority-deduction-design.md) | 计费语义 |
-| [订阅升级方案](./subscription-upgrade-plan.md) | 跨业务+Relay 总方案 |
-| [续费语义](./subscription-renewal-semantics.md) | 续费行为与幂等 |
-| [退款/冲正语义](./subscription-refund-reversal-semantics.md) | 退款账务与幂等 |
+| [上游账号额度后续工作说明](../design/subscription-account-quota-follow-up.md) | 额度实现边界与数据流 |
+| [订阅优先扣费设计](../design/subscription-priority-deduction-design.md) | 计费语义 |
+| [订阅升级方案](../design/subscription-upgrade-plan.md) | 跨业务+Relay 总方案 |
+| [续费语义](../design/subscription-renewal-semantics.md) | 续费行为与幂等 |
+| [退款/冲正语义](../design/subscription-refund-reversal-semantics.md) | 退款账务与幂等 |
 | [OAuth 绑定 Runbook](./subscription-oauth-binding-runbook.md) | OAuth 授权码绑定 |
 | [套餐配置与购买发放 Runbook](./subscription-plan-runbook.md) | 套餐上下架与购买 |
 | [账号额度治理 Runbook](./subscription-account-quota-governance-runbook.md) | 额度重置与恢复 |

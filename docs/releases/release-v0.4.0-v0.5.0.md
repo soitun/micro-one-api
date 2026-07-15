@@ -183,11 +183,11 @@ git diff --check
 
 ## 后续规划
 
-详细路线图见 [订阅系统后续规划路线图](./subscription-follow-up-roadmap.md)。
+详细路线图见 [订阅系统后续规划路线图](../design/subscription-follow-up-roadmap.md)。
 
 阶段 4(文档与 Runbook)已交付,长期操作细节见订阅生产 Runbook 索引:
 
-- [订阅生产发布、回滚与排障 Runbook](./subscription-production-runbook.md#七订阅文档索引):含 OAuth 绑定、套餐配置、额度治理、Redis 多副本、压测 runbook 的完整索引。
-- [订阅系统后续规划路线图](./subscription-follow-up-roadmap.md#阶段-4-文档与-runbook):阶段 4 交付物清单与验收状态。
+- [订阅生产发布、回滚与排障 Runbook](../runbooks/subscription-production-runbook.md#七订阅文档索引):含 OAuth 绑定、套餐配置、额度治理、Redis 多副本、压测 runbook 的完整索引。
+- [订阅系统后续规划路线图](../design/subscription-follow-up-roadmap.md#阶段-4-文档与-runbook):阶段 4 交付物清单与验收状态。
 
 本文只保留发布摘要,不再承载操作步骤。

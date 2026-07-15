@@ -221,12 +221,12 @@
 
 交付物:
 
-- [订阅账号 OAuth 绑定 Runbook](./subscription-oauth-binding-runbook.md):授权码 auth-url/exchange 两步流、字段来源、多副本 session 限制、token 刷新健康度、绑定排障。
-- [订阅套餐配置与购买发放 Runbook](./subscription-plan-runbook.md):分组/套餐字段、上下架切换、plan_snapshot 快照发放、测试购买、续费幂等验证、运营报表。
-- [订阅账号额度治理 Runbook](./subscription-account-quota-governance-runbook.md):reset scope、批量重置/模板、runtime block 分层恢复、AutoPause、额度事件幂等、指标。
-- [订阅 Redis 多副本部署 Runbook](./subscription-redis-multi-replica-runbook.md):共享状态清单、并发 cap/跨副本 block/sticky/fail-open 验证、CI smoke 与预发全量。
-- [订阅生产发布、回滚与排障 Runbook](./subscription-production-runbook.md):迁移清单与顺序、滚动发布、回滚策略、回归门槛、生产排障、文档索引。
-- [Relay 稳定性压测与 Runbook](./relay-stress-runbook.md)(阶段 3 已交付,阶段 4 复用)。
+- [订阅账号 OAuth 绑定 Runbook](../runbooks/subscription-oauth-binding-runbook.md):授权码 auth-url/exchange 两步流、字段来源、多副本 session 限制、token 刷新健康度、绑定排障。
+- [订阅套餐配置与购买发放 Runbook](../runbooks/subscription-plan-runbook.md):分组/套餐字段、上下架切换、plan_snapshot 快照发放、测试购买、续费幂等验证、运营报表。
+- [订阅账号额度治理 Runbook](../runbooks/subscription-account-quota-governance-runbook.md):reset scope、批量重置/模板、runtime block 分层恢复、AutoPause、额度事件幂等、指标。
+- [订阅 Redis 多副本部署 Runbook](../runbooks/subscription-redis-multi-replica-runbook.md):共享状态清单、并发 cap/跨副本 block/sticky/fail-open 验证、CI smoke 与预发全量。
+- [订阅生产发布、回滚与排障 Runbook](../runbooks/subscription-production-runbook.md):迁移清单与顺序、滚动发布、回滚策略、回归门槛、生产排障、文档索引。
+- [Relay 稳定性压测与 Runbook](../runbooks/relay-stress-runbook.md)(阶段 3 已交付,阶段 4 复用)。
 
 验收:
 

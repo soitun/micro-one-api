@@ -6,7 +6,7 @@
 
 本项目面向需要统一管理多个上游模型供应商、钱包余额、访问令牌、账务和运营后台的场景。它不是上游服务的替代品，也不提供任何第三方模型账号、订阅或 API Key。
 
-> 📣 **最新发布**:[v0.7.1 发布公告](./docs/releases/release-v0.7.1.md)(管理后台日志详情与分页修复、服务间路由与鉴权修复、安全扫描收敛) · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.7.1)
+> 📣 **最新发布**：[v0.7.2 发布公告](./docs/releases/release-v0.7.2.md)（OAuth 回调修复、Compose 显式迁移、Kubernetes 清单与部署文档收口） · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.7.2)
 
 ## 功能概览
 
@@ -25,7 +25,48 @@
 - 监控与日志：提供健康检查、Prometheus metrics、业务日志聚合、监控 worker 和通知 worker；对账任务与渠道健康探测暴露运行次数、耗时和失败原因指标。
 - 部署形态：支持本地开发、Docker Compose 和 Kubernetes 部署。
 
+## 界面预览
+
+以下截图来自测试账号或经过脱敏的管理页面。API Key 未展示；渠道名称、用户标识和账务流水已替换为演示内容，运营金额已替换或模糊处理。
+
+| 用户仪表盘 | Token 管理 |
+|:---:|:---:|
+| ![用户仪表盘](./docs/assets/screenshots/user-dashboard.png) | ![Token 管理](./docs/assets/screenshots/token-management.png) |
+| 用量记录 | 充值与订阅套餐 |
+| ![用量记录](./docs/assets/screenshots/usage-records.png) | ![充值与订阅套餐](./docs/assets/screenshots/subscription-plans.png) |
+| 渠道健康监控 | 成本分析 |
+| ![渠道健康监控](./docs/assets/screenshots/channel-health.png) | ![成本分析](./docs/assets/screenshots/cost-analysis.png) |
+| 账务日志 | |
+| ![脱敏后的账务日志](./docs/assets/screenshots/billing-logs.png) | |
+
+## 适合谁 / 不适合谁
+
+| 适合 | 不适合 |
+|------|--------|
+| 需要自托管统一入口，管理多个 OpenAI-compatible 或专用 provider 渠道的团队 | 只需要单机、单用户、单上游转发，希望一个二进制零配置启动的场景 |
+| 需要用户、Token、钱包、订阅、账务、用量、成本和运营后台的内部平台或 SaaS 团队 | 希望项目直接提供上游模型账号、订阅、API Key 或代替第三方模型服务的用户 |
+| 需要 Docker Compose / Kubernetes 部署，并希望按服务边界扩展和审计的工程团队 | 不准备维护 MySQL、Redis、多服务部署和监控体系的轻量个人用途 |
+| 已获得上游服务合法授权，需要在组织内部做统一鉴权、调度和成本治理的使用者 | 试图绕过上游访问限制、账号规则、计费规则或服务条款的用途 |
+
 ## 架构
+
+```mermaid
+flowchart LR
+    Client[SDK / 应用] --> Relay[relay-gateway]
+    Admin[Web 管理后台] --> BFF[admin-api]
+    Relay --> Identity[identity-service]
+    Relay --> Channel[channel-service]
+    Relay --> Billing[billing-service]
+    Relay --> Upstream[上游模型服务]
+    BFF --> Identity
+    BFF --> Channel
+    BFF --> Billing
+    BFF --> Log[log-service]
+    Monitor[monitor-worker] --> Channel
+    Billing --> Notify[notify-worker]
+```
+
+请求路径以 `relay-gateway` 为入口，鉴权、渠道选择和账务结算分别由对应服务负责；管理前端通过 `admin-api` 聚合管理接口，监控与通知 worker 处理异步运营任务。
 
 当前仓库按 Kratos 服务边界组织：
 
@@ -90,6 +131,23 @@ docker compose up -d
 
 首次启动时，如果 `users` 表为空，`identity-service` 会创建初始 root 管理员。可通过 `INITIAL_ADMIN_USERNAME`、`INITIAL_ADMIN_EMAIL`、`INITIAL_ADMIN_PASSWORD` 指定；未设置密码时会生成随机密码。生产环境应设置 `INITIAL_ADMIN_PASSWORD_FILE`，服务会把随机密码写入该 0600 私有文件，不会在日志中打印明文。
 
+### 从空环境到首个渠道和 Token
+
+1. 按上面的 Docker Compose 步骤启动服务，确认 `http://localhost:8080/healthz` 返回成功。
+2. 打开 `http://localhost:3000`，使用首次启动时配置或生成的管理员账号登录。
+3. 进入 **管理后台 → 渠道 → Create Channel**，填写 `Name`、`Provider`、`Base URL`、`API Key`、`Models` 和 `Group`；`Priority`、`Weight` 可先保留默认值。
+4. 保存后在渠道列表执行 **Test**，并在 **健康监控** 中确认渠道状态为健康。测试失败时先核对 Base URL 是否包含正确的 API 前缀，以及模型名称是否被上游支持。
+5. 进入 **API 密钥 → Create Token**，输入用途名称（例如 `quickstart`）。新 Token 只会完整显示一次，应立即复制并安全保存。
+6. 使用新 Token 验证 Relay：
+
+```bash
+export API_TOKEN='<刚创建的 Token>'
+curl -H "Authorization: Bearer ${API_TOKEN}" \
+  http://localhost:8080/v1/models
+```
+
+返回模型列表后，即完成从空环境部署到首个渠道和 Token 的最短链路。生产环境不要把上游 API Key、用户 Token 或管理员密码写入文档、命令历史和版本库。
+
 ### 本地开发
 
 生成 proto 和构建：
@@ -120,6 +178,10 @@ make web-dist
 ```
 
 完整部署说明见 [docs/deployment.md](./docs/deployment.md)。
+
+### 升级到 v0.7.2
+
+v0.7.2 是 v0.7.1 之后的 PATCH 版本，无 API 或数据库 schema 破坏性变更。Compose 改为由一次性 `migrate` 服务显式执行迁移，旧数据卷升级前应先备份并按需登记 brownfield baseline。详见 [docs/releases/release-v0.7.2.md](./docs/releases/release-v0.7.2.md)。
 
 ### 升级到 v0.7.1
 
