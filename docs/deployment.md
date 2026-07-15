@@ -552,15 +552,36 @@ scrape_configs:
 
 SQL 迁移文件位于仓库根目录的 `migrations/`。Docker Compose 的一次性 `migrate` 服务会先执行迁移，成功后其他应用服务才启动；迁移失败会直接阻止部署继续。订阅套餐购买需要 `050_create_subscription_plans.sql`；上游订阅账号本地额度需要 `051_add_subscription_account_local_quota.sql`。
 
-手动迁移：
+查看或手动执行迁移：
 
 ```bash
-# 进入 MySQL
-docker compose exec mysql mysql -u root -p oneapi
+cd deployments/docker-compose
 
-# 执行迁移文件示例
-source /docker-entrypoint-initdb.d/001_create_users.sql
+# 查看一次性迁移服务的执行结果
+docker compose --env-file .env logs migrate
+
+# 查看迁移记录；命令复用同一个 migrate 镜像和 .env 中的 DSN
+docker compose --env-file .env run --rm migrate -status
+
+# 应用尚未记录的迁移
+docker compose --env-file .env run --rm migrate
 ```
+
+### 8.1 从 v0.7.1 或更早的 Compose 数据卷升级
+
+旧版 Compose 把整个 `migrations/` 目录挂载到 MySQL 的 `/docker-entrypoint-initdb.d`。该机制只在空数据目录首次启动时执行，而且 SQL 中途失败后重启 MySQL 会跳过剩余文件，因此 v0.7.2 不再使用它。
+
+升级已有数据卷前必须先备份数据库。如果旧环境已确认完整执行到 `phase1_indexes.sql`，先用 brownfield baseline 只登记历史版本，再启动 v0.7.2：
+
+```bash
+cd deployments/docker-compose
+
+docker compose --env-file .env up -d mysql redis
+docker compose --env-file .env run --rm migrate -baseline phase1_indexes
+docker compose --env-file .env up -d --build
+```
+
+`-baseline phase1_indexes` 只适用于已经具备这些历史表、列和索引的旧数据库；它不会补建缺失结构。若旧初始化曾失败、无法确认 schema 完整性，禁止直接 baseline，应先从备份恢复、逐项修复缺失迁移，或迁移到按本文创建的全新数据库。全新 v0.7.2 环境不需要指定 baseline，一次性 `migrate` 会执行所有编号迁移和 `phase1_indexes.sql`，并继续排除可选的 `phase3_partitioning.sql`。
 
 ## 9. 多数据库方言部署
 

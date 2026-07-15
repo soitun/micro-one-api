@@ -1,15 +1,15 @@
 # 项目 TODO
 
-> 最后更新：2026-07-14
+> 最后更新：2026-07-15
 >
 > 当前阶段重点：先完成发布与部署收口，再完善项目展示；在这些任务完成前，暂不启动新的大型业务功能。
 
 ## P0 — 发布与部署可用性
 
-### [ ] 合并 OAuth 回调路由修复
+### [x] 合并 OAuth 回调路由修复
 
 - [x] 等待 `develop` 提交 `2cb0a23` 的完整 CI 通过。
-- [ ] 合并到 `main`。
+- [x] 合并到 `main`。
 - [x] 评估是否发布 `v0.7.2`：结论为合并部署修复后发布。
 
 验收标准：
@@ -18,7 +18,7 @@
 - OAuth 回调路由的相关单元测试通过。
 - `main` 包含 `2cb0a23` 的修复。
 
-### [ ] 同步部署方式与部署文档
+### [x] 同步部署方式与部署文档
 
 关联 Issue：[部署方式是否同步更新 #5](https://github.com/mengbin92/micro-one-api/issues/5)
 
@@ -29,7 +29,7 @@
 - [x] 核对 `config-service` 是否确实需要 `SERVICE_TOKEN`：代码不读取该变量，已从 Compose/K8s 移除。
 - [x] 文档说明如何替换 `your-registry/<service>:v0.7.2`，生产示例使用固定版本而非浮动 `latest`。
 - [x] 核对全部 ConfigMap、Secret、Service、Ingress 名称和端口引用。
-- [ ] 验证全新 Docker Compose 部署。
+- [x] 验证全新 Docker Compose 部署。
 - [x] 使用 kind、k3d 或测试集群执行一次 K8s smoke test。
 
 2026-07-14 进度记录：
@@ -38,7 +38,9 @@
 - kind v1.33.1 smoke 中，九个应用及 MySQL/Redis 均达到 `1/1 Running`；Admin Pod 可访问 billing/log 内部接口，共享令牌鉴权成功，Relay `/healthz` 成功。
 - 全新 MySQL 已一次完成 55 项自动迁移；修复了 SQL 字符串内分号解析、`phase1_indexes.sql` 错误列名，并将可选 `phase3_partitioning.sql` 排除出自动迁移。
 - Compose 曾在旧初始化方式下达到 22 项 smoke 全通过，但该过程暴露出 MySQL 初始化失败后重启会掩盖不完整 schema。现已改为强制一次性 `migrate` 服务；最终全新卷复验在镜像构建完成前按当天工作安排中止，因此本项保持未完成。
-- 待续：完成最终 Compose smoke，执行项目基线测试，推送并等待 `develop` CI，合并 `main` 后发布 `v0.7.2`。
+- 2026-07-15 使用全新 Compose project 和临时环境文件完成最终 smoke：一次性迁移成功，MySQL/Redis 健康，九个应用全部运行，内部健康检查、共享令牌鉴权、Relay 健康与未授权校验共 23 项全部通过。
+- 项目基线通过：`./scripts/check-architecture.sh`、`make test-unit`、前端 72 项测试与 ESLint、`docker compose config --quiet`、OAuth admin/identity 路由定向测试均成功。
+- `develop` 头提交 `2ecee00` 的 GitHub CI 与 Security Pipeline 全部通过；`main` 已包含 `2cb0a23` 及部署收口提交，发布说明已准备为 `v0.7.2`。
 
 验收标准：
 

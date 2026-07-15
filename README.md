@@ -6,7 +6,7 @@
 
 本项目面向需要统一管理多个上游模型供应商、钱包余额、访问令牌、账务和运营后台的场景。它不是上游服务的替代品，也不提供任何第三方模型账号、订阅或 API Key。
 
-> 📣 **最新发布**:[v0.7.1 发布公告](./docs/releases/release-v0.7.1.md)(管理后台日志详情与分页修复、服务间路由与鉴权修复、安全扫描收敛) · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.7.1)
+> 📣 **最新发布**:[v0.7.2 发布公告](./docs/releases/release-v0.7.2.md)(OAuth 回调路由修复、一次性数据库迁移、Compose/K8s 部署收口) · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.7.2)
 
 ## 功能概览
 
@@ -120,6 +120,12 @@ make web-dist
 ```
 
 完整部署说明见 [docs/deployment.md](./docs/deployment.md)。
+
+### 升级到 v0.7.2
+
+v0.7.2 是 v0.7.1 之后的 PATCH 版本，修复 OAuth 绑定回调路由，并收口 Docker Compose 与 Kubernetes 的生产部署方式。**没有新增业务表迁移，也没有破坏性 API 变更**；但部署流程改为先运行一次性 `migrate`，成功后才启动应用服务。详见 [docs/releases/release-v0.7.2.md](./docs/releases/release-v0.7.2.md)。
+
+> 从 v0.7.1 或更早的旧 Compose 数据卷升级前，请先备份数据库，并按发布公告中的 brownfield baseline 步骤处理旧的初始化方式。
 
 ### 升级到 v0.7.1
 
