@@ -7,34 +7,6 @@ ARG SERVICE_NAME=log-service
 ARG SERVICE_PATH=./app/log/cmd/log
 
 # ---------------------------------------------------------------------------
-# Stage 1: web-builder
-# Builds the admin frontend (vite 8 requires node >= 20.19, alpine 3.20 only
-# ships node 20.14). Using a dedicated node:24 stage keeps the Go build
-# stage small and avoids relying on the OS-shipped node.
-# ---------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM node:24-alpine AS web-builder
-
-WORKDIR /web
-
-# Copy lockfile + manifests first so dependency install caches independently
-# of the source tree. This step fails fast if package-lock.json is out of
-# sync with package.json (which would otherwise fail much later in
-# `npm run build` and waste CI time).
-COPY web/package.json web/package-lock.json web/.npmrc ./
-
-# `npm ci` requires a clean install. We don't have node_modules in the
-# build context (.dockerignore excludes it), so this is always a fresh
-# install. --no-audit --no-fund keep logs quiet and fast.
-RUN npm ci --no-audit --no-fund
-
-COPY web/ ./
-
-ARG VITE_RECHARGE_AMOUNT_MULTIPLIER=10
-ENV VITE_RECHARGE_AMOUNT_MULTIPLIER=${VITE_RECHARGE_AMOUNT_MULTIPLIER}
-
-RUN npm run build
-
-# ---------------------------------------------------------------------------
 # Stage 2: go-deps
 # Caches Go modules inside this Dockerfile so CI/buildx jobs are self-contained.
 # A separate Dockerfile.deps may still be used by deployment scripts for
@@ -81,18 +53,6 @@ COPY . .
 
 RUN make proto-tools && make proto
 
-# For admin-api, the web dist was built in the dedicated web-builder stage
-# (alpine's node 20.14 is too old for vite 8). Bring it in here so the
-# //go:embed all:static/web directive picks it up at build time. The
-# intermediate /tmp/web-dist path lets us guard the COPY with a shell
-# conditional on SERVICE_NAME.
-COPY --from=web-builder /web/dist /tmp/web-dist
-ARG SERVICE_NAME
-RUN if [ "$SERVICE_NAME" = "admin-api" ]; then \
-      rm -rf /app/app/admin/internal/server/static/web && \
-      mkdir -p /app/app/admin/internal/server/static/web && \
-      cp -a /tmp/web-dist/. /app/app/admin/internal/server/static/web/; \
-    fi
 
 # CGO is required by github.com/mattn/go-sqlite3 so the lite deployment
 # (DATABASE_DRIVER=sqlite3) works. Because this stage runs on the target

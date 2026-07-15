@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -939,8 +938,27 @@ func TestAdminHTTPProxiesUserTopUp(t *testing.T) {
 	}
 }
 
+// adminWebRootFixture builds a minimal but valid admin SPA web root in a
+// temp directory and returns its path. It is used by tests that need the
+// page handler to actually serve HTML without relying on the removed
+// //go:embed fallback.
+func adminWebRootFixture(t *testing.T) string {
+	t.Helper()
+	webRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(webRoot, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webRoot, "index.html"), []byte(`<!doctype html><div id="root"></div><script src="/assets/app.js"></script>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webRoot, "assets", "app.js"), []byte(`console.log("fixture")`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return webRoot
+}
+
 func TestAdminHTTPPageIsServed(t *testing.T) {
-	srv := NewHTTPServer(":0", nil)
+	srv := NewHTTPServer(":0", nil, "", adminWebRootFixture(t))
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	rec := httptest.NewRecorder()
 
@@ -962,7 +980,7 @@ func TestAdminHTTPPageIsServed(t *testing.T) {
 }
 
 func TestAdminHTTPPageSPARouteFallback(t *testing.T) {
-	srv := NewHTTPServer(":0", nil)
+	srv := NewHTTPServer(":0", nil, "", adminWebRootFixture(t))
 	for _, path := range []string{"/", "/login", "/register", "/dashboard", "/tokens", "/pricing", "/redeem", "/admin/channel-health", "/admin/cost-analysis", "/admin/reconciliation", "/admin/options", "/admin/subscription-plans"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
@@ -1132,16 +1150,19 @@ func TestAdminHTTPPageDisablesShellCache(t *testing.T) {
 	}
 }
 
-func TestAdminHTTPPageFallsBackToEmbedWhenExternalWebRootInvalid(t *testing.T) {
-	webRoot := t.TempDir()
-	srv := NewHTTPServer(":0", nil, "", webRoot)
-	body := adminHTTPGetBody(t, srv, "/admin")
-
-	if strings.Contains(body, `external`) {
-		t.Fatalf("unexpected external shell from invalid web root: %s", body)
-	}
-	if !strings.Contains(body, `<div id="root">`) {
-		t.Fatalf("embedded SPA shell missing root: %s", body)
+func TestAdminHTTPPageReturnsUnavailableWhenNoWebRoot(t *testing.T) {
+	// With no embedded fallback and ADMIN_WEB_ROOT unset, the admin SPA
+	// must respond 500 "frontend not available" rather than serving a
+	// stale or empty shell.
+	t.Setenv("ADMIN_WEB_ROOT", "")
+	srv := NewHTTPServer(":0", nil, "")
+	for _, path := range []string{"/", "/admin", "/login", "/assets/app.js"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("GET %s status = %d, want 500, body=%s", path, rec.Code, rec.Body.String())
+		}
 	}
 }
 
@@ -1202,25 +1223,6 @@ func TestReadonlyPricingReadsLegacyQuotaPerUnit(t *testing.T) {
 	}
 }
 
-func TestAdminHTTPEmbeddedLoginBundleIncludesRegistration(t *testing.T) {
-	srv := NewHTTPServer(":0", nil)
-	shell := adminHTTPGetBody(t, srv, "/login")
-	entryPath := firstSubmatch(t, shell, `<script[^>]+src="([^"]+)"`)
-	entry := adminHTTPGetBody(t, srv, entryPath)
-	loginChunkPath := firstSubmatch(t, entry, "import\\(`\\./(LoginPage-[^`]+\\.js)`\\)")
-	loginChunk := adminHTTPGetBody(t, srv, "/assets/"+loginChunkPath)
-
-	for _, want := range []string{
-		"/user/register",
-		"confirm-password",
-		"注册账号",
-	} {
-		if !strings.Contains(loginChunk, want) {
-			t.Fatalf("embedded login chunk missing %q", want)
-		}
-	}
-}
-
 func TestUsableWebRootCleansToAbsoluteIndexDir(t *testing.T) {
 	webRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(webRoot, "index.html"), []byte("ok"), 0o600); err != nil {
@@ -1248,15 +1250,6 @@ func adminHTTPGetBody(t *testing.T, srv http.Handler, path string) string {
 		t.Fatalf("GET %s status = %d, want 200, body=%s", path, rec.Code, rec.Body.String())
 	}
 	return rec.Body.String()
-}
-
-func firstSubmatch(t *testing.T, value string, pattern string) string {
-	t.Helper()
-	matches := regexp.MustCompile(pattern).FindStringSubmatch(value)
-	if len(matches) != 2 {
-		t.Fatalf("pattern %q did not match", pattern)
-	}
-	return matches[1]
 }
 
 func TestAdminHTTPOptionRequiresAuth(t *testing.T) {

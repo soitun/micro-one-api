@@ -79,7 +79,14 @@ test/e2e/e2e-test
 web/node_modules
 web/dist
 web/.env
-internal/admin/server/static/web/
+# Admin frontend build output. The Dockerfiles build the web in a
+# dedicated web-builder stage and copy it into the embed path right
+# before `go build`, so these built assets must never be tracked in
+# git. `ADMIN_WEB_ROOT` can override the path at runtime; the
+# `//go:embed all:static/web` directive is kept valid by `.gitkeep`.
+app/admin/internal/server/static/web/*
+!app/admin/internal/server/static/web/.gitkeep
+
 cert/
 .claude
 # Local build/save outputs

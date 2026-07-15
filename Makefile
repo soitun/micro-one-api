@@ -96,7 +96,7 @@ build-service:
 	@test -n "$(SERVICE_PATH)" || (echo "unknown SERVICE=$(SERVICE)" && exit 1)
 	go build -o bin/$(SERVICE) $(SERVICE_PATH)
 # build
-build: proto web-build
+build: proto
 	go build ./...
 
 .PHONY: web-dist
@@ -105,11 +105,10 @@ web-dist:
 	cd web && npm ci && npm run build
 
 .PHONY: web-build
-# build web frontend and copy it into the embedded admin-api asset directory
+# build web frontend into web/dist. The admin-api binary no longer embeds
+# the frontend; deploy it via ADMIN_WEB_ROOT (see Dockerfile) or copy
+# web/dist to a served directory manually.
 web-build: web-dist
-	rm -rf app/admin/internal/server/static/web
-	mkdir -p app/admin/internal/server/static/web
-	cp -r web/dist/* app/admin/internal/server/static/web/
 
 .PHONY: generate
 # generate

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/subtle"
-	"embed"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -24,18 +23,18 @@ import (
 	billingv1 "micro-one-api/api/billing/v1"
 	commonv1 "micro-one-api/api/common/v1"
 	"micro-one-api/app/admin/internal/service"
-	"micro-one-api/platform/metrics"
 	"micro-one-api/pkg/safecast"
 	"micro-one-api/platform/http"
+	"micro-one-api/platform/metrics"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-//go:embed all:static/web
-var webFS embed.FS
-
+// adminWebAssets serves the admin SPA. The frontend is never embedded
+// into the binary; it is resolved from ADMIN_WEB_ROOT (or the optional
+// constructor argument) so the built web dist stays out of the git repo.
 type adminWebAssets struct {
 	root fs.FS
 }
@@ -957,12 +956,12 @@ func adminSummaryAlerts(channels []*commonv1.ChannelSummary, topChannels []servi
 	if latest := latestReconciliationRun(reconciliation); latest != nil {
 		if count := interfaceToInt64(latest["discrepancy_count"]); count > 0 {
 			alerts = append(alerts, map[string]interface{}{
-				"type":     "reconciliation_discrepancy",
-				"severity": "critical",
-				"category": "billing",
-				"run_id":   latest["run_id"],
+				"type":              "reconciliation_discrepancy",
+				"severity":          "critical",
+				"category":          "billing",
+				"run_id":            latest["run_id"],
 				"discrepancy_count": count,
-				"message":  "最近一次对账存在差异",
+				"message":           "最近一次对账存在差异",
 			})
 		}
 	}
@@ -980,25 +979,25 @@ func adminSummaryAlerts(channels []*commonv1.ChannelSummary, topChannels []servi
 				severity = "critical"
 			}
 			alerts = append(alerts, map[string]interface{}{
-				"type":               "subscription_account_unschedulable",
-				"severity":           severity,
-				"category":           "subscription_account",
-				"account_id":         account.GetId(),
-				"account_name":       account.GetName(),
-				"recovery_policy":    account.GetRecoveryPolicy(),
+				"type":                 "subscription_account_unschedulable",
+				"severity":             severity,
+				"category":             "subscription_account",
+				"account_id":           account.GetId(),
+				"account_name":         account.GetName(),
+				"recovery_policy":      account.GetRecoveryPolicy(),
 				"expected_recovery_at": account.GetExpectedRecoveryAt(),
 				"unschedulable_since":  account.GetUnschedulableSince(),
-				"message":            "订阅账号不可调度: " + reason,
+				"message":              "订阅账号不可调度: " + reason,
 			})
 		}
 		if account.GetQuotaSnapshotPaused() {
 			alerts = append(alerts, map[string]interface{}{
-				"type":       "subscription_account_writeback_down",
-				"severity":   "critical",
-				"category":   "subscription_account",
-				"account_id": account.GetId(),
+				"type":         "subscription_account_writeback_down",
+				"severity":     "critical",
+				"category":     "subscription_account",
+				"account_id":   account.GetId(),
 				"account_name": account.GetName(),
-				"message":    "订阅账号额度快照回写已暂停",
+				"message":      "订阅账号额度快照回写已暂停",
 			})
 		}
 	}
@@ -1326,23 +1325,14 @@ func newAdminWebAssets(webRoot string) adminWebAssets {
 	if webRoot == "" {
 		webRoot = strings.TrimSpace(os.Getenv("ADMIN_WEB_ROOT"))
 	}
-	if webRoot != "" {
-		cleanRoot, err := usableWebRoot(webRoot)
-		if err == nil {
-			return adminWebAssets{root: os.DirFS(cleanRoot)}
-		}
+	if webRoot == "" {
+		return adminWebAssets{}
 	}
-
-	distFS, err := fs.Sub(webFS, "static/web")
+	cleanRoot, err := usableWebRoot(webRoot)
 	if err != nil {
 		return adminWebAssets{}
 	}
-	return adminWebAssets{root: distFS}
-}
-
-func isUsableWebRoot(webRoot string) bool {
-	_, err := usableWebRoot(webRoot)
-	return err == nil
+	return adminWebAssets{root: os.DirFS(cleanRoot)}
 }
 
 func usableWebRoot(webRoot string) (string, error) {

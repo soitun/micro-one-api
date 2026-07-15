@@ -81,18 +81,9 @@ COPY . .
 
 RUN make proto-tools && make proto
 
-# For admin-api, the web dist was built in the dedicated web-builder stage
-# (alpine's node 20.14 is too old for vite 8). Bring it in here so the
-# //go:embed all:static/web directive picks it up at build time. The
-# intermediate /tmp/web-dist path lets us guard the COPY with a shell
-# conditional on SERVICE_NAME.
-COPY --from=web-builder /web/dist /tmp/web-dist
-ARG SERVICE_NAME
-RUN if [ "$SERVICE_NAME" = "admin-api" ]; then \
-      rm -rf /app/app/admin/internal/server/static/web && \
-      mkdir -p /app/app/admin/internal/server/static/web && \
-      cp -a /tmp/web-dist/. /app/app/admin/internal/server/static/web/; \
-    fi
+# The admin frontend is no longer compiled into the Go binary via
+# //go:embed. It is shipped as a separate runtime directory and served
+# via ADMIN_WEB_ROOT (set below). Nothing to do at build time.
 
 # CGO is required by github.com/mattn/go-sqlite3 so the lite deployment
 # (DATABASE_DRIVER=sqlite3) works. Because this stage runs on the target
@@ -115,9 +106,12 @@ RUN apk add --no-cache ca-certificates sqlite-libs
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app/bin/service /service
 COPY --from=builder /app/app/admin/configs /configs
+COPY --from=web-builder /web/dist /web
 
 # Default config path; overridable via -e CONF_PATH=... at runtime.
 ENV CONF_PATH=/configs/config.yaml
+# Admin SPA is served from /web via ADMIN_WEB_ROOT (not embedded).
+ENV ADMIN_WEB_ROOT=/web
 
 USER 65534:65534
 
