@@ -414,8 +414,7 @@ export function ApiGuidePage() {
             <li className="flex gap-3">
               <span className="grid size-6 shrink-0 place-items-center rounded-full bg-blue-600 text-xs font-bold text-white">2</span>
               <div className="min-w-0 pt-0.5 text-sm text-slate-600 dark:text-slate-300">
-                将下方的 <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-mono text-blue-600 dark:bg-white/10 dark:text-blue-400">your-api-domain.com</code>
-                替换为本平台的实际 API 地址。
+                「连接信息」显示的就是 API 服务部署地址： <code className="break-all rounded bg-slate-100 px-1.5 py-0.5 text-xs font-mono text-blue-600 dark:bg-white/10 dark:text-blue-400">{baseUrl}</code>。
               </div>
             </li>
             <li className="flex gap-3">

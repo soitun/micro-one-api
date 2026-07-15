@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bot, Cpu, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -113,18 +113,30 @@ export function CCSwitchDialog({
   const [app, setApp] = useState<AppType>('claude');
   const [name, setName] = useState(APP_CONFIGS.claude.defaultName);
   const [models, setModels] = useState<Record<string, string>>({});
-  const [apiKey, setApiKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
+  const [apiKey, setApiKey] = useState(
+    tokenKey.startsWith('sk-') ? tokenKey : tokenKey ? `sk-${tokenKey}` : '',
+  );
+  const [baseUrl, setBaseUrl] = useState(window.location.origin);
+
+  // The parent bumps a `key` prop each time the dialog opens so this is a
+  // fresh component instance: useState initializers run with the new
+  // tokenKey, and the effect below prefetches the configured server
+  // address exactly once per session. This is the React-recommended way
+  // to "reset state when a prop changes" — re-using the old approach of
+  // calling onOpenChange would never fire because Base UI's controlled
+  // Dialog does not echo the parent's `open=true` back through
+  // `onOpenChange`.
+  useEffect(() => {
+    let cancelled = false;
+    getServerAddress().then((addr) => {
+      if (!cancelled) setBaseUrl(addr);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleOpenChange = (next: boolean) => {
-    if (next) {
-      setModels({});
-      setApp('claude');
-      setName(APP_CONFIGS.claude.defaultName);
-      setApiKey(tokenKey.startsWith('sk-') ? tokenKey : tokenKey ? `sk-${tokenKey}` : '');
-      setBaseUrl(window.location.origin);
-      getServerAddress().then((addr) => setBaseUrl(addr));
-    }
     onOpenChange(next);
   };
 

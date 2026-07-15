@@ -86,6 +86,10 @@ export function TokensPage() {
   const [createdToken, setCreatedToken] = useState<Token | null>(null);
   const [ccSwitchOpen, setCCSwitchOpen] = useState(false);
   const [ccSwitchKey, setCCSwitchKey] = useState('');
+  // Bumped on each open so CCSwitchDialog remounts and re-reads tokenKey
+  // into initial state — Base UI's Dialog does not echo the parent's
+  // controlled `open=true` through onOpenChange.
+  const [ccSwitchSessionId, setCCSwitchSessionId] = useState(0);
   const queryClient = useQueryClient();
 
   const { data: tokens, isLoading } = useQuery({
@@ -166,6 +170,7 @@ export function TokensPage() {
   };
 
   const openCCSwitch = (key: string) => {
+    setCCSwitchSessionId((id) => id + 1);
     setCCSwitchKey(key);
     setCCSwitchOpen(true);
   };
@@ -302,6 +307,7 @@ export function TokensPage() {
       )}
 
       <CCSwitchDialog
+        key={ccSwitchSessionId}
         open={ccSwitchOpen}
         onOpenChange={setCCSwitchOpen}
         tokenKey={ccSwitchKey}
