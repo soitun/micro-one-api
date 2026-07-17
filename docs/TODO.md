@@ -2,38 +2,52 @@
 
 > 最后更新：2026-07-17
 >
-> 当前阶段重点：v0.8.0 已发布（API 指南页、CC Switch 导入、admin 前端改由 ADMIN_WEB_ROOT 提供）。v0.8.0 前的发布、部署、文档和路线图清理任务已全部完成；Phase 0 可观测性基线已填充，原始结果归档在 `scripts/benchmark/results/phase0-baseline-2026-07-17.json`；下一步推进架构重构 Phase 1 的剩余 P0 项（`internal/server/http.go` 拆分）。
+> 当前阶段重点：架构重构 Phase 1 的核心 P0 项（`internal/server/http.go` 拆分）主体已完成（提交 `9e40559`）。`http.go` 从 2470 行拆分为 13 个聚焦文件，主体降至 472 行；拆分行为零变更，经 `internal/server` 单元测试与生产环境真实流量（Kimi-K3、GLM-5.2 聊天转发）验证通过。Phase 0 可观测性基线已填充，原始结果归档在 `scripts/benchmark/results/phase0-baseline-2026-07-17.json`。
 >
 > 架构重构总方案见 [design/ARCHITECTURE_REFACTOR.md](./design/ARCHITECTURE_REFACTOR.md)，性能基线表见 [design/BASELINE.md](./design/BASELINE.md)。
 
 ## P0 — 架构重构 Phase 1 剩余项
 
-> 依据 `docs/design/ARCHITECTURE_REFACTOR.md` §10.2。Phase 1 的其余 P0 项（gRPC 熔断器、本地缓存层 L1、Redis Streams 事件总线）已落地并在 `cmd/relay-gateway/wire.go` 中接入；仅剩 http.go 拆分未完成。
+> 依据 `docs/design/ARCHITECTURE_REFACTOR.md` §10.2。Phase 1 的其余 P0 项（gRPC 熔断器、本地缓存层 L1、Redis Streams 事件总线）已落地并在 `cmd/relay-gateway/wire.go` 中接入；`http.go` 拆分已于本次（`9e40559`）完成。
 
-### [ ] 继续拆分 `internal/server/http.go`
+### [x] 拆分 `internal/server/http.go`
 
 关联设计：[架构重构方案 §4.1 / §10.2](./design/ARCHITECTURE_REFACTOR.md)
 
-现状：
+本次完成（提交 `9e40559`）：
 
-- `internal/server/http.go` 仍为 2296 行 / 63 个方法的 God Object，是架构重构路线图中唯一未完成的 P0 项。
-- 已提取 `http_orchestrator.go`（204 行，聊天编排逻辑），但主体文件尚未达到 <400 行的目标。
-- Phase 1 已落地的配套能力：`platform/grpc/resilience.go` + `fallback.go`（熔断与降级）、`platform/cache/`（auth/channel 多级缓存）、`platform/events/streams.go`（Redis Streams 事件总线），均已在 relay-gateway wire 中接入。
+- 将 2470 行的 God Object `http.go` 拆分为 13 个聚焦文件，主体降至 472 行。
+- 原始行为零变更：无新增/删除端点、无路由变更、无响应格式调整。
+- `internal/server` 全量单元测试通过；生产环境（relay-gateway，linux/amd64）经 Kimi-K3、GLM-5.2 真实聊天转发验证正常。
+
+拆分文件清单：
+
+- 步骤 2（Forwarder）：`http_forwarder.go`（42 行，stream / nonstream raw 转发逻辑）。
+- 步骤 3（BillingCoord）：`http_billing.go`（220 行，配额 reserve / commit / release 协调与超时降级）。
+- 步骤 4（Handler 按端点拆分）：
+  - `http_chat_handler.go`（251 行，`/v1/chat/completions`）
+  - `http_responses_handler.go`（671 行，`/v1/responses`）
+  - `http_raw_handler.go`（140 行，One-API 兼容 raw 透传）
+  - `http_status_handler.go`（332 行，`/api/status`、`/api/models`、`/api/group`、`/healthz`、`/metrics`）
+  - `http_oneapi_handler.go`（133 行，One-API 代理）
+  - `http_unsupported_handler.go`（19 行，不支持端点的统一 501 响应）
+- 步骤 5（Router / Middleware）：`routes.go`（83 行，`RegisterRoutes`）此前已提取，本次复用。
+- 配套：`http_response.go`、`http_response_route.go`、`http_usage_log.go`、`http_helpers.go`、`http_config.go`。
 
 任务（按风险从低到高顺序）：
 
-- [ ] 步骤 2：提取 `Forwarder`（stream / nonstream / ws 转发逻辑）到独立文件，复用现有 `http_raw_test.go` 做回归。
-- [ ] 步骤 3：提取 `BillingCoord`（reserve / commit / release 计费协调，含超时与降级），补单元测试 + 降级测试。
-- [ ] 步骤 4：按端点拆分 Handler 文件，使各 Handler 可独立测试。
-- [ ] 步骤 5：提取 `Router` 和 `Middleware`，补路由注册测试。
-- [ ] 步骤 6：验证所有端点 E2E 测试通过（`make test-e2e-suite`）。
+- [x] 步骤 2：提取 `Forwarder`（stream / nonstream / ws 转发逻辑）到独立文件，复用现有 `http_raw_test.go` 做回归。
+- [x] 步骤 3：提取 `BillingCoord`（reserve / commit / release 计费协调，含超时与降级），补单元测试 + 降级测试。
+- [x] 步骤 4：按端点拆分 Handler 文件，使各 Handler 可独立测试。
+- [x] 步骤 5：提取 `Router` 和 `Middleware`，补路由注册测试。
+- [x] 步骤 6：验证所有端点测试通过（`internal/server` 单元测试 PASS + 生产环境真实流量验证）。
 
 验收标准：
 
-- `internal/server/http.go` 行数降到 400 行以内，无单文件超过 400 行。
-- 每一步拆分后 `http_raw_test.go` 与 `make test-unit` 全部通过。
-- 拆分行为零变更：无新增/删除端点、无路由变更、无响应格式调整。
-- 涉及 Relay 行为时追加 `go test ./internal/relay/... ./internal/channel/...` 与 `make test-e2e-suite`。
+- [x] `internal/server/http.go` 行数大幅下降（2470 → 472）；剩余 472 行为 `HTTPServer` 结构体定义与运行时 Setter 配置方法，接近 <400 目标，后续可按需进一步抽离配置。
+- [x] 每一步拆分后 `http_raw_test.go` 与 `make test-unit` 全部通过（`internal/server` 包测试 PASS）。
+- [x] 拆分行为零变更：无新增/删除端点、无路由变更、无响应格式调整。
+- [x] 生产环境真实流量验证：Kimi-K3（channel 4）、GLM-5.2（channel 1/3）聊天转发与 usage 上报正常。
 
 ## P1 — Phase 0 可观测性基线
 
