@@ -11,12 +11,15 @@ import (
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/google/wire"
+	"go.uber.org/zap"
 	"micro-one-api/app/log/internal/biz"
 	"micro-one-api/app/log/internal/conf"
 	"micro-one-api/app/log/internal/data"
 	"micro-one-api/app/log/internal/server"
 	"micro-one-api/app/log/internal/service"
+	"micro-one-api/platform/logging"
 	registry2 "micro-one-api/platform/registry"
+	"time"
 )
 
 import (
@@ -71,6 +74,30 @@ func newApp(cfg *conf.Config, repo *data.Repository, uc *biz.LogUsecase, svc *se
 	cleanupRetention := startLogRetentionCleanup(uc, cfg.Log.RetentionDays)
 	partitionCtx, partitionCancel := context.WithCancel(context.Background())
 	partitionStop := startPartitionMaintenance(partitionCtx, repo.DB(), cfg.Partition)
+
+	// Phase 2.3: optional async batch log writer. When disabled (default),
+	// LogUsecase.IngestLog falls back to synchronous repo.Create; when
+	// enabled, entries are queued and flushed in batches via
+	// Repository.CreateBatch (gorm CreateInBatches), lowering per-request
+	// log latency. The writer's lifecycle is tied to the app cleanup.
+	var batchWriter *biz.BatchLogWriter
+	var batchStop func()
+	if cfg.Log.BatchEnabled {
+		batchSize := cfg.Log.BatchSize
+		if batchSize <= 0 {
+			batchSize = 100
+		}
+		flushInterval := parseLogFlushInterval(cfg.Log.BatchFlushInterval, time.Second)
+		batchWriter = biz.NewBatchLogWriter(repo, batchSize, flushInterval)
+		batchWriter.Start()
+		uc.SetBatchWriter(batchWriter)
+		batchStop = batchWriter.Stop
+		if logger.Log != nil {
+			logger.Log.
+				Info("log batch writer enabled", zap.Int("batch_size", batchSize), zap.Duration("flush_interval", flushInterval))
+		}
+	}
+
 	opts := []kratos.Option{kratos.Name("log-service"), kratos.Server(grpcSrv, httpSrv)}
 	if reg.Registrar != nil {
 		opts = append(opts, kratos.Registrar(reg.Registrar))
@@ -82,5 +109,21 @@ func newApp(cfg *conf.Config, repo *data.Repository, uc *biz.LogUsecase, svc *se
 		if partitionStop != nil {
 			partitionStop()
 		}
+		if batchStop != nil {
+			batchStop()
+		}
 	}
+}
+
+// parseLogFlushInterval parses a duration string with a fallback. Empty or
+// unparsable values fall back to the provided default so a missing config
+// field never blocks the writer.
+func parseLogFlushInterval(raw string, fallback time.Duration) time.Duration {
+	if raw == "" {
+		return fallback
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	return fallback
 }

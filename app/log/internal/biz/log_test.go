@@ -357,3 +357,116 @@ func TestLogUsecase_ListLogs(t *testing.T) {
 		}
 	})
 }
+
+// --- Phase 2.3 batch ingestion tests ---
+
+// batchMockLogRepo wraps mockLogRepo and records CreateBatch calls so we can
+// assert the batch path is taken. It implements biz.LogRepoBatch.
+type batchMockLogRepo struct {
+	*mockLogRepo
+	batched [][]*LogEntry
+}
+
+func newBatchMockLogRepo(entries ...*LogEntry) *batchMockLogRepo {
+	return &batchMockLogRepo{mockLogRepo: newMockLogRepo(entries...)}
+}
+
+func (m *batchMockLogRepo) CreateBatch(ctx context.Context, entries []*LogEntry) error {
+	m.batched = append(m.batched, entries)
+	for _, e := range entries {
+		if err := m.mockLogRepo.Create(ctx, e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *batchMockLogRepo) batchCount() int {
+	return len(m.batched)
+}
+
+// TestLogUsecase_IngestLogSyncFallback verifies that when no batch writer is
+// wired, IngestLog calls repo.Create directly (synchronous path).
+func TestLogUsecase_IngestLogSyncFallback(t *testing.T) {
+	repo := newBatchMockLogRepo()
+	uc := NewLogUsecase(repo)
+	// batchWriter is nil → sync path
+	e := &LogEntry{Level: "info", Message: "sync", Source: "test"}
+	if err := uc.IngestLog(context.Background(), e); err != nil {
+		t.Fatalf("IngestLog sync failed: %v", err)
+	}
+	if e.ID == 0 {
+		t.Fatal("entry ID not set on sync path")
+	}
+	if repo.batchCount() != 0 {
+		t.Fatalf("CreateBatch called %d times, want 0 (no batch writer)", repo.batchCount())
+	}
+}
+
+// TestLogUsecase_IngestLogBatchRouting verifies that when a batch writer is
+// wired, IngestLog routes the entry through the queue instead of calling
+// repo.Create synchronously. We assert by checking the entry is NOT assigned
+// an ID until the batch is flushed.
+func TestLogUsecase_IngestLogBatchRouting(t *testing.T) {
+	repo := newBatchMockLogRepo()
+	uc := NewLogUsecase(repo)
+	w := NewBatchLogWriter(repo, 100, time.Hour) // long interval; we flush manually
+	w.Start()
+	defer w.Stop()
+	uc.SetBatchWriter(w)
+
+	e := &LogEntry{Level: "info", Message: "batched", Source: "test"}
+	if err := uc.IngestLog(context.Background(), e); err != nil {
+		t.Fatalf("IngestLog batch failed: %v", err)
+	}
+	// The entry should be queued, not yet persisted.
+	if e.ID != 0 {
+		t.Fatalf("entry ID = %d before flush; batch path should not persist synchronously", e.ID)
+	}
+	// Flush and verify the batch path was taken.
+	w.Flush()
+	// Give the background flusher a moment to process the manual flush signal.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if repo.batchCount() > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if repo.batchCount() == 0 {
+		t.Fatal("CreateBatch never called after Flush")
+	}
+}
+
+// TestLogUsecase_IngestLogNilBatchWriterIsSafe confirms the zero-value
+// LogUsecase (no batch writer) does not panic and behaves like the sync path.
+func TestLogUsecase_IngestLogNilBatchWriterIsSafe(t *testing.T) {
+	repo := newBatchMockLogRepo()
+	uc := &LogUsecase{repo: repo} // batchWriter nil
+	e := &LogEntry{Level: "info", Message: "safe", Source: "test"}
+	if err := uc.IngestLog(context.Background(), e); err != nil {
+		t.Fatalf("IngestLog nil-batch failed: %v", err)
+	}
+}
+
+// TestBatchLogWriter_QueueFullReturnsError verifies the IngestLog contract:
+// when the queue is full the writer returns an error rather than blocking.
+// The writer's queue capacity is batchSize*10; with batchSize=1 the cap is
+// 10. We do not start the processor goroutine so the queue only drains on
+// flush; filling it to capacity forces the next IngestLog to take the
+// "queue full" branch.
+func TestBatchLogWriter_QueueFullReturnsError(t *testing.T) {
+	repo := newBatchMockLogRepo()
+	w := NewBatchLogWriter(repo, 1, time.Hour)
+	// Fill the queue to its capacity (1*10 = 10).
+	for i := 0; i < 10; i++ {
+		if err := w.IngestLog(context.Background(), &LogEntry{Level: "info", Message: "fill"}); err != nil {
+			t.Fatalf("fill IngestLog %d errored unexpectedly: %v", i, err)
+		}
+	}
+	// Queue is now full; the next call must error, not block.
+	err := w.IngestLog(context.Background(), &LogEntry{Level: "info", Message: "overflow"})
+	if err == nil {
+		t.Fatal("expected error when queue is full, got nil")
+	}
+}

@@ -268,6 +268,68 @@ func (r *Repository) createDB(ctx context.Context, entry *biz.LogEntry) error {
 	return nil
 }
 
+// CreateBatch persists many log entries in a single DB round-trip via gorm
+// CreateInBatches. It implements the biz.LogRepoBatch optional interface so
+// BatchLogWriter can flush a whole batch with one INSERT rather than N.
+// When the repository is backed by the in-memory store it appends directly.
+// The per-entry IDs returned by the DB are written back onto the input
+// entries so callers (e.g. the gRPC IngestLog response) observe the same IDs
+// they would on the synchronous path.
+func (r *Repository) CreateBatch(ctx context.Context, entries []*biz.LogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	if r.db != nil {
+		models := make([]logModel, 0, len(entries))
+		for _, e := range entries {
+			if e.CreatedAt.IsZero() {
+				e.CreatedAt = time.Now()
+			}
+			models = append(models, logModel{
+				Level:                 e.Level,
+				Message:               e.Message,
+				Source:                e.Source,
+				RequestID:             e.RequestID,
+				UserID:                e.UserID,
+				CreatedAt:             e.CreatedAt.Unix(),
+				Username:              e.Username,
+				TokenName:             e.TokenName,
+				ModelName:             e.ModelName,
+				Quota:                 e.Quota,
+				PromptTokens:          e.PromptTokens,
+				CompletionTokens:       e.CompletionTokens,
+				CacheReadTokens:        e.CacheReadTokens,
+				ChannelID:             e.ChannelID,
+				SubscriptionAccountID: e.SubscriptionAccountID,
+				ElapsedTime:           e.ElapsedTime,
+				IsStream:              e.IsStream,
+			})
+		}
+		if err := r.db.WithContext(ctx).CreateInBatches(&models, len(models)).Error; err != nil {
+			return err
+		}
+		// Write generated IDs back to the source entries so callers see them.
+		for i, e := range entries {
+			if i < len(models) {
+				e.ID = models[i].ID
+			}
+		}
+		return nil
+	}
+	// In-memory fallback: append one at a time under the lock.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range entries {
+		if e.CreatedAt.IsZero() {
+			e.CreatedAt = time.Now()
+		}
+		r.seq++
+		e.ID = r.seq
+		r.mem[e.ID] = e
+	}
+	return nil
+}
+
 func (r *Repository) deleteDB(ctx context.Context, filter biz.DeleteLogsFilter) (int64, error) {
 	query := r.db.WithContext(ctx).Where("created_at <= ?", filter.EndTime.Unix())
 	if !filter.StartTime.IsZero() {

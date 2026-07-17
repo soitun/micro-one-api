@@ -141,7 +141,7 @@ func (w *BatchLogWriter) flush() {
 
 	// Write batch to database
 	start := time.Now()
-	err := w.createBatch(batch)
+	err := w.createBatch(context.Background(), batch)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -156,15 +156,15 @@ func (w *BatchLogWriter) flush() {
 
 // createBatch creates multiple log entries using the repository.
 // Falls back to individual writes if batch is not supported.
-func (w *BatchLogWriter) createBatch(entries []*LogEntry) error {
+func (w *BatchLogWriter) createBatch(ctx context.Context, entries []*LogEntry) error {
 	// Try batch interface first
 	if batchRepo, ok := w.repo.(LogRepoBatch); ok {
-		return batchRepo.CreateBatch(entries)
+		return batchRepo.CreateBatch(ctx, entries)
 	}
 
 	// Fallback to individual writes
 	for _, entry := range entries {
-		if err := w.repo.Create(context.Background(), entry); err != nil {
+		if err := w.repo.Create(ctx, entry); err != nil {
 			return err
 		}
 	}
@@ -201,27 +201,7 @@ type BatchWriterStats struct {
 	DroppedEntries int64
 }
 
-// LogRepoBatch extends LogRepo with batch operations.
-type LogRepoBatch interface {
-	LogRepo
-	CreateBatch(entries []*LogEntry) error
-}
-
-// TODO: Implement proper batch insert in data layer
-// Example MySQL implementation would use a single INSERT with multiple VALUES.
-/*
-func (r *logRepo) CreateBatch(entries []*LogEntry) error {
-	if len(entries) == 0 {
-		return nil
-	}
-
-	// Build batch insert query
-	query := `INSERT INTO logs
-		(level, message, source, request_id, user_id, created_at,
-		 username, token_name, model_name, quota, prompt_tokens, completion_tokens,
-		 cache_read_tokens, channel_id, subscription_account_id, elapsed_time, is_stream)
-		VALUES `
-
-	// Implementation in data layer...
-}
-*/
+// LogRepoBatch is now defined in log.go alongside the LogRepo interface so
+// the biz package has a single authoritative batch-capable repo contract.
+// The data layer (data.Repository) implements CreateBatch via gorm
+// CreateInBatches with a per-dialect fallback.

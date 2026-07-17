@@ -44,6 +44,14 @@ type LogSVCConfig struct {
 	RetentionDays int `json:"retention_days"`
 	// BatchSize is the batch insert size for log ingestion.
 	BatchSize int `json:"batch_size"`
+	// BatchEnabled toggles the async batch log writer. When false (default),
+	// IngestLog writes synchronously via repo.Create. When true, entries are
+	// queued and flushed in batches by the background writer, lowering
+	// per-request log latency at the cost of eventual consistency.
+	BatchEnabled bool `json:"batch_enabled"`
+	// BatchFlushInterval is how often the batch writer flushes pending
+	// entries when BatchSize has not been reached. Defaults to 1s.
+	BatchFlushInterval string `json:"batch_flush_interval"`
 }
 
 // PartitionConfig controls periodic table-partition maintenance for the

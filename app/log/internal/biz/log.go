@@ -63,13 +63,34 @@ type LogRepo interface {
 	DeleteBefore(ctx context.Context, before time.Time) (int64, error)
 }
 
+// LogRepoBatch is an optional capability interface a LogRepo may implement to
+// persist many entries in a single round-trip. BatchLogWriter probes for it
+// and falls back to per-entry Create when the repo does not support batch
+// inserts.
+type LogRepoBatch interface {
+	LogRepo
+	CreateBatch(ctx context.Context, entries []*LogEntry) error
+}
+
 // LogUsecase implements business logic for log-service.
 type LogUsecase struct {
-	repo LogRepo
+	repo        LogRepo
+	batchWriter *BatchLogWriter // optional; nil = synchronous path
 }
 
 func NewLogUsecase(repo LogRepo) *LogUsecase {
 	return &LogUsecase{repo: repo}
+}
+
+// SetBatchWriter wires the batch log writer. When set, IngestLog routes
+// entries through the batch queue instead of calling repo.Create
+// synchronously; the writer handles flushing and per-entry fallback. When
+// unset (nil), IngestLog falls back to the original synchronous Create.
+func (uc *LogUsecase) SetBatchWriter(w *BatchLogWriter) {
+	if uc == nil {
+		return
+	}
+	uc.batchWriter = w
 }
 
 func (uc *LogUsecase) GetLog(ctx context.Context, id int64) (*LogEntry, error) {
@@ -103,6 +124,14 @@ func (uc *LogUsecase) UserUsageStats(ctx context.Context, userID int64, startTim
 func (uc *LogUsecase) IngestLog(ctx context.Context, entry *LogEntry) error {
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now()
+	}
+	// Async/batch path: enqueue the entry and return immediately. The
+	// batch writer flushes to the repo (CreateBatch when supported,
+	// per-entry Create otherwise) on its own schedule. Failures to enqueue
+	// (queue full) are reported as errors so callers can decide whether
+	// to fall back; the writer itself never silently drops entries.
+	if uc.batchWriter != nil {
+		return uc.batchWriter.IngestLog(ctx, entry)
 	}
 	return uc.repo.Create(ctx, entry)
 }
