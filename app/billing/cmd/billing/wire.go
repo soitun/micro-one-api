@@ -36,7 +36,7 @@ var ProviderSet = wire.NewSet(
 )
 
 func newData(cfg *bcfg.Config) (*data.Data, error) {
-	return data.NewData(cfg.Data.Database.Driver, cfg.Data.Database.Source)
+	return data.NewData(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
 }
 
 type registrarResult struct {

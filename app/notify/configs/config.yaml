@@ -7,6 +7,10 @@ data:
   database:
     driver: ${DATABASE_DRIVER:-mysql}
     source: ${DATABASE_DSN}
+    # Phase 2.4 schema isolation: empty keeps the legacy shared-database behaviour;
+    # set <SVC>_SCHEMA (or DATABASE_SCHEMA) to point this service at its own MySQL
+    # database or Postgres schema. See docs/deployment.md §10.
+    schema: ${NOTIFY_SCHEMA:-}
   redis:
     addr: ${REDIS_ADDR:-127.0.0.1:6379}
 registry:

@@ -39,6 +39,7 @@ func main() {
 		baseline = flag.String("baseline", defaultBaseline, "brownfield baseline cutoff version (file basename without .sql)")
 		status   = flag.Bool("status", false, "print status table and exit without applying")
 		driver   = flag.String("driver", "", "database driver: mysql (default) or sqlite; inferred from DSN when empty")
+		ownership = flag.String("ownership", "", "restrict to migrations owned by this service key (Phase 2.4 schema isolation; see migrations/ownership.yaml)")
 	)
 	flag.Parse()
 
@@ -84,6 +85,9 @@ func main() {
 	// rejected by pgx) and on SQLite (no information_schema, so tableExists
 	// has to fall back to sqlite_master).
 	runner = migrate.NewWithDriver(db, *dir, drv).WithBaseline(*baseline)
+	if *ownership != "" {
+		runner = runner.WithOwnershipFilter(*ownership)
+	}
 	ctx := context.Background()
 
 	if *status {

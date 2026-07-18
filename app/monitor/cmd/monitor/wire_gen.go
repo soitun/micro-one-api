@@ -7,18 +7,17 @@
 package main
 
 import (
-	"github.com/go-kratos/kratos/v2"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/google/wire"
 	"micro-one-api/app/monitor/internal/biz"
 	"micro-one-api/app/monitor/internal/conf"
 	"micro-one-api/app/monitor/internal/data"
 	"micro-one-api/app/monitor/internal/server"
 	"micro-one-api/app/monitor/internal/service"
 	registry2 "micro-one-api/platform/registry"
-)
 
-import (
+	"github.com/go-kratos/kratos/v2"
+	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/google/wire"
+
 	_ "github.com/go-kratos/kratos/v2/config/file"
 )
 
@@ -49,7 +48,7 @@ var ProviderSet = wire.NewSet(
 )
 
 func newRepo(cfg *conf.Config) (*data.Repository, error) {
-	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source)
+	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
 }
 
 type registrarResult struct {

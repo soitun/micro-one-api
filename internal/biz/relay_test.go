@@ -181,11 +181,7 @@ func TestRelayUsecasePlan_ModelNotAllowed(t *testing.T) {
 }
 
 func TestRelayUsecasePlan_WithModelMapping(t *testing.T) {
-	mapper := &ModelMapper{
-		models: map[string]*ModelEntry{
-			"gpt-4o": {ActualName: "gpt-4o-2024-08-06", Capabilities: []string{"function_call", "streaming"}},
-		},
-	}
+	mapper := NewModelMapperForTest(map[string]*ModelEntry{"gpt-4o": {ActualName: "gpt-4o-2024-08-06", Capabilities: []string{"function_call", "streaming"}}})
 	// testIdentityClient allows "gpt-4o-mini" but we'll use a custom one that allows "gpt-4o"
 	channelClient := &recordingChannelClient{}
 	uc := NewRelayUsecase(&testIdentityClientAllowAll{}, channelClient, mapper, nil)
@@ -202,11 +198,7 @@ func TestRelayUsecasePlan_WithModelMapping(t *testing.T) {
 }
 
 func TestRelayUsecasePlan_SelectsResolvedModelWhenClientModelHasNoChannel(t *testing.T) {
-	mapper := &ModelMapper{
-		models: map[string]*ModelEntry{
-			"gpt-5": {ActualName: "mimo-v2.5-pro", Capabilities: []string{"function_call", "streaming"}},
-		},
-	}
+	mapper := NewModelMapperForTest(map[string]*ModelEntry{"gpt-5": {ActualName: "mimo-v2.5-pro", Capabilities: []string{"function_call", "streaming"}}})
 	channelClient := &recordingChannelClient{
 		failModels:  map[string]error{"gpt-5": errors.New("no available channel")},
 		channelName: "mimo-channel",
@@ -510,11 +502,7 @@ func TestRelayUsecasePlan_StickyDisabled_NoLookup(t *testing.T) {
 }
 
 func TestRelayUsecase_ResolveModel(t *testing.T) {
-	mapper := &ModelMapper{
-		models: map[string]*ModelEntry{
-			"gpt-4o": {ActualName: "gpt-4o-2024-08-06"},
-		},
-	}
+	mapper := NewModelMapperForTest(map[string]*ModelEntry{"gpt-4o": {ActualName: "gpt-4o-2024-08-06"}})
 	uc := NewRelayUsecase(testIdentityClient{}, testChannelClient{}, mapper, nil)
 	if got := uc.ResolveModel("gpt-4o"); got != "gpt-4o-2024-08-06" {
 		t.Fatalf("expected gpt-4o-2024-08-06, got %s", got)
@@ -532,11 +520,7 @@ func TestRelayUsecase_ResolveModel_NilMapper(t *testing.T) {
 }
 
 func TestRelayUsecase_HasCapability(t *testing.T) {
-	mapper := &ModelMapper{
-		models: map[string]*ModelEntry{
-			"gpt-4o": {ActualName: "gpt-4o-2024-08-06", Capabilities: []string{"function_call", "streaming"}},
-		},
-	}
+	mapper := NewModelMapperForTest(map[string]*ModelEntry{"gpt-4o": {ActualName: "gpt-4o-2024-08-06", Capabilities: []string{"function_call", "streaming"}}})
 	uc := NewRelayUsecase(testIdentityClient{}, testChannelClient{}, mapper, nil)
 	if !uc.HasCapability("gpt-4o", "streaming") {
 		t.Fatal("expected streaming capability")

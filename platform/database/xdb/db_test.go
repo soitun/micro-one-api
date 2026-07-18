@@ -2,6 +2,7 @@ package xdb
 
 import (
 	"database/sql"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -206,5 +207,140 @@ func TestOpenPostgresRejectsBadDSN(t *testing.T) {
 	}
 	if db.Dialector.Name() != "postgres" {
 		t.Errorf("Dialector.Name()=%q, want postgres", db.Dialector.Name())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2.4 — schema isolation helpers.
+// ---------------------------------------------------------------------------
+
+func TestWithMySQLDBName(t *testing.T) {
+	cases := []struct {
+		name   string
+		dsn    string
+		schema string
+		want   string
+	}{
+		{
+			name:   "plain",
+			dsn:    "user:pass@tcp(127.0.0.1:3306)/oneapi?parseTime=true",
+			schema: "oneapi_identity",
+			want:   "user:pass@tcp(127.0.0.1:3306)/oneapi_identity?parseTime=true",
+		},
+		{
+			name:   "no params preserves question mark structure",
+			dsn:    "user:pass@tcp(127.0.0.1:3306)/oneapi",
+			schema: "oneapi_log",
+			want:   "user:pass@tcp(127.0.0.1:3306)/oneapi_log",
+		},
+		{
+			name:   "schema with backticks is stripped",
+			dsn:    "user:pass@tcp(127.0.0.1:3306)/oneapi?charset=utf8mb4",
+			schema: "`oneapi_channel`",
+			want:   "user:pass@tcp(127.0.0.1:3306)/oneapi_channel?charset=utf8mb4",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := withMySQLDBName(c.dsn, c.schema)
+			if err != nil {
+				t.Fatalf("withMySQLDBName: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("withMySQLDBName(%q,%q) =\n  %q\nwant %q", c.dsn, c.schema, got, c.want)
+			}
+		})
+	}
+}
+
+func TestWithMySQLDBName_EmptySchemaReturnsOriginal(t *testing.T) {
+	dsn := "user:pass@tcp(127.0.0.1:3306)/oneapi?parseTime=true"
+	got, err := withMySQLDBName(dsn, "")
+	if err != nil {
+		t.Fatalf("withMySQLDBName: %v", err)
+	}
+	if got != dsn {
+		t.Errorf("empty schema should be a no-op, got %q", got)
+	}
+}
+
+func TestWithMySQLDBName_InvalidDSNReturnsError(t *testing.T) {
+	// ParseDSN rejects DSNs without a slash.
+	_, err := withMySQLDBName("not a dsn", "schema")
+	if err == nil {
+		t.Fatal("expected error for unparseable DSN")
+	}
+}
+
+func TestWithPostgresSearchPath_URLForm(t *testing.T) {
+	dsn := "postgres://user:pw@host:5432/oneapi?sslmode=disable"
+	got := withPostgresSearchPath(dsn, "oneapi_identity")
+	// search_path ends up URL-encoded inside the options= query param.
+	decoded, err := url.QueryUnescape(got)
+	if err != nil {
+		t.Fatalf("url.QueryUnescape: %v", err)
+	}
+	if !strings.Contains(decoded, "search_path=oneapi_identity") {
+		t.Errorf("URL-form DSN missing search_path: %q", got)
+	}
+	if !strings.HasPrefix(got, "postgres://user:pw@host:5432/oneapi?") {
+		t.Errorf("URL-form DSN prefix mangled: %q", got)
+	}
+	if !strings.Contains(got, "sslmode=disable") {
+		t.Errorf("URL-form DSN dropped sslmode: %q", got)
+	}
+}
+
+func TestWithPostgresSearchPath_URLFormReplacesExistingOptions(t *testing.T) {
+	dsn := "postgres://user:pw@host:5432/oneapi?sslmode=disable&options=-c%20foo%3Dbar"
+	got := withPostgresSearchPath(dsn, "oneapi_log")
+	decoded, err := url.QueryUnescape(got)
+	if err != nil {
+		t.Fatalf("url.QueryUnescape: %v", err)
+	}
+	if strings.Count(decoded, "options=") != 1 {
+		t.Errorf("expected exactly one options=, got %q", got)
+	}
+	if !strings.Contains(decoded, "search_path=oneapi_log") {
+		t.Errorf("missing search_path in replaced options: %q", got)
+	}
+}
+
+func TestWithPostgresSearchPath_KeyValueForm(t *testing.T) {
+	dsn := "host=127.0.0.1 user=app dbname=oneapi port=5432 sslmode=disable"
+	got := withPostgresSearchPath(dsn, "oneapi_billing")
+	if !strings.Contains(got, "search_path=oneapi_billing") {
+		t.Errorf("KV-form DSN missing search_path: %q", got)
+	}
+	if !strings.Contains(got, "dbname=oneapi") {
+		t.Errorf("KV-form DSN dropped dbname: %q", got)
+	}
+}
+
+func TestWithPostgresSearchPath_KeyValueFormAppendsWhenMissing(t *testing.T) {
+	dsn := "host=127.0.0.1 dbname=oneapi"
+	got := withPostgresSearchPath(dsn, "oneapi_admin")
+	if !strings.Contains(got, "options=") {
+		t.Errorf("KV-form DSN missing options=: %q", got)
+	}
+	if !strings.Contains(got, "search_path=oneapi_admin") {
+		t.Errorf("KV-form DSN missing search_path: %q", got)
+	}
+}
+
+func TestSplitPostgresKV_QuotedValue(t *testing.T) {
+	parts := splitPostgresKV("host=127.0.0.1 options='-c foo=bar -c search_path=x' dbname=app")
+	want := map[string]string{
+		"host":    "127.0.0.1",
+		"options": "-c foo=bar -c search_path=x",
+		"dbname":  "app",
+	}
+	if len(parts) != len(want) {
+		t.Fatalf("got %d parts, want %d: %+v", len(parts), len(want), parts)
+	}
+	for _, kv := range parts {
+		if want[kv.key] != kv.value {
+			t.Errorf("part %s = %q, want %q", kv.key, kv.value, want[kv.key])
+		}
 	}
 }

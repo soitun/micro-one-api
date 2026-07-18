@@ -194,3 +194,62 @@ func containsSubstr(s, substr string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2.5 — hot reload contract.
+// ---------------------------------------------------------------------------
+
+func TestModelMapper_Reload_PicksUpNewEntries(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/models.yaml"
+	if err := os.WriteFile(path, []byte("models:\n  gpt-4o:\n    actual_name: gpt-4o-2024-08-06\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewModelMapper(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Resolve("gpt-4o"); got != "gpt-4o-2024-08-06" {
+		t.Fatalf("initial resolve: got %q, want gpt-4o-2024-08-06", got)
+	}
+	if got := m.Resolve("claude-3"); got != "claude-3" {
+		t.Fatalf("unknown model should pass through, got %q", got)
+	}
+
+	// Rewrite file to add claude-3 + change gpt-4o target.
+	if err := os.WriteFile(path, []byte("models:\n  gpt-4o:\n    actual_name: gpt-4o-2025-01-01\n  claude-3:\n    actual_name: claude-3-opus\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Reload(); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	if got := m.Resolve("gpt-4o"); got != "gpt-4o-2025-01-01" {
+		t.Fatalf("after reload: gpt-4o got %q, want gpt-4o-2025-01-01", got)
+	}
+	if got := m.Resolve("claude-3"); got != "claude-3-opus" {
+		t.Fatalf("after reload: claude-3 got %q, want claude-3-opus", got)
+	}
+}
+
+func TestModelMapper_Reload_RejectsInvalid(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/models.yaml"
+	if err := os.WriteFile(path, []byte("models:\n  good:\n    actual_name: upstream\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewModelMapper(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Now write an invalid file (empty actual_name). Reload must fail and the
+	// previous snapshot must remain observable.
+	if err := os.WriteFile(path, []byte("models:\n  bad:\n    actual_name: ''\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Reload(); err == nil {
+		t.Fatal("Reload should reject empty actual_name")
+	}
+	if got := m.Resolve("good"); got != "upstream" {
+		t.Fatalf("after failed reload, snapshot should be unchanged: got %q, want upstream", got)
+	}
+}

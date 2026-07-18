@@ -44,6 +44,9 @@ import (
 	subscriptiondata "micro-one-api/domain/subscription/data"
 	relaycredential "micro-one-api/domain/upstream/credential"
 	relayadaptor "micro-one-api/internal/adaptor"
+
+	"github.com/go-kratos/kratos/v2/config"
+	xconfig "micro-one-api/platform/config"
 )
 
 // ProviderSet declares the relay-gateway providers. loadConfig lives in
@@ -246,6 +249,21 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func(), error) {
 	}
 
 	modelMapper := newModelMapper(cfg)
+	var modelReloadStop func()
+	if mm := modelMapper; mm != nil {
+		// Phase 2.5 — models.yaml hot reload. The callback re-reads the file
+		// and atomically swaps the mapper's snapshot; a parse/validation
+		// failure is logged and the previous snapshot remains in effect.
+		if mp := modelsConfigPath(cfg); mp != "" {
+			modelReloadStop, _ = xconfig.SubscribeFile(mp, func(_ *config.KeyValue) {
+				if err := mm.Reload(); err != nil {
+					applogger.Log.Warn("models.yaml hot reload failed; keeping previous snapshot", zap.String("path", mp), zap.Error(err))
+					return
+				}
+				applogger.Log.Info("models.yaml hot-reloaded", zap.String("path", mp))
+			})
+		}
+	}
 	retryPolicy := newRetryPolicy(cfg)
 
 	identityAdapter := relaydata.NewIdentityAdapter(identityClient)
@@ -374,6 +392,9 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func(), error) {
 	applogger.Log.Info("relay-gateway starting", zap.String("http_addr", cfg.Server.HTTP.Addr))
 
 	cleanup := func() {
+		if modelReloadStop != nil {
+			modelReloadStop()
+		}
 		if refreshTask != nil {
 			refreshTask.Stop()
 		}

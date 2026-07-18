@@ -1,0 +1,107 @@
+# Migration ownership manifest — Phase 2.4 database schema isolation.
+#
+# When a backend service runs migrations against its own schema
+# (IDENTITY_SCHEMA=oneapi_identity, BILLING_SCHEMA=oneapi_billing, …), it
+# must only own the migrations for the tables it cares about. Files not
+# owned by the service are still run by the centralised migrate job that
+# owns the shared bootstrap.
+#
+# `shared` lists migrations that every per-service schema needs regardless
+# of ownership (currently just the schema_migrations bootstrap).
+# `services` maps a service key (matched by WithOwnershipFilter) to the
+# migration versions that service is allowed to apply on its own schema.
+#
+# When this manifest is absent, Apply/Status fall back to the legacy
+# "apply everything" behaviour, so a deployment that has not yet split its
+# schemas is unaffected.
+
+shared:
+  - 022_create_schema_migrations
+
+services:
+  identity:
+    # users / tokens / user_oauth_identities
+    - 000_create_core_tables          # users, tokens (subset owned by identity)
+    - 007_create_system_options       # also admin-owned; running on identity schema is harmless
+    - 014_add_token_management_fields
+    - 015_add_user_aff_fields
+    - 016_add_usage_log_fields
+    - 017_add_token_oneapi_fields
+    - 019_create_user_oauth_identities
+    - 025_add_user_role
+    - 026_fix_users_status_comment
+    - 027_remove_placeholder_seed_data
+
+  channel:
+    # channels / abilities / subscription_accounts / subscription_account_quota_*
+    - 000_create_core_tables          # channels, abilities (subset)
+    - 018_add_channel_oneapi_fields
+    - 020_add_channel_balance_refresh_tracking
+    - 032_add_channel_health_fields
+    - 034_create_subscription_accounts
+    - 035_add_subscription_account_quota_fields
+    - 051_add_subscription_account_local_quota
+    - 052_create_subscription_account_quota_events
+    - 053_add_subscription_account_5h_quota
+    - 054_add_subscription_account_rpm_limit
+    - 055_add_subscription_account_session_window_limit
+    - 056_add_subscription_account_quota_reset_config
+    - 057_create_subscription_account_quota_reset_runs
+
+  billing:
+    # billing_reservations / billing_ledgers / billing_redeem_* / payment_orders /
+    # reconciliation_runs / account_receivables / user_subscriptions / subscription_groups /
+    # subscription_plans / account_quota_snapshots
+    - 008_create_billing_reservations
+    - 009_create_billing_ledgers
+    - 010_create_billing_redeem_codes
+    - 011_create_billing_redeem_records
+    - 013_add_redeem_code_indexes
+    - 021_create_reconciliation_runs
+    - 023_create_payment_orders
+    - 024_add_billing_ledger_usage_fields
+    - 028_add_billing_ledger_aggregation_indexes
+    - 029_add_billing_ledger_upstream_cost
+    - 030_add_reconciliation_run_phase3_fields
+    - 036_add_subscription_account_id_to_billing_ledgers
+    - 037_add_subscription_account_id_to_logs       # shared index; harmless on billing schema
+    - 038_add_subscription_account_id_to_billing_reservations
+    - 039_create_user_subscriptions
+    - 040_create_subscription_groups
+    - 041_create_account_quota_snapshots
+    - 042_add_subscription_group_pricing
+    - 043_add_group_id_to_payment_orders
+    - 044_add_reservation_subscription_fields
+    - 045_add_ledger_cost_source_and_dedupe_key
+    - 046_create_account_receivables
+    - 047_backfill_empty_ledger_dedupe_keys
+    - 048_increase_subscription_usage_precision
+    - 049_backfill_subscription_usage_from_ledgers
+    - 050_create_subscription_plans
+    - 057_add_plan_snapshot_to_payment_orders
+    - 058_add_subscription_id_to_payment_orders
+    - 059_enforce_single_active_subscription
+
+  log:
+    # logs table (a subset of 000_create_core_tables on the shared schema,
+    # but in a per-service schema the table must be materialised).
+    - 000_create_core_tables
+    - 031_add_cache_read_token_usage_fields
+    - 037_add_subscription_account_id_to_logs
+
+  admin:
+    # system_options (007); the rest is owned elsewhere.
+    - 007_create_system_options
+
+  config:
+    # configs table (a subset of 000_create_core_tables).
+    - 000_create_core_tables
+
+  notify:
+    # notifications table (a subset of 000_create_core_tables).
+    - 000_create_core_tables
+    - 033_add_notification_last_error
+
+  monitor:
+    # health_checks + alert_rules (subset of 000_create_core_tables).
+    - 000_create_core_tables

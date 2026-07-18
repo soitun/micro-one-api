@@ -32,7 +32,7 @@ var ProviderSet = wire.NewSet(
 )
 
 func newRepo(cfg *channelcfg.Config) (*data.Repository, error) {
-	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source)
+	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
 }
 
 func newEventBus(repo *data.Repository) events.EventBus {

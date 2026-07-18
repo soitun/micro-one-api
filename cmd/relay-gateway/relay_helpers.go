@@ -140,3 +140,19 @@ func appwsDrainConfig(drainTimeout time.Duration) *appws.DrainConfig {
 		MaxConcurrentClose: 100,
 	}
 }
+
+// modelsConfigPath returns the resolved path to models.yaml: cfg.Models.Path
+// when set, otherwise the first existing well-known default. Phase 2.5: used
+// by the hot-reload subscriber so it watches the same file newModelMapper
+// actually loaded.
+func modelsConfigPath(cfg *relaycfg.Config) string {
+	if cfg != nil && cfg.Models.Path != "" {
+		return cfg.Models.Path
+	}
+	for _, candidate := range []string{"/configs/models.yaml", "configs/models.yaml"} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}

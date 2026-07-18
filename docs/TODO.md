@@ -2,7 +2,7 @@
 
 > 最后更新：2026-07-18
 >
-> 当前阶段重点：Phase 2.2（渠道加权选择运行时验证）已完成。relay-gateway → channel-service 的 `SelectChannel` 现在有一份端到端集成测试（`TestRelaySelectChannel_WeightedDistribution`）证明选路实际走到 `WeightedSelector`（同优先级不同 Weight 的两渠道，高权重命中严格更多；`WeightedSelector` 的 Weight / CurrentWeight / Inflight / P95Latency 被真实填充）；channel-service HTTP 新增 `GET /api/v1/admin/channels/selector/stats`（`ADMIN_TOKEN` 守卫）供运行时观察 selector 状态。下一步推进 2.4 数据库 Schema 隔离 / 2.5 配置热更新。
+> 当前阶段重点：Phase 2.2（渠道加权选择运行时验证）已完成。relay-gateway → channel-service 的 `SelectChannel` 现在有一份端到端集成测试（`TestRelaySelectChannel_WeightedDistribution`）证明选路实际走到 `WeightedSelector`（同优先级不同 Weight 的两渠道，高权重命中严格更多；`WeightedSelector` 的 Weight / CurrentWeight / Inflight / P95Latency 被真实填充）；channel-service HTTP 新增 `GET /api/v1/admin/channels/selector/stats`（`ADMIN_TOKEN` 守卫）供运行时观察 selector 状态。Phase 2.4 数据库 Schema 隔离 / Phase 2.5 配置热更新均已接入（见下方"已完成"小节）。下一步可推进 Phase 3 剩余项或 conf.proto 配置层对齐。
 >
 > 历史进度：Phase 1 的 `http.go` God Object 拆分（`9e40559`，2470→472 行）、gRPC 熔断器、本地缓存层 L1、Redis Streams 事件总线均已落地；Phase 0 可观测性基线已填充，原始结果归档在 `scripts/benchmark/results/phase0-baseline-2026-07-17.json`；Phase 2.1 异步计费、Phase 2.3 批量日志、Phase 3.3 WebSocket 优雅排空、Phase 2.2 渠道加权选择运行时验证均已接入。
 >
@@ -43,8 +43,8 @@
 | 2.1 异步计费 | 半接入 | wire 构建但未接入结算热路径，需把 `CommitQuota` 改走 `asyncBilling.Settle` |
 | 2.2 加权选路 | 已接入 | channel-service 内部已用 |
 | 2.3 批量日志 | 仅脚手架 | `BatchLogWriter` 未接入 `LogUsecase` |
-| 2.4 Schema 隔离 | 未实现 | 需新建 |
-| 2.5 配置热更新 | 未实现 | 需新建 |
+| 2.4 Schema 隔离 | 已接入（可选启用） | 每服务 `<SVC>_SCHEMA` 环境变量 + ownership manifest；默认共享库 |
+| 2.5 配置热更新 | 已接入 | fsnotify watcher + relay-gateway models.yaml 热重载 |
 | 3.1 日志分区 | 已接入 | 运行时维护已接，DDL 需手动应用 |
 | 3.2 幂等中间件 | 已接入 | relay-gateway 路由已用 |
 | 3.3 WS 优雅排空 | 仅脚手架 | `ConnectionTracker` 未被 `openai_ws_*` 使用 |
@@ -65,7 +65,7 @@
 2. ~~**2.3 日志批量写入接入 `LogUsecase`**~~ ✅ 已完成（见上方"已完成 — Phase 2.3"小节）。
 3. ~~**3.3 WebSocket 优雅排空接入 `openai_ws_*`**~~ ✅ 已完成（见下方"已完成 — Phase 3.3"小节）。
 4. ~~**2.2 渠道加权选择**~~ ✅ 已完成（见下方"已完成 — Phase 2.2"小节）。
-5. **2.4 数据库 Schema 隔离 / 2.5 配置热更新**：结构性新建项，风险较高，放最后。
+5. ~~**2.4 数据库 Schema 隔离 / 2.5 配置热更新**~~ ✅ 已完成（见下方"已完成 — Phase 2.4 / 2.5"小节）。
 
 ## 已完成 — Phase 2.3 日志批量写入接入 LogUsecase
 
@@ -401,3 +401,105 @@ docker compose config
 go test ./internal/relay/... ./internal/channel/...
 make test-e2e-suite
 ```
+
+
+## 已完成 — Phase 2.4 数据库 Schema 隔离
+
+### [x] 2.4 数据库 Schema 隔离
+
+关联设计：[架构重构方案 §5.1 Schema 隔离策略 / §10.1 Phase 2](./design/ARCHITECTURE_REFACTOR.md)
+
+本次完成：
+
+- `xdb.DatabaseConfig` 新增 `Schema` 字段；`Open` 在 MySQL 路径用 `go-sql-driver/mysql.ParseDSN` + `FormatDSN` 把 DSN 的 DBName 重写为目标 schema（保留 auth/TLS/parseTime 等参数），在 Postgres 路径把 `options=-c search_path=<schema>` 注入到 URL-form 和 key=value-form DSN。SQLite 路径不变（schema 隔离 = 不同文件）。导出 `RewriteMySQLDBName` / `RewritePostgresSearchPath` 给非 gorm 调用方（admin-api 的 `*sql.DB` 路径）。
+- 每个服务的 `internal/conf.DatabaseConfig` 新增 `Schema` 字段（json/yaml tag）；`configs/config.yaml` 新增 `data.database.schema: ${<SVC>_SCHEMA:-}`，默认空 → 沿用共享库。
+- 每个服务的 `internal/data.NewRepositoryFromEnv` / `NewData` 解析 schema（优先 wire 传入的 cfg.Data.Database.Schema，其次 `<SVC>_SCHEMA`，再次 `DATABASE_SCHEMA`），传给 `xdb.Open`。
+- 各服务 `cmd/<svc>/wire.go` + `wire_gen.go` 的 `newRepo` 把 `cfg.Data.Database.Schema` 作为第三参数传给 `NewRepositoryFromEnv` / `NewData`。admin-api 的 system_options + subscription 路径通过新增的 `resolveAdminSchemaDSN` helper 应用 schema。
+- 迁移层：`platform/database/migrate.Runner` 新增 `WithOwnershipFilter(service)`，读取 `<dir>/ownership.yaml`（`shared` + `services` 映射），在 `Apply` / `Status` 中过滤文件列表。manifest 缺失或 service 未列出时退化为旧行为（不阻断）。`cmd/migrate` 新增 `-ownership <service>` 标志。
+- `migrations/ownership.yaml` 声明 identity/channel/billing/log/admin/config/notify/monitor 各自拥有的迁移版本 + 共享 bootstrap（022）。
+- `migrations/schema_split.sql` 参考脚本：CREATE DATABASE + CREATE TABLE LIKE + INSERT IGNORE 把共享 `oneapi` 库的表复制到 8 个 `<svc>` schema（源库不动，便于回滚）。
+- 文档：`docs/deployment.md` 新增 §10（Schema 隔离使用方式、切流步骤、billing 跨 schema 读的过渡方案 A/B、ownership manifest 说明）。
+- 架构债务 TODO：本项目各服务 `internal/conf/config.go` 仍是手写 Go struct，未对齐 kratos 官方模板的 `internal/conf/conf.proto` + `make config` 生成 `conf.pb.go` 的做法（见 `example/internal/conf/conf.proto`）。本次 Schema 字段先加在手写 struct 上；conf.proto 迁移列入下方独立 TODO，不在本次实现范围。
+
+改动文件：
+
+- `platform/database/xdb/db.go`（`DatabaseConfig.Schema` + `withMySQLDBName`/`withPostgresSearchPath` + 导出 `RewriteMySQLDBName`/`RewritePostgresSearchPath` + 一组 Postgres DSN KV 解析 helper）
+- `platform/database/xdb/db_test.go`（MySQL DBName 改写 4 例 + Postgres search_path URL/KV/已有 options 替换 4 例 + `splitPostgresKV` 单测）
+- `platform/database/migrate/runner.go`（`ownershipFilter` 字段 + `WithOwnershipFilter` + `loadOwnershipManifest` + `ownedVersions` + Apply/Status 过滤）
+- `platform/database/migrate/ownership_test.go`（3 个测试：filter 限制 Apply、manifest 缺失退化、未知 service 只跑 shared）
+- `cmd/migrate/main.go`（`-ownership` 标志）
+- `migrations/ownership.yaml`、`migrations/schema_split.sql`
+- 8 × `app/<svc>/internal/conf/config.go`（`Schema` 字段）
+- 8 × `app/<svc>/configs/config.yaml`（`data.database.schema`）
+- 7 × `app/<svc>/internal/data/data.go` + `domain/subscription/data/data.go`（schema 解析 + 传给 xdb.Open）
+- 6 × `app/<svc>/cmd/<svc>/wire.go` + 对应 `wire_gen.go`（newRepo/newData 传入 Schema）
+- `app/admin/cmd/admin/admin_helpers.go`（`resolveAdminSchemaDSN` helper + 应用到 system_options/subscription 路径）
+- `docs/deployment.md`（§10）
+
+验收标准：
+
+- [x] 默认（`<SVC>_SCHEMA` / `DATABASE_SCHEMA` 都未设）行为与改动前完全一致：所有服务仍连 `DATABASE_DSN` 指向的共享库。
+- [x] MySQL：设置 `IDENTITY_SCHEMA=oneapi_identity` 后，identity-service 的连接实际指向 `oneapi_identity` 库（DSN 经 ParseDSN/FormatDSN 重写，单测覆盖）。
+- [x] Postgres：设置 `BILLING_SCHEMA=oneapi_billing` 后，连接的 `search_path` 含 `oneapi_billing`（URL + KV 两种 DSN 形式均单测覆盖）。
+- [x] `cmd/migrate -ownership identity` 只应用 ownership.yaml 中 identity 拥有的迁移 + shared；其他服务的迁移被跳过（单测覆盖）。
+- [x] ownership.yaml 缺失时 `Apply` 行为不变（单测覆盖）。
+- [x] `go build ./...` 通过；`go vet ./platform/database/... ./platform/config/... ./cmd/migrate/... ./cmd/relay-gateway/...` 通过。
+
+## 已完成 — Phase 2.5 配置热更新
+
+### [x] 2.5 配置热更新
+
+关联设计：[架构重构方案 §P2-3 配置热更新缺失](./design/ARCHITECTURE_REFACTOR.md)
+
+本次完成：
+
+- `platform/config/source.go` 的 `EnvFileSource.Watch` 从 noop 改为真正的 fsnotify watcher：监听文件路径（失败则退到父目录），debounce 100ms 合并 editor 突发保存，Rename/Remove 事件后重新 `Add` 路径（对齐 kratos/config/file 行为），fan-out 到所有活跃订阅者。fsnotify 不可用时降级为 noop watcher，服务仍可启动。
+- `platform/config/subscribe.go` 新增 `SubscribeFile(path, callback)` 便捷封装：返回 stop 函数，callback 收到 `*config.KeyValue`（已 env 展开）。nil path/callback 直接 noop。
+- `internal/biz.ModelMapper` 改为持有 `atomic.Pointer[map[string]*ModelEntry]` 快照，新增 `Reload()` 方法原子替换；构造函数改为调用 Reload。`Resolve`/`HasCapability`/`GetEntry` 读快照，热路径无锁。
+- `cmd/relay-gateway` 的 `newApp` 在构造 ModelMapper 后用 `xconfig.SubscribeFile(modelsConfigPath(cfg), ...)` 订阅 `models.yaml` 变化，回调调用 `mm.Reload()`，失败保留旧快照并告警，成功打 info 日志。stop 函数挂到 app cleanup。
+- 文档：`docs/deployment.md` 新增 §11（机制、已接入热更新点、验证步骤、已知限制）。
+
+改动文件：
+
+- `platform/config/source.go`（fsnotify watcher + fan-out + debounce + 降级）
+- `platform/config/source_test.go`（Stop 行为 + Modify 触发 + env 展开重载 + Load 契约）
+- `platform/config/subscribe.go`（`SubscribeFile` 封装）
+- `platform/config/subscribe_test.go`（更新投递 + nil 入参 noop）
+- `internal/biz/model_mapping.go`（atomic 快照 + `Reload` + `NewModelMapperForTest`）
+- `internal/biz/model_mapping_test.go`（Reload 新增条目 + Reload 拒绝非法保留旧快照）
+- `internal/biz/relay_test.go`（测试改用 `NewModelMapperForTest`）
+- `cmd/relay-gateway/wire.go` + `wire_gen.go`（订阅 models.yaml + cleanup）
+- `cmd/relay-gateway/relay_helpers.go`（`modelsConfigPath`）
+- `go.mod`（`fsnotify` 从 indirect 提升为 direct）
+- `docs/deployment.md`（§11）
+
+验收标准：
+
+- [x] 默认行为（无文件变化）与改动前一致；`ModelMapper.Resolve` 返回值稳定。
+- [x] `models.yaml` 变化后无需重启：日志出现 `models.yaml hot-reloaded`，`Resolve("gpt-4o")` 返回新值（单测 `TestModelMapper_Reload_PicksUpNewEntries` 覆盖）。
+- [x] 重载到非法文件（空 actual_name）时 `Reload` 返回错误，旧快照保持可用（单测 `TestModelMapper_Reload_RejectsInvalid` 覆盖）。
+- [x] fsnotify watcher 的 Modify 事件被 debounce + 投递（单测 `TestEnvFileSourceWatch_FiresOnModify` 在 tmpdir 真实触发）。
+- [x] `go build ./...` 通过；`go test ./platform/config/... ./internal/biz/...`（model_mapping + relay 子集）通过。
+
+## 待办 — 架构债务（独立于 Phase 2/3 推进顺序）
+
+### [ ] 配置层对齐 kratos 官方模板：conf.proto + make config
+
+关联参考：`example/internal/conf/conf.proto`（kratos 官方 laytemplates）。
+
+现状：本项目每个服务的 `internal/conf/config.go` 都是 **手写** Go struct，未走 proto 定义 → `make config` → `conf.pb.go` 的标准流程。`make config` 目标存在但因 `app/` 下无 internal proto 而是空操作。
+
+影响：
+
+- 配置 schema 没有 proto 的强类型约束和 field-number 演进语义。
+- 新增配置项（如本次 Phase 2.4 的 `Schema`）需要手改 struct，容易遗漏 json/yaml tag 一致性。
+- `make config` 形同虚设。
+
+建议（不在本次实现）：
+
+1. 为每个服务（或收敛到一个共享的 `internal/conf/conf.proto`）定义 `Bootstrap`/`Server`/`Data` 等 message，含本次新增的 `Schema` 字段。
+2. 跑 `make config` 生成 `conf.pb.go`，删除手写 struct。
+3. 调整 `config_loader.go` 的 `Scan` 目标为生成的 `*conf.Bootstrap`。
+4. CI 增加 `make config` + `git diff --exit-code` 检查，防止漂移。
+
+本次 Phase 2.4 的 `Schema` 字段先加在手写 struct 上，保证功能可用；conf.proto 迁移作为独立债务跟踪。

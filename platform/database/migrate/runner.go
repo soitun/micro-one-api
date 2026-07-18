@@ -26,6 +26,8 @@ import (
 	"strings"
 
 	"micro-one-api/pkg/safefile"
+
+	"gopkg.in/yaml.v3"
 )
 
 // rebind rewrites "?" placeholders to "$1, $2, ..." when the target
@@ -74,6 +76,16 @@ type Runner struct {
 	// If brownfield is detected but BaselineVersion is empty, Apply returns
 	// an error rather than risk re-running historical migrations.
 	BaselineVersion string
+
+	// ownershipFilter, when non-empty, restricts Apply/Status to the
+	// migrations explicitly owned by the given service key (Phase 2.4
+	// schema isolation). The ownership map is loaded from a YAML manifest
+	// next to the migrations dir (migrations/ownership.yaml). When the
+	// manifest is absent or the service key has no entry, the runner
+	// applies every file as before — preserving the legacy "single shared
+	// schema" behaviour.
+	ownershipFilter string
+	ownership       *ownershipManifest
 }
 
 // MigrationStatus describes one migration file and whether it has been
@@ -156,6 +168,16 @@ func (r *Runner) Apply(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
+	if owned := r.ownedVersions(); owned != nil {
+		filtered := files[:0]
+		for _, f := range files {
+			if _, ok := owned[versionOf(f)]; ok {
+				filtered = append(filtered, f)
+			}
+		}
+		files = filtered
+	}
+
 	applied, err := r.loadAppliedSet(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load applied set: %w", err)
@@ -216,6 +238,16 @@ func (r *Runner) Status(ctx context.Context) ([]MigrationStatus, error) {
 	if err != nil {
 		return nil, err
 	}
+	if owned := r.ownedVersions(); owned != nil {
+		filtered := files[:0]
+		for _, f := range files {
+			if _, ok := owned[versionOf(f)]; ok {
+				filtered = append(filtered, f)
+			}
+		}
+		files = filtered
+	}
+
 	applied, err := r.loadAppliedSet(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load applied set: %w", err)
@@ -472,3 +504,74 @@ func versionOf(path string) string {
 	base := filepath.Base(path)
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
+
+// WithOwnershipFilter restricts the runner to the migration files owned by
+// the given service key (e.g. "identity", "billing"). The key is resolved
+// against a YAML manifest located at <dir>/ownership.yaml; if the manifest
+// is missing or the key is unknown, Apply/Status fall back to the unfiltered
+// list so a partial deployment (no manifest yet) does not block startup.
+//
+// Phase 2.4 schema isolation: when each backend service runs migrations
+// against its own schema, the manifest maps a service to the exact files
+// that own the tables it cares about (plus the shared schema_migrations
+// bootstrap). Files not in the manifest remain the responsibility of the
+// centralised migrate job.
+func (r *Runner) WithOwnershipFilter(service string) *Runner {
+	r.ownershipFilter = service
+	if r.ownership == nil {
+		m, _ := loadOwnershipManifest(r.dir)
+		r.ownership = m
+	}
+	return r
+}
+
+// loadOwnershipManifest reads <dir>/ownership.yaml. A missing file returns
+// (nil, nil) so callers can treat the no-manifest case as "no filtering".
+func loadOwnershipManifest(dir string) (*ownershipManifest, error) {
+	path := filepath.Join(dir, ownershipManifestFile)
+	data, err := safefile.ReadFile(path)
+	if err != nil {
+		// Missing manifest is the historical default — not an error.
+		return nil, nil
+	}
+	var m ownershipManifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return &m, nil
+}
+
+// ownedVersions returns the set of migration versions the active service
+// filter is allowed to apply. Empty set (or nil filter) means "no filter".
+func (r *Runner) ownedVersions() map[string]struct{} {
+	if r.ownershipFilter == "" || r.ownership == nil {
+		return nil
+	}
+	// Shared bootstrap files are always included so a fresh per-service
+	// schema still gets schema_migrations before its first owned file.
+	out := make(map[string]struct{})
+	for _, v := range r.ownership.Shared {
+		out[v] = struct{}{}
+	}
+	if svc, ok := r.ownership.Services[r.ownershipFilter]; ok {
+		for _, v := range svc {
+			out[v] = struct{}{}
+		}
+	}
+	return out
+}
+
+// ownershipManifest is the parsed form of migrations/ownership.yaml.
+type ownershipManifest struct {
+	// Shared migrations apply to every per-service schema (e.g. the
+	// schema_migrations bootstrap). Listed by version (basename without
+	// .sql).
+	Shared []string `yaml:"shared"`
+	// Services maps a service key (identity, billing, …) to the migration
+	// versions that service owns.
+	Services map[string][]string `yaml:"services"`
+}
+
+// ownershipManifestFile is the canonical name of the ownership manifest
+// placed beside the per-dialect migrations directory.
+const ownershipManifestFile = "ownership.yaml"

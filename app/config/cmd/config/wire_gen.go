@@ -56,7 +56,7 @@ var ProviderSet = wire.NewSet(
 // newRepo wraps data.NewRepositoryFromEnv so Wire can resolve it from a
 // *configcfg.Config (it passes the configured driver + DSN).
 func newRepo(cfg *conf.Config) (*data.Repository, error) {
-	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source)
+	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
 }
 
 // newEventBus builds the EventBus from the repository's Redis client.

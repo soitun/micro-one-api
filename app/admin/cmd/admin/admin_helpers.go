@@ -105,7 +105,8 @@ func newSystemOptionsRepo(cfg *admincfg.Config) systemOptionsResult {
 	if cfg.Data.Database.Source == "" {
 		return systemOptionsResult{}
 	}
-	db, dbErr := xdb.OpenSQL(cfg.Data.Database.Driver, cfg.Data.Database.Source)
+	source := resolveAdminSchemaDSN(cfg.Data.Database.Driver, cfg.Data.Database.Source)
+	db, dbErr := xdb.OpenSQL(cfg.Data.Database.Driver, source)
 	if dbErr != nil {
 		applogger.Log.Warn("failed to connect to system options DB", zap.Error(dbErr))
 		return systemOptionsResult{}
@@ -126,7 +127,7 @@ func newSubscriptionUsecases(cfg *admincfg.Config) subscriptionResult {
 		return subscriptionResult{}
 	}
 	driver := cfg.Data.Database.Driver
-	source := cfg.Data.Database.Source
+	source := resolveAdminSchemaDSN(cfg.Data.Database.Driver, cfg.Data.Database.Source)
 	repo, subErr := subscriptiondata.NewRepositoryFromEnv(driver, source)
 	if subErr != nil {
 		applogger.Log.Warn("failed to connect to subscription DB", zap.Error(subErr))
@@ -165,4 +166,28 @@ type appSignalStopper struct {
 
 func (s appSignalStopper) Stop() {
 	_ = s.app.Stop()
+}
+
+// resolveAdminSchemaDSN applies the admin-side database schema (Phase 2.4) to
+// the configured DSN. Admin owns system_options and shares the subscription
+// tables; both are isolated via the same per-service schema. The schema is
+// read from cfg.Data.Database.Schema (wire) or ADMIN_SCHEMA / DATABASE_SCHEMA
+// env vars for direct callers.
+func resolveAdminSchemaDSN(driver, dsn string) string {
+	schema := os.Getenv("ADMIN_SCHEMA")
+	if schema == "" {
+		schema = os.Getenv("DATABASE_SCHEMA")
+	}
+	if schema == "" {
+		return dsn
+	}
+	switch xdb.NormalizeDriver(driver, dsn) {
+	case xdb.DriverMySQL:
+		if rewritten, err := xdb.RewriteMySQLDBName(dsn, schema); err == nil {
+			return rewritten
+		}
+	case xdb.DriverPostgres:
+		return xdb.RewritePostgresSearchPath(dsn, schema)
+	}
+	return dsn
 }

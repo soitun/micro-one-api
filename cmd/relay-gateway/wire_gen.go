@@ -9,15 +9,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/go-kratos/kratos/v2"
-	"github.com/google/wire"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"micro-one-api/api/billing/v1"
-	"micro-one-api/api/channel/v1"
-	"micro-one-api/api/identity/v1"
-	"micro-one-api/api/log/v1"
+	billingv1 "micro-one-api/api/billing/v1"
+	channelv1 "micro-one-api/api/channel/v1"
+	identityv1 "micro-one-api/api/identity/v1"
+	logv1 "micro-one-api/api/log/v1"
 	biz2 "micro-one-api/domain/subscription/biz"
 	data2 "micro-one-api/domain/subscription/data"
 	"micro-one-api/domain/upstream/credential"
@@ -35,7 +30,7 @@ import (
 	"micro-one-api/platform/database/xdb"
 	"micro-one-api/platform/events"
 	grpc2 "micro-one-api/platform/grpc"
-	"micro-one-api/platform/logging"
+	logger "micro-one-api/platform/logging"
 	"micro-one-api/platform/metrics"
 	"micro-one-api/platform/middleware"
 	"micro-one-api/platform/registry"
@@ -44,9 +39,16 @@ import (
 	"net/http"
 	"os"
 	"time"
-)
 
-import (
+	"github.com/go-kratos/kratos/v2"
+	"github.com/google/wire"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	xconfig "micro-one-api/platform/config"
+
+	"github.com/go-kratos/kratos/v2/config"
 	_ "github.com/go-kratos/kratos/v2/config/file"
 )
 
@@ -258,6 +260,21 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	}
 
 	modelMapper := newModelMapper(cfg)
+	var modelReloadStop func()
+	if mm := modelMapper; mm != nil {
+		// Phase 2.5 — models.yaml hot reload. The callback re-reads the file
+		// and atomically swaps the mapper's snapshot; a parse/validation
+		// failure is logged and the previous snapshot remains in effect.
+		if mp := modelsConfigPath(cfg); mp != "" {
+			modelReloadStop, _ = xconfig.SubscribeFile(mp, func(_ *config.KeyValue) {
+				if err := mm.Reload(); err != nil {
+					logger.Log.Warn("models.yaml hot reload failed; keeping previous snapshot", zap.String("path", mp), zap.Error(err))
+					return
+				}
+				logger.Log.Info("models.yaml hot-reloaded", zap.String("path", mp))
+			})
+		}
+	}
 	retryPolicy := newRetryPolicy(cfg)
 
 	identityAdapter := data.NewIdentityAdapter(identityClient)
@@ -375,6 +392,9 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 		Info("relay-gateway starting", zap.String("http_addr", cfg.Server.HTTP.Addr))
 
 	cleanup := func() {
+		if modelReloadStop != nil {
+			modelReloadStop()
+		}
 		if refreshTask != nil {
 			refreshTask.Stop()
 		}

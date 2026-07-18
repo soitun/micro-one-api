@@ -41,7 +41,20 @@ func NewRepositoryFromEnv(driver string, dsn ...string) (*Repository, error) {
 	if dbDSN == "" {
 		return newMemoryRepository(), nil
 	}
-	db, err := xdb.Open(xdb.DatabaseConfig{Driver: xdb.NormalizeDriver(driver, dbDSN), DSN: dbDSN})
+	// Schema isolation (Phase 2.4): wire passes (driver, source, schema) so
+	// dsn=[source, schema?]. Per-service env var then DATABASE_SCHEMA are the
+	// fall-back paths for direct callers / non-wire entrypoints.
+	schema := ""
+	if len(dsn) > 1 {
+		schema = dsn[1]
+	}
+	if schema == "" {
+		schema = os.Getenv("SUBSCRIPTION_SCHEMA")
+	}
+	if schema == "" {
+		schema = os.Getenv("DATABASE_SCHEMA")
+	}
+db, err := xdb.Open(xdb.DatabaseConfig{Driver: xdb.NormalizeDriver(driver, dbDSN), DSN: dbDSN, Schema: schema})
 	if err != nil {
 		return nil, err
 	}

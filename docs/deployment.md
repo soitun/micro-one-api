@@ -665,3 +665,124 @@ MIGRATIONS_DSN='host=127.0.0.1 user=app password=… dbname=micro_one_api port=5
 `migrations/mysql`、`migrations/sqlite`、`migrations/postgres` 三套迁移是分别维护的快照。SQLite3 / Postgres baseline 是单一手写文件（`000_create_full_schema.sql`），由 `docs/design/issue-4-sqlite-solution.md` 描述的设计取舍决定：MySQL 迁移依赖 `AUTO_INCREMENT`、`ENGINE=InnoDB`、`COMMENT`、前缀索引、`ON UPDATE CURRENT_TIMESTAMP` 等方言特性，逐文件翻译要么丢能力、要么需要条件 SQL runner；snapshot 形式更易于评审与同步。
 
 新增 schema 变更时请同步更新两套迁移目录（MySQL + 对应方言）；CI 会在 PR 上跑 `cmd/migrate -dir ./migrations/<dialect>` 作为防漂移检查。
+
+
+## 10. Phase 2.4 — 数据库 Schema 隔离
+
+默认部署模型仍是 **所有服务共享同一个数据库**（`DATABASE_DSN` 指向同一个 MySQL `oneapi` 库或 Postgres 数据库）。Schema 隔离是 **可选** 的：每个服务可通过环境变量 `<SVC>_SCHEMA`（或共享的 `DATABASE_SCHEMA`）指向自己的 MySQL database 或 Postgres schema，互不影响。
+
+### 10.1 何时启用
+
+| 场景 | 是否启用 |
+| --- | --- |
+| 单机自托管 / Lite | 不启用（保持单库） |
+| 标准多实例部署 | 可选，按服务逐步切换 |
+| 多租户隔离 / 故障爆炸半径要求 | 强烈建议启用 |
+| 高频日志写入影响其他服务 | 建议至少把 `log-service` 切到独立 schema |
+
+### 10.2 配置方式
+
+每个服务的 `config.yaml` 新增 `data.database.schema` 字段（默认空）。生产部署通过环境变量覆盖即可，**无需修改 yaml 文件**：
+
+```bash
+# 只切 identity-service 到独立 schema
+IDENTITY_SCHEMA=oneapi_identity
+
+# 或全局给所有服务设置共享前缀
+DATABASE_SCHEMA=oneapi
+
+# 服务级覆盖优先于 DATABASE_SCHEMA
+```
+
+| 服务 | 环境变量 | 建议 schema 名 |
+| --- | --- | --- |
+| identity-service | `IDENTITY_SCHEMA` | `oneapi_identity` |
+| channel-service | `CHANNEL_SCHEMA` | `oneapi_channel` |
+| billing-service | `BILLING_SCHEMA` | `oneapi_billing` |
+| log-service | `LOG_SCHEMA` | `oneapi_log` |
+| admin-api | `ADMIN_SCHEMA` | `oneapi_admin` |
+| config-service | `CONFIG_SCHEMA` | `oneapi_config` |
+| notify-worker | `NOTIFY_SCHEMA` | `oneapi_notify` |
+| monitor-worker | `MONITOR_SCHEMA` | `oneapi_monitor` |
+
+### 10.3 一次性切流（参考脚本）
+
+`migrations/schema_split.sql` 是一份参考 DDL，它在一个已有数据的 MySQL 实例上 **复制**（而非移动）表到 8 个新 schema：
+
+```bash
+mysql -h <host> -u root -p < migrations/schema_split.sql
+```
+
+切流步骤：
+
+1. 在低峰期执行 `schema_split.sql`，把共享 `oneapi` 库的表复制到 8 个 `<svc>` schema（源库不动）。
+2. 对每个 schema 跑一次带 `-ownership` 的 migrate，确保 schema_migrations 和该服务拥有的迁移都已落地：
+
+   ```bash
+   for svc in identity channel billing log admin config notify monitor; do
+     MIGRATIONS_DSN="root:pw@tcp(host:3306)/oneapi_${svc}"        go run ./cmd/migrate -ownership ${svc%-*}
+   done
+   ```
+
+3. 滚动重启各服务，环境变量从 `DATABASE_DSN=.../oneapi?...` 切到 `DATABASE_DSN=.../oneapi?...` + `<SVC>_SCHEMA=oneapi_<svc>`。
+4. 观察 30 分钟；任何异常只需把 `<SVC>_SCHEMA` 置空并重启对应服务即可回滚（源库未变）。
+
+### 10.4 billing-service 跨 schema 读的过渡处理
+
+`billing-service` 的对账逻辑（`app/billing/internal/data/reconciliation_repo.go`）会读 `channels` / `logs` / `user_subscriptions` 三张表。当 billing 切到 `oneapi_billing` schema 后，这些读会失败。过渡方案：
+
+- **方案 A（推荐，零代码改动）**：在 `oneapi_billing` 中为这三张表建视图，指向源 schema：
+
+  ```sql
+  USE oneapi_billing;
+  CREATE OR REPLACE VIEW channels          AS SELECT * FROM oneapi_channel.channels;
+  CREATE OR REPLACE VIEW logs              AS SELECT * FROM oneapi_log.logs;
+  -- user_subscriptions 已被 schema_split.sql 复制到 oneapi_billing，无需视图。
+  ```
+
+- **方案 B（长期）**：将对账读改为走 channel-service / log-service 的 gRPC 接口。属于后续重构，本次不实现。
+
+### 10.5 ownership manifest
+
+`migrations/ownership.yaml` 声明每个服务"拥有"哪些迁移文件。`cmd/migrate -ownership <service>` 在 per-service schema 上只跑该服务拥有的迁移 + 共享 bootstrap（`schema_migrations`）。manifest 缺失时退化为旧行为（全量应用），因此未启用 schema 隔离的部署完全不受影响。
+
+```yaml
+shared:
+  - 022_create_schema_migrations
+services:
+  identity:
+    - 014_add_token_management_fields
+    - 019_create_user_oauth_identities
+    # …
+  billing:
+    - 008_create_billing_reservations
+    # …
+```
+
+## 11. Phase 2.5 — 配置热更新
+
+### 11.1 机制
+
+`platform/config/source.go` 的 `EnvFileSource` 现在使用 fsnotify 真正监听 config 文件变化（之前的实现是 noop）。任何 `NewEnvFileSource(path)` + `kratos config.Watch(key, observer)` 的订阅者都会在文件变化时收到回调。fsnotify 不可用的环境（无 inotify 的容器、受限沙箱）自动降级为 noop watcher，**服务仍可启动**，只是不会热更新。
+
+### 11.2 已接入的热更新点
+
+| 组件 | 文件 | 行为 |
+| --- | --- | --- |
+| relay-gateway ModelMapper | `configs/models.yaml` | 文件变化时重新解析并原子替换映射表；解析失败保留旧快照并告警 |
+
+订阅通过 `platform/config.SubscribeFile(path, callback)`（`subscribe.go`）建立，回调在独立的 goroutine 中执行；服务的 cleanup 函数负责调用返回的 stop。
+
+### 11.3 验证
+
+```bash
+# 启动 relay-gateway，请求 gpt-4o → 应解析为 models.yaml 中配置的 actual_name
+# 修改 configs/models.yaml 中 gpt-4o 的 actual_name，保存
+# 无需重启：日志应出现 "models.yaml hot-reloaded"
+# 再次请求 gpt-4o → 解析为新值
+```
+
+### 11.4 已知限制
+
+- **配置文件本身的 schema 变化**（端口、DSN、Redis 地址等）不会触发组件重建——这些只在进程启动时读取一次。热更新目前只覆盖"可安全原子替换"的组件（model 映射）。这是有意为之的保守策略：连接池、监听 socket 等重启成本高的资源不做热切换。
+- **环境变量替换** `${VAR:-default}` 在每次重载时都会用最新环境变量重新展开，因此修改 env 后再 touch 一下 config 文件即可生效。

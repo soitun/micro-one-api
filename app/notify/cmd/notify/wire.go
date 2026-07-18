@@ -31,7 +31,7 @@ var ProviderSet = wire.NewSet(
 )
 
 func newRepo(cfg *notifycfg.Config) (*data.Repository, error) {
-	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source)
+	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
 }
 
 type registrarResult struct {
