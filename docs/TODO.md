@@ -2,7 +2,7 @@
 
 > 最后更新：2026-07-17
 >
-> 当前阶段重点：Phase 2.3（日志批量写入接入 `LogUsecase`）已完成。`LogUsecase.IngestLog` 在 `cfg.Log.BatchEnabled` 时路由到 `BatchLogWriter` 队列，后台 flusher 调 `Repository.CreateBatch`（gorm `CreateInBatches`）批量落库；默认关闭时仍走同步 `repo.Create`。下一步推进 3.3 WebSocket 优雅排空接入 `openai_ws_*`。
+> 当前阶段重点：Phase 3.3（WebSocket 优雅排空接入 `openai_ws_*`）已完成。relay-gateway 的 `handleResponsesWebSocket` 现使用 `platform/websocket.ConnectionTracker` 跟踪活跃客户端连接；SIGTERM 触发 `kratos.BeforeStop(DrainWSConnections)`，排空期间 `/healthz` 返回 503、新升级被拒绝，连接在 `openai_ws.drain_timeout`（默认 30s）内优雅关闭或强制关闭。下一步推进 2.2 渠道加权选择运行时验证。
 >
 > 历史进度：Phase 1 的 `http.go` God Object 拆分（`9e40559`，2470→472 行）、gRPC 熔断器、本地缓存层 L1、Redis Streams 事件总线均已落地；Phase 0 可观测性基线已填充，原始结果归档在 `scripts/benchmark/results/phase0-baseline-2026-07-17.json`。
 >
@@ -63,8 +63,8 @@
 
 1. ~~**2.1 异步计费接入结算热路径**~~ ✅ 已完成。
 2. ~~**2.3 日志批量写入接入 `LogUsecase`**~~ ✅ 已完成（见上方"已完成 — Phase 2.3"小节）。
-3. **3.3 WebSocket 优雅排空接入 `openai_ws_*`**（当前优先级）：让 `openai_ws_forwarder` / `openai_ws_pool` 使用 `platform/websocket.ConnectionTracker` 做优雅关闭，激活已有脚手架。
-4. **2.2 渠道加权选择**：已接入，补一份运行时验证（确认 relay-gateway 经 channel-service 选路实际走到 `WeightedSelector`）。
+3. ~~**3.3 WebSocket 优雅排空接入 `openai_ws_*`**~~ ✅ 已完成（见下方"已完成 — Phase 3.3"小节）。
+4. **2.2 渠道加权选择**（当前优先级）：已接入，补一份运行时验证（确认 relay-gateway 经 channel-service 选路实际走到 `WeightedSelector`）。
 5. **2.4 数据库 Schema 隔离 / 2.5 配置热更新**：结构性新建项，风险较高，放最后。
 
 ## 已完成 — Phase 2.3 日志批量写入接入 LogUsecase
@@ -98,6 +98,43 @@
 - [x] `cfg.Log.BatchEnabled=true` 时 `IngestLog` 入队返回，不阻塞；队列满返回错误而非静默丢弃；`Flush` 后 `CreateBatch` 被调用并回写 ID。
 - [x] `go build ./...` 通过；`go vet ./app/log/... ./app/billing/... ./cmd/relay-gateway/...` 通过。
 - [x] `go test ./app/log/...` 全部通过（biz / data / integration / server）。
+
+## 已完成 — Phase 3.3 WebSocket 优雅排空接入 openai_ws_*
+
+### [x] 3.3 WebSocket 优雅排空接入 `openai_ws_*`
+
+关联设计：[架构重构方案 §10.1 Phase 3 / §11.3](./design/ARCHITECTURE_REFACTOR.md)
+
+本次完成（激活 `platform/websocket/graceful.go` 死代码脚手架）：
+
+- `HTTPServer` 新增 `wsConnTracker *appws.ConnectionTracker` + `wsDrainCfg appws.DrainConfig` 字段；`SetOpenAIWSConnPool` 构建 tracker（幂等），新增 `SetOpenAIWSDrainConfig` / `drainConfig` / `IsWSDraining` / `DrainWSConnections(ctx)` nil-safe 访问器（未 wire 时行为与改动前一致）。
+- `handleResponsesWebSocket` 入口加排空门：`IsWSDraining()` 为真时直接返回 503 + `Retry-After`，不再 `coderws.Accept` 新连接；已升级连接在 relay 前 `NewConnection` 注册、defer `Unregister`，关闭回调走 `wsConn.CloseNow()`。
+- `handleHealth`（`/healthz`）在排空期间返回 503 + `{"status":"draining","drain":"true"}` + `Retry-After: 30`，供 LB 摘流；稳态仍 200 `ok`。
+- `internal/conf.OpenAIWSConfig` 新增 `DrainTimeout`（默认 30s）+ `GetOpenAIWSDrainTimeout()`；`configs/config.yaml` 补 `openai_ws.drain_timeout`（`OPENAI_WS_DRAIN_TIMEOUT`）。
+- `cmd/relay-gateway/wire.go` / `wire_gen.go`（经 `wire` 重生成）在启动时 `SetOpenAIWSDrainConfig(appwsDrainConfig(wsDrain))`；`kratosOpts` 注入 `kratos.StopTimeout(drainTimeout+10s)` + `kratos.BeforeStop` 调 `httpServer.DrainWSConnections(drainCtx)`，实现 SIGTERM → 摘流 → 排空 → 强制关闭的完整链路。
+- `platform/websocket/graceful.go` 新增 `SetDrainingForTest` 以便单测直接翻转 CAS 标志。
+
+改动文件：
+
+- `internal/server/http.go`（`wsConnTracker`/`wsDrainCfg` 字段 + `SetOpenAIWSConnPool`/`SetOpenAIWSDrainConfig`/`drainConfig`/`IsWSDraining`/`DrainWSConnections` + `appws`/`applogger`/`zap` import）
+- `internal/server/http_status_handler.go`（`handleHealth` 排空分支）
+- `internal/server/openai_ws_forwarder.go`（入口排空门 + relay 前 tracker 注册/Unregister + `appws` import）
+- `internal/conf/config.go`（`DrainTimeout` + `GetOpenAIWSDrainTimeout`）
+- `internal/conf/config_test.go`（`TestOpenAIWSDrainTimeoutDefault`）
+- `cmd/relay-gateway/relay_helpers.go`（`appwsDrainConfig` + `appws` import）
+- `cmd/relay-gateway/wire.go` / `wire_gen.go`（`SetOpenAIWSDrainConfig` + `BeforeStop(DrainWSConnections)` + `StopTimeout`）
+- `configs/config.yaml`（`openai_ws.drain_timeout`）
+- `platform/websocket/graceful.go`（`SetDrainingForTest`）
+- `internal/server/openai_ws_drain_test.go`（新增 4 个测试：healthz 翻 503、排空期拒绝新升级、tracker 关闭活跃连接、HTTPServer 级 drain 关闭已注册连接）
+
+验收标准：
+
+- [x] 稳态（未排空）`/healthz` 仍返回 200 `{"status":"ok"}`；`handleResponsesWebSocket` 正常 accept + relay，行为与改动前一致。
+- [x] `DrainWSConnections` 启动后 `IsWSDraining()` 为真，`/healthz` 返回 503 + `drain=true` + `Retry-After`，新 WebSocket 升级被 503 拒绝。
+- [x] 已注册的 tracked 连接在 `drain_timeout` 内被关闭（优雅完成或强制关闭），`ActiveCount` 归零。
+- [x] 未 wire tracker（`SetOpenAIWSConnPool` 未调）时 `IsWSDraining()` 恒假、`DrainWSConnections` no-op，不影响测试与默认禁用路径。
+- [x] `go build ./...` 通过；`go vet ./internal/server/... ./cmd/relay-gateway/... ./internal/conf/... ./platform/websocket/...` 通过。
+- [x] `go test ./internal/server/ ./platform/websocket/... ./internal/conf/...` 全部通过（含新增 4 个 drain 测试与既有 ws/pool/relay/stress/e2e 测试）。
 
 ## 已完成 — Phase 2.1 异步计费接入结算热路径
 

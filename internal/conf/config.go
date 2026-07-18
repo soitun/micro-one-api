@@ -263,6 +263,10 @@ type OpenAIWSConfig struct {
 	FailoverMaxSwitches int `json:"failover_max_switches" yaml:"failover_max_switches"`
 	// StickyTTL is the TTL for response->channel sticky bindings (local + Redis).
 	StickyTTL string `json:"sticky_ttl" yaml:"sticky_ttl"`
+	// DrainTimeout is how long the gateway waits for in-flight Responses-WS
+	// relays to finish during graceful shutdown (Phase 3.3) before force
+	// closing the remaining connections. Empty = 30s default.
+	DrainTimeout string `json:"drain_timeout" yaml:"drain_timeout"`
 	// RedisAddr enables the cross-process sticky store. Empty = in-memory only.
 	RedisAddr string `json:"redis_addr" yaml:"redis_addr"`
 	// RedisPassword for the sticky store.
@@ -413,4 +417,12 @@ func (c OpenAIWSConfig) GetOpenAIWSStickyTTL() string {
 		return "1h"
 	}
 	return c.StickyTTL
+}
+
+// GetOpenAIWSDrainTimeout returns the graceful-drain timeout with default.
+func (c OpenAIWSConfig) GetOpenAIWSDrainTimeout() string {
+	if c.DrainTimeout == "" {
+		return "30s"
+	}
+	return c.DrainTimeout
 }

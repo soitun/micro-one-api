@@ -14,6 +14,7 @@ import (
 	relaycfg "micro-one-api/internal/conf"
 	"micro-one-api/internal/server"
 	applogger "micro-one-api/platform/logging"
+	appws "micro-one-api/platform/websocket"
 	appauth "micro-one-api/platform/security/auth"
 	apptls "micro-one-api/platform/tls"
 
@@ -119,3 +120,23 @@ func parseDurationOrDefault(s string, def time.Duration) time.Duration {
 
 // suppress unused import warnings
 var _ = http.Client{}
+
+// appwsDrainConfig builds a platform/websocket.DrainConfig from a drain
+// timeout. CloseTimeout and NotifyBeforeClose use sensible fractions of the
+// drain window; MaxConcurrentClose caps the goroutine fan-out on force close.
+func appwsDrainConfig(drainTimeout time.Duration) *appws.DrainConfig {
+	closeTimeout := drainTimeout / 3
+	if closeTimeout < 5*time.Second {
+		closeTimeout = 5 * time.Second
+	}
+	notifyBefore := drainTimeout / 6
+	if notifyBefore < 2*time.Second {
+		notifyBefore = 2 * time.Second
+	}
+	return &appws.DrainConfig{
+		DrainTimeout:       drainTimeout,
+		CloseTimeout:       closeTimeout,
+		NotifyBeforeClose:  notifyBefore,
+		MaxConcurrentClose: 100,
+	}
+}

@@ -371,3 +371,15 @@ func (h *DrainHandler) HandleHealthCheck() func(w http.ResponseWriter, r *http.R
 		w.Write([]byte(`{"status":"healthy","drain":false}`))
 	}
 }
+
+// SetDrainingForTest flips the draining flag without running the full drain
+// goroutine. It is intended for tests that need to assert the drain-gate
+// behavior of callers (e.g. HTTP 503 on new upgrades) in isolation.
+func (ct *ConnectionTracker) SetDrainingForTest(v bool) {
+	if v {
+		ct.draining.Store(true)
+	} else {
+		ct.draining.Store(false)
+	}
+}
+

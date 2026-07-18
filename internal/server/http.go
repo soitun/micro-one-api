@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 
 	billingv1 "micro-one-api/api/billing/v1"
 	channelv1 "micro-one-api/api/channel/v1"
@@ -17,6 +18,8 @@ import (
 	relaycredential "micro-one-api/domain/upstream/credential"
 	relayprovider "micro-one-api/domain/upstream/provider"
 	relaybiz "micro-one-api/internal/biz"
+	applogger "micro-one-api/platform/logging"
+	appws "micro-one-api/platform/websocket"
 )
 
 const postResponseWriteTimeout = 10 * time.Second
@@ -42,6 +45,12 @@ type HTTPServer struct {
 	wsSticky           *openAIWSStickyStore
 	wsPoolCfg          openAIWSPoolConfig
 	wsScheduler        *OpenAIWSRoutingScheduler
+	// wsConnTracker tracks active client WebSocket connections so the gateway
+	// can drain them gracefully on shutdown (Phase 3.3). nil until
+	// SetOpenAIWSConnPool wires it; all accessors are nil-safe so tests and
+	// the default-disabled path behave exactly as before.
+	wsConnTracker      *appws.ConnectionTracker
+	wsDrainCfg         appws.DrainConfig
 	runtimeBlockCfg    runtimeBlockConfig
 
 	// hybridAdaptorEnabled gates the new adaptor-based request path (plan §十).
@@ -383,13 +392,93 @@ func (s *HTTPServer) SetOpenAIWSStickyStore(rdb *redis.Client) {
 
 // SetOpenAIWSConnPool configures the upstream connection pool. Must be called
 
-// after SetOpenAIWSTimeouts since it reads the dial timeout.
+// after SetOpenAIWSTimeouts since it reads the dial timeout. It also activates
+// the platform/websocket.ConnectionTracker used for Phase 3.3 graceful drain:
+// every accepted client Responses-WS connection is registered here so that, on
+// shutdown, DrainWSConnections can wait for in-flight turns to finish (or
+// force-close after DrainTimeout) before the HTTP server stops accepting.
 
 func (s *HTTPServer) SetOpenAIWSConnPool() {
 	if s == nil {
 		return
 	}
 	s.wsPool = newOpenAIWSConnPool(s.openAIWSDialTimeout())
+	if s.wsConnTracker == nil {
+		s.wsConnTracker = appws.NewConnectionTracker(s.drainConfig())
+	}
+}
+
+// SetOpenAIWSDrainConfig overrides the graceful-drain configuration. Call
+// before SetOpenAIWSConnPool so the tracker is built with the custom config;
+// a later call rebuilds the tracker, dropping any previously registered
+// connections (only intended during startup wiring, not at runtime).
+
+func (s *HTTPServer) SetOpenAIWSDrainConfig(cfg *appws.DrainConfig) {
+	if s == nil {
+		return
+	}
+	if cfg == nil {
+		cfg = appws.DefaultDrainConfig()
+	}
+	s.wsDrainCfg = *cfg
+	s.wsConnTracker = appws.NewConnectionTracker(cfg)
+}
+
+// drainConfig returns the effective drain configuration, falling back to the
+// platform default when unset.
+
+func (s *HTTPServer) drainConfig() *appws.DrainConfig {
+	if s == nil {
+		return appws.DefaultDrainConfig()
+	}
+	if s.wsDrainCfg.DrainTimeout > 0 {
+		return &s.wsDrainCfg
+	}
+	return appws.DefaultDrainConfig()
+}
+
+// IsWSDraining reports whether the gateway is draining WebSocket connections
+// prior to shutdown. Load balancers probe /healthz to pull the instance.
+
+func (s *HTTPServer) IsWSDraining() bool {
+	if s == nil || s.wsConnTracker == nil {
+		return false
+	}
+	return s.wsConnTracker.IsDraining()
+}
+
+// DrainWSConnections initiates graceful drain of all tracked client WebSocket
+// connections. It is idempotent and safe to call from a kratos.BeforeStop hook:
+// the tracker's Drain sets a CAS flag so new upgrades are rejected (see
+// handleResponsesWebSocket), existing relays are given DrainTimeout to
+// complete, and any that remain are force-closed. Returns the drain error
+// (context.DeadlineExceeded on force-close) for the caller to log.
+
+func (s *HTTPServer) DrainWSConnections(ctx context.Context) error {
+	if s == nil || s.wsConnTracker == nil {
+		return nil
+	}
+	if applogger.Log != nil {
+		applogger.Log.Info("draining openai responses websocket connections",
+			zap.Int("active", s.wsConnTracker.ActiveCount()),
+		)
+	}
+	err := s.wsConnTracker.Drain(ctx)
+	if err != nil && applogger.Log != nil {
+		applogger.Log.Warn("openai ws drain finished with error",
+			zap.Int("active_remaining", s.wsConnTracker.ActiveCount()),
+			zap.Error(err),
+		)
+	} else if applogger.Log != nil {
+		m := s.wsConnTracker.Metrics()
+		applogger.Log.Info("openai ws drain complete",
+			zap.Int64("total", m.TotalConnections),
+			zap.Int64("graceful", m.ClosedGracefully),
+			zap.Int64("forced", m.ClosedByForce),
+			zap.Int("active_remaining", s.wsConnTracker.ActiveCount()),
+		)
+	}
+	return err
 }
 
 // SetOpenAIWSPoolConfig configures pool + failover tunables.

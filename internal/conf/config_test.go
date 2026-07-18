@@ -62,3 +62,14 @@ func TestTokenRefreshNestedConfigOverridesLegacyDurations(t *testing.T) {
 		t.Fatal("explicit token refresh flag should enable refresh")
 	}
 }
+
+func TestOpenAIWSDrainTimeoutDefault(t *testing.T) {
+	var cfg OpenAIWSConfig
+	if got := cfg.GetOpenAIWSDrainTimeout(); got != "30s" {
+		t.Fatalf("drain timeout default = %q, want 30s", got)
+	}
+	cfg.DrainTimeout = "45s"
+	if got := cfg.GetOpenAIWSDrainTimeout(); got != "45s" {
+		t.Fatalf("drain timeout = %q, want 45s", got)
+	}
+}

@@ -329,6 +329,11 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 		wsIdle, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSIdleTimeout())
 		wsDial, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSDialTimeout())
 		wsFirst, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSFirstMessageTimeout())
+
+		wsDrain, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSDrainTimeout())
+		if wsDrain > 0 {
+			httpServer.SetOpenAIWSDrainConfig(appwsDrainConfig(wsDrain))
+		}
 		httpServer.SetOpenAIWSTimeouts(wsWrite, wsIdle, wsDial, wsFirst)
 		httpServer.SetOpenAIWSConnPool()
 		httpServer.SetOpenAIWSPoolConfig(
@@ -352,7 +357,16 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	}
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, grpcSvc, relayGRPCOpts...)
 
-	kratosOpts := []kratos.Option{kratos.Name("relay-gateway"), kratos.Server(srv, grpcSrv)}
+	drainTimeout := parseDurationOrDefault(cfg.OpenAIWS.GetOpenAIWSDrainTimeout(), 30*time.Second)
+	stopTimeout := drainTimeout + 10*time.Second
+
+	kratosOpts := []kratos.Option{kratos.Name("relay-gateway"), kratos.Server(srv, grpcSrv), kratos.StopTimeout(stopTimeout), kratos.BeforeStop(func(ctx context.Context) error {
+		drainCtx, cancel := context.WithTimeout(ctx, drainTimeout)
+		defer cancel()
+		_ = httpServer.DrainWSConnections(drainCtx)
+		return nil
+	}),
+	}
 	if registrar != nil {
 		kratosOpts = append(kratosOpts, kratos.Registrar(registrar))
 	}

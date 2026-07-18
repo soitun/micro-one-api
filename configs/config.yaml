@@ -71,3 +71,12 @@ session_sticky:
 subscription:
   enabled: true
   user_rpm_limit: ${SUBSCRIPTION_USER_RPM_LIMIT:-0}
+
+# openai_ws tunes the Codex Responses WebSocket relay (inbound /v1/responses
+# upgrade). All fields are optional; omitted values fall back to sensible
+# defaults (see internal/conf OpenAIWSConfig getters). drain_timeout bounds the
+# graceful shutdown window for in-flight WS relays before force-close
+# (Phase 3.3); while draining, /healthz returns 503 so load balancers route to
+# a healthy replica.
+openai_ws:
+  drain_timeout: ${OPENAI_WS_DRAIN_TIMEOUT:-30s}

@@ -317,6 +317,14 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func(), error) {
 		wsIdle, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSIdleTimeout())
 		wsDial, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSDialTimeout())
 		wsFirst, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSFirstMessageTimeout())
+		// Phase 3.3: graceful-drain config must be set before the connection
+		// pool is built so the tracker is created with the configured
+		// DrainTimeout / CloseTimeout. Empty / unparseable values fall back to
+		// the platform defaults (DrainTimeout=30s, CloseTimeout=10s).
+		wsDrain, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSDrainTimeout())
+		if wsDrain > 0 {
+			httpServer.SetOpenAIWSDrainConfig(appwsDrainConfig(wsDrain))
+		}
 		httpServer.SetOpenAIWSTimeouts(wsWrite, wsIdle, wsDial, wsFirst)
 		httpServer.SetOpenAIWSConnPool()
 		httpServer.SetOpenAIWSPoolConfig(
@@ -340,9 +348,23 @@ func newApp(cfg *relaycfg.Config) (*kratos.App, func(), error) {
 	}
 	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, grpcSvc, relayGRPCOpts...)
 
+	// Phase 3.3: graceful drain. On SIGTERM the BeforeStop hook drains the
+	// tracked WebSocket connections for up to drain_timeout, then the kratos
+	// StopTimeout (slightly larger than the drain window) bounds the whole
+	// shutdown so an unresponsive client cannot stall termination indefinitely.
+	drainTimeout := parseDurationOrDefault(cfg.OpenAIWS.GetOpenAIWSDrainTimeout(), 30*time.Second)
+	stopTimeout := drainTimeout + 10*time.Second
+
 	kratosOpts := []kratos.Option{
 		kratos.Name("relay-gateway"),
 		kratos.Server(srv, grpcSrv),
+		kratos.StopTimeout(stopTimeout),
+		kratos.BeforeStop(func(ctx context.Context) error {
+			drainCtx, cancel := context.WithTimeout(ctx, drainTimeout)
+			defer cancel()
+			_ = httpServer.DrainWSConnections(drainCtx)
+			return nil
+		}),
 	}
 	if registrar != nil {
 		kratosOpts = append(kratosOpts, kratos.Registrar(registrar))

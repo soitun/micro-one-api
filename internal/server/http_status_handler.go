@@ -300,6 +300,18 @@ func (s *HTTPServer) handleGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+	// While draining WebSocket connections for shutdown (Phase 3.3), report
+	// 503 so external load balancers stop sending traffic. The draining flag
+	// is only set after a SIGTERM; in steady state healthz stays 200 ok.
+	if s != nil && s.IsWSDraining() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		// Retry-After gives LBs a hint; the drain window is bounded by
+		// openai_ws.drain_timeout (default 30s).
+		w.Header().Set("Retry-After", "30")
+		encodeJSON(w, map[string]string{"status": "draining", "drain": "true"})
+		return
+	}
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

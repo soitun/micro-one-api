@@ -17,6 +17,7 @@ import (
 	channelv1 "micro-one-api/api/channel/v1"
 	servererrors "micro-one-api/pkg/errors"
 	applogger "micro-one-api/platform/logging"
+	appws "micro-one-api/platform/websocket"
 	relaybiz "micro-one-api/internal/biz"
 )
 
@@ -44,6 +45,15 @@ const (
 // the request is a WebSocket upgrade (see isOpenAIWSUpgradeRequest) before
 // calling this.
 func (s *HTTPServer) handleResponsesWebSocket(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	// Drain gate (Phase 3.3): once the process is draining for shutdown,
+	// reject new Responses-WS upgrades with 503 + Retry-After so load
+	// balancers route to a healthy replica. Existing tracked connections are
+	// allowed to finish their in-flight turns before force-close.
+	if s != nil && s.IsWSDraining() {
+		w.Header().Set("Retry-After", "30")
+		s.writeError(w, http.StatusServiceUnavailable, "server is draining websocket connections")
+		return
+	}
 	// Accept the upgrade. Compression with context takeover matches both the
 	// Codex CLI and the sub2api upstream dialer.
 	wsConn, err := coderws.Accept(w, r, &coderws.AcceptOptions{
@@ -138,6 +148,29 @@ func (s *HTTPServer) handleResponsesWebSocket(ctx context.Context, w http.Respon
 	// relay error before any data reached the client) we switch to a different
 	// channel and retry, up to the configured switch limit.
 	maxSwitches := s.openAIWSFailoverMaxSwitches()
+
+	// Register the client connection with the graceful-drain tracker (Phase
+	// 3.3). DrainWSConnections, called from a BeforeStop hook on shutdown,
+	// waits for tracked relays to complete (or force-closes them after the
+	// drain timeout). The close func delegates to wsConn.CloseNow so the
+	// tracker never touches coderws internals directly. Unregister happens
+	// automatically when the connection closes; here we also defer an explicit
+	// Unregister so a relay that returns without the close func firing (e.g.
+	// context cancel) is removed from the active set.
+	var tracked *appws.Connection
+	if s.wsConnTracker != nil {
+		tracked = s.wsConnTracker.NewConnection(requestID, func() error {
+			return wsConn.CloseNow()
+		})
+		if tracked != nil {
+			tracked.SetMetadata("endpoint", "/v1/responses")
+			tracked.SetMetadata("model", clientModel)
+			tracked.SetMetadata("user_id", fmt.Sprintf("%d", plan.Auth.UserID))
+			defer tracked.Unregister()
+		}
+	}
+	_ = tracked
+
 	s.runResponsesWSRelayWithFailover(ctx, wsConn, clientFrameConn, r, token, clientModel, sessionHash, plan, rewrittenFirstMessage, reservation, requestID, maxSwitches)
 }
 
