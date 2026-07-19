@@ -481,6 +481,51 @@ make test-e2e-suite
 - [x] fsnotify watcher 的 Modify 事件被 debounce + 投递（单测 `TestEnvFileSourceWatch_FiresOnModify` 在 tmpdir 真实触发）。
 - [x] `go build ./...` 通过；`go test ./platform/config/... ./internal/biz/...`（model_mapping + relay 子集）通过。
 
+## 待办 — Phase 2.4 Schema 隔离生产启用（风险登记）
+
+> 来源：2026-07-19 生产部署评估。Phase 2.4 代码 + `schema_split.sql` + `ownership.yaml` 已合入仓库，但**生产环境直接启用 schema 隔离存在数据/功能风险**，需先补齐下列前置项才能切流。
+
+### [ ] 生产启用 Schema 隔离的前置修复
+
+**背景**：`migrations/schema_split.sql`（Phase 2.4 参考脚本）在已有 MySQL 实例上把共享 `oneapi` 库的表**复制**（而非移动）到 8 个 per-service schema。但代码实际访问的表超出了 `schema_split.sql` 复制的范围，直接切流会导致跨 schema 读失败。
+
+**风险登记（按严重度排序）**：
+
+| # | 风险 | 影响 | 根因 | 前置修复 |
+|---|---|---|---|---|
+| R1 | **billing-service 对账跨 schema 读失败** | 对账 + 运营报表报错 `Table 'channels'/'logs'/'users' doesn't exist` | `app/billing/internal/data/reconciliation_repo.go` 的 `reconciliationChannelUsageModel`/`reconciliationLogModel`/`SumOverdraftBalances` 直接读 `channels`/`logs`/`users` 三张表；`schema_split.sql` 只把 `channels` 复制到 `oneapi_channel`、`logs` 复制到 `oneapi_log`，**没复制 `users`，也没在 `oneapi_billing` 建跨 schema 视图** | (a) `schema_split.sql` 补 `CREATE VIEW oneapi_billing.users AS SELECT * FROM oneapi_identity.users;` + channels/logs 视图（docs §10.4 方案 A）；或 (b) reconciliation 改走 gRPC（docs §10.4 方案 B，长期） |
+| R2 | **billing 运营报表读 `subscription_plans` 失败** | `operation_report_repo.go` LEFT JOIN `subscription_plans` 取 plan name 报错 | `schema_split.sql` 复制了 `subscription_groups`/`account_quota_snapshots` 但**漏了 `subscription_plans`**；`ownership.yaml` 的 billing 服务也没声明 050_create_subscription_plans | (a) `schema_split.sql` 补 `subscription_plans` 复制；`ownership.yaml` 的 billing 列表加 `050_create_subscription_plans` |
+| R3 | **relay-gateway 订阅配额中间件读空** | 订阅配额门控失效（fail-open）/读不到 user_subscriptions | `cmd/relay-gateway/wire.go` 通过 `domain/subscription/data.NewRepositoryFromEnv` 直连 DB 读 `user_subscriptions`；schema 切流后该 repo 用 `SUBSCRIPTION_SQL_DSN`/`SQL_DSN`（指向旧 `oneapi`），而 billing 写入已切到 `oneapi_billing` → 双向不一致 | relay-gateway 也设置 `SUBSCRIPTION_SCHEMA=oneapi_billing`（与 billing 同库），或在 relay-gateway 容器内同时透传 `SUBSCRIPTION_SCHEMA` 环境变量 |
+| R4 | **per-service migrate ownership 与真实表访问不完全对齐** | 某些 schema 跑 migrate 后缺表 | `ownership.yaml` 是按"建表迁移"粗粒度声明的，没覆盖所有跨表读。如 billing 读 `subscription_plans`(050) 未声明；channel 读 `subscription_accounts` 的 034-057 已覆盖，但 billing 读 subscription_accounts 视图缺失 | 以"代码实际访问的表"为权威，重审 ownership.yaml + schema_split.sql 的表清单 |
+| R5 | **migrate 二进制在服务器上缺失** | per-service migrate 无法在服务器执行 | 服务器无 Go 环境，`cmd/migrate` 二进制需跨平台编译后上传 | 本地 `GOOS=linux GOARCH=amd64 go build -o migrate ./cmd/migrate`，scp 到服务器；或打包进 init 容器/job |
+| R6 | **回滚路径需验证** | 切流异常时 `<SVC>_SCHEMA=""` 重启能否完全恢复 | schema_split 是复制不是移动，源库 `oneapi` 未变，理论上回滚 = 清空 env + 重启；但切流后**新写入落在 per-service schema**，回滚会丢这部分增量 | 切流窗口选低峰期；回滚前确认无新写入或接受增量丢失；长期需双向同步或停写窗口 |
+
+**推荐切流次序（风险隔离，逐服务推进）**：
+
+1. **先 log-service 单独切**（R 风险最低，只读 `logs` 表，无跨 schema 依赖）→ `LOG_SCHEMA=oneapi_log`，验证日志正常。
+2. **再切 monitor/notify/config/admin**（单表服务，无跨 schema 读）。
+3. **再切 identity/channel**（channel 读 subscription_accounts 全部已复制；identity 无跨 schema 读）。
+4. **最后切 billing**（需先完成 R1/R2 修复 + relay-gateway 的 R3 对齐）。
+
+**验收标准（切流完成时）**：
+
+- [ ] `schema_split.sql` 补齐 `users`/`channels`/`logs`/`subscription_plans` 的跨 schema 视图或复制。
+- [ ] `ownership.yaml` 补齐 billing 的 `050_create_subscription_plans`，并按代码实际访问表复核全部 8 个服务的 ownership 列表。
+- [ ] relay-gateway docker-compose 透传 `SUBSCRIPTION_SCHEMA`，与 billing 同 schema。
+- [ ] `migrate` linux/amd64 二进制构建并上传到服务器，per-service `migrate -ownership <svc>` 全绿。
+- [ ] 低峰期切流，观察 30 分钟；回滚演练通过（清空 env 重启后服务恢复）。
+- [ ] billing 对账 + 运营报表手动触发一次，确认无 `table doesn't exist`。
+
+**关联文件**：
+- `migrations/schema_split.sql`（参考 DDL，需补视图）
+- `migrations/ownership.yaml`（ownership 清单，需补 050）
+- `app/billing/internal/data/reconciliation_repo.go:59,121,176,214`（跨 schema 读证据）
+- `app/billing/internal/data/operation_report_repo.go:58`（subscription_plans JOIN）
+- `domain/subscription/data/data.go:28`（relay-gateway 直连 DB 读 user_subscriptions）
+- `docs/deployment.md` §10.4（过渡方案 A/B）
+
+---
+
 ## 待办 — 架构债务（独立于 Phase 2/3 推进顺序）
 
 ### [ ] 配置层对齐 kratos 官方模板：conf.proto + make config
@@ -503,3 +548,27 @@ make test-e2e-suite
 4. CI 增加 `make config` + `git diff --exit-code` 检查，防止漂移。
 
 本次 Phase 2.4 的 `Schema` 字段先加在手写 struct 上，保证功能可用；conf.proto 迁移作为独立债务跟踪。
+
+---
+
+#### 方案选型分析（调研后）
+
+> 调研覆盖：Makefile `config` 目标（`find app -name "*.proto"`，Makefile:14）、9 个服务的 `internal/conf/config.go`、各服务 `config_loader.go`、kratos 官方 `example/internal/conf/conf.proto`、消费层（各 `cmd/<svc>/wire.go`）。
+
+**推荐方案：每个服务一个 `internal/conf/conf.proto`**
+
+1. **对齐官方模板**。`example/internal/conf/conf.proto` 就是 kratos `new` 出来的每服务一份，TODO 里"关联参考"指的就是它。收敛到一个共享 proto 会偏离模板；TODO 文字"为每个服务（**或**收敛到一个共享的…）"也是把前者列为首选。
+2. **`make config` 零改动可用**。现有 Makefile 的 `config` 目标逻辑是 `find app -name "*.proto"`，proto 放在 `app/<svc>/internal/conf/` 下会被自动 pick up，立刻让 `make config` 从"空操作"变真操作。收敛方案需要改 Makefile 的搜索路径，且根 `internal/conf`（relay-gateway）不在 `app/` 下，改动面更大。
+3. **服务边界清晰**。9 个服务配置差异很大：notify 有 10 个 webhook、identity 有 OAuth/Registration、billing 有 Async/Recon/Partition、relay-gateway 有 20+ feature flag。合并成一个 `Bootstrap` 会让单 message 膨胀且每个服务只用一小块，违反微服务独立性。
+
+**三个必须先处理的关键障碍（否则做不干净）**
+
+| 障碍 | 现状 | 处理策略 |
+|---|---|---|
+| **`appregistry.Config`** 被嵌入全部 9 个服务 Config | proto 不能引用这个 Go 类型 | 在每个 `conf.proto` 里用等价 message 定义 `Registry`/`Consul`；`config_loader.go` 做一次轻量转换 `conf.Registry → appregistry.Config`，保持 `platform/registry` 不被污染 |
+| **`biz.PaymentConfig`** 嵌入 billing Config，且有自定义 `UnmarshalJSON`（`quota_per_unit`→`amount_per_unit` legacy 兼容） | proto JSON 反序列化阶段无法表达 legacy 兼容 | proto 定义 `Payment` message；legacy 兼容逻辑下沉到 billing `config_loader.go` 的转换层 |
+| **~25 个 `GetXxx()` 默认值方法**（OpenAIWS/Retry/HybridAdaptor/RuntimeBlock）挂在手写 struct 上 | proto 生成的 struct 没有这些方法 | 在各 conf 包保留一个 `defaults.go`，为 proto 生成的同名 type 添加方法（Go 允许同包内为 named type 加方法），零 API 破坏 |
+
+**破坏性变更控制**：让 protoc-gen-go 生成的 json tag 与现有 struct 完全一致（`json:"server"` 等），这样 `cfg.Server.HTTP.Addr` 访问路径和 `config.yaml` key 全部不变，`kratos config Scan` 行为不变，消费层（wire.go / 业务代码）零改动。
+
+**落地次序**：先做最简单的 channel-service 样板（只有 Server/Data/Registry，无障碍类型），验证 `make config` + 转换层 + defaults.go 路径可行，再按 notify → config → log → monitor → admin → identity → billing → relay-gateway 的复杂度递增批量铺开。
