@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	logcfg "micro-one-api/app/log/internal/conf"
+	logconf "micro-one-api/app/log/internal/conf"
 	appdb "micro-one-api/platform/database/partition"
 	applogger "micro-one-api/platform/logging"
 )
@@ -17,8 +17,8 @@ import (
 // (default off) and is a no-op when the repository is backed by the
 // in-memory store (no *gorm.DB). This is the cron integration listed in
 // REVIEW_v4 §六 as a remaining optional optimization item.
-func startPartitionMaintenance(ctx context.Context, db *gorm.DB, cfg logcfg.PartitionConfig) func() {
-	if !cfg.Enabled || db == nil {
+func startPartitionMaintenance(ctx context.Context, db *gorm.DB, cfg *logconf.Partition) func() {
+	if cfg == nil || !cfg.Enabled || db == nil {
 		return func() {}
 	}
 	maintenanceCtx, cancel := context.WithCancel(ctx)

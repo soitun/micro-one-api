@@ -528,23 +528,43 @@ make test-e2e-suite
 
 ## 待办 — 架构债务（独立于 Phase 2/3 推进顺序）
 
-### [x] 配置层对齐 kratos 官方模板：channel-service 样板
+### [x] 配置层对齐 kratos 官方模板：所有 9 服务已完成
 
 关联参考：`example/internal/conf/conf.proto`（kratos 官方 laytemplates）。
 
-**已完成 — channel-service 样板验证（2026-07-19）**
+**已完成 — 所有 9 服务 proto 迁移（2026-07-19）**
 
-- **✅ channel-service**：已完成 proto 配置迁移，作为其他服务的样板。
+- **✅ 所有服务**：channel → notify → config → log → monitor → admin → identity → billing → relay-gateway 全部完成。
 
-### [ ] 配置层对齐 kratos 官方模板：其余 8 服务批量迁移
+本次完成：
+- 所有 9 个服务都创建了 `conf.proto`，通过 `make config` 生成 `conf.pb.go`
+- 所有手写 `config.go` 已删除
+- 创建 `defaults.go` 保留需要默认值的方法（relay-gateway 专用）
+- `config_loader.go` 的 `Config` 结构体嵌入 proto 生成的 `*Bootstrap`
+- **所有 9 个服务**的 `initBootstrap` 函数使用指针参数避免 proto 消息按值复制（proto 包含 sync.Mutex）
+- **Makefile 更新**：`make config` 现在同时处理 `app/*/internal/conf/*.proto` 和 `internal/conf/*.proto`（relay-gateway）
+- relay-gateway 的 `wire.go`/`relay_helpers.go` 更新为使用 `cfg.Bootstrap.*` 访问字段
+- 所有字段名按 proto 生成的名称调整（如 `Server.Grpc`、`OpenaiWs.Ttl` 等）
+- Registry 转换层通过 `cfg.Registry()` 方法返回 `appregistry.Config`
+- **删除 billing 未使用的 duration import**
+- **统一 Schema 字段标注风格**：所有服务使用 `[json_name = "schema"]`
 
-关联参考：`example/internal/conf/conf.proto`（kratos 官方 laytemplates）。
+验收标准：
+- [x] `go build ./...` 通过
+- [x] `go vet ./...` 通过（无 lock value 复制警告）
+- [x] `go test ./internal/conf/... ./app/channel/internal/conf/... ./app/billing/internal/conf/...` 通过
+- [x] 所有 9 个服务的 `conf.proto` 存在且 `conf.pb.go` 已生成
+- [x] 所有手写 `config.go` 已删除
+- [x] `make config` 可正常生成所有 9 个服务的 proto 代码（包括 relay-gateway）
+- [x] billing duration import 警告已消除
+- [x] 所有 9 个服务的 `initBootstrap` 写法统一（helper 函数 + 指针参数）
+- [x] billing ToPaymentConfig 转换层有单测覆盖
 
-**待推进 — 按 complex 度递增顺序**
-
-- **⏳ 其余服务**：notify → config → log → monitor → admin → identity → billing → relay-gateway（按复杂度递增顺序待推进）。
-
-现状：本项目每个服务的 `internal/conf/config.go` 都是 **手写** Go struct，未走 proto 定义 → `make config` → `conf.pb.go` 的标准流程。`make config` 目标存在但因 `app/` 下无 internal proto 而是空操作。
+**备注**：测试覆盖现状（非阻塞 [x]）：
+- relay-gateway：config_test.go（默认值测试）
+- channel：registry_test.go（Registry 转换测试）
+- billing：payment_test.go（ToPaymentConfig 转换测试，新增）
+- 其余 6 个服务：conf 包无测试文件（nice-to-have，未来可补充）
 
 影响：
 

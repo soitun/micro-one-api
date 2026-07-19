@@ -35,9 +35,9 @@ message Data {
 
 // Database configuration.
 message Database {
-  string driver = 1;   // json:"driver"
-  string source = 2;   // json:"source"
-  string schema = 3;   // json:"schema" (Phase 2.4: schema isolation)
+  string driver = 1 [json_name = "driver"];
+  string source = 2 [json_name = "source"];
+  string schema = 3 [json_name = "schema"]; // Phase 2.4: schema isolation
 }
 
 // Redis configuration.

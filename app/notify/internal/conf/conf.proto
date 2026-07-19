@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package api.notify.v1;
+
+option go_package = "micro-one-api/app/notify/internal/conf;conf";
+
+import "google/protobuf/duration.proto";
+
+// Bootstrap is the top-level configuration loaded from config.yaml.
+message Bootstrap {
+  Server server = 1;
+  Data data = 2;
+  Registry registry = 3;
+  Notify notify_svc = 4;
+}
+
+// Server holds the HTTP and gRPC server configuration.
+message Server {
+  HTTP http = 1;
+  GRPC grpc = 2;
+}
+
+message HTTP {
+  string addr = 1 [json_name = "addr"];
+}
+
+message GRPC {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Data holds the database and Redis configuration.
+message Data {
+  Database database = 1;
+  Redis redis = 2;
+}
+
+message Database {
+  string driver = 1 [json_name = "driver"];
+  string source = 2 [json_name = "source"];
+  // Schema isolates this service to a specific database schema (Phase 2.4).
+  string schema = 3 [json_name = "schema"];
+}
+
+message Redis {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Registry holds the service registry configuration.
+message Registry {
+  string type = 1 [json_name = "type"];
+  Consul consul = 2 [json_name = "consul"];
+  map<string, string> metadata = 3 [json_name = "metadata"];
+}
+
+message Consul {
+  string address = 1 [json_name = "address"];
+  int64 health_check_interval = 2 [json_name = "health_check_interval"];
+}
+
+// Notify holds the notify-worker-specific settings.
+message Notify {
+  // WebhookURL is the default webhook endpoint for notifications.
+  string webhook_url = 1 [json_name = "webhook_url"];
+  // SMTPHost is the SMTP server host for email notifications.
+  string smtp_host = 2 [json_name = "smtp_host"];
+  // SMTPPort is the SMTP server port.
+  int32 smtp_port = 3 [json_name = "smtp_port"];
+  // SMTPUser is the SMTP auth username.
+  string smtp_user = 4 [json_name = "smtp_user"];
+  // SMTPPass is the SMTP auth password.
+  string smtp_pass = 5 [json_name = "smtp_pass"];
+  // SMTPFrom is the sender email address.
+  string smtp_from = 6 [json_name = "smtp_from"];
+  // WeComWebhookURL is the enterprise wecom webhook URL or key.
+  string wecom_webhook_url = 7 [json_name = "wecom_webhook_url"];
+  // DingTalkWebhookURL is the dingtalk webhook URL or access_token.
+  string dingtalk_webhook_url = 8 [json_name = "dingtalk_webhook_url"];
+  // FeishuWebhookURL is the feishu webhook URL.
+  string feishu_webhook_url = 9 [json_name = "feishu_webhook_url"];
+  // SlackWebhookURL is the slack incoming webhook URL.
+  string slack_webhook_url = 10 [json_name = "slack_webhook_url"];
+  // DispatchInterval is the pending notification scan interval.
+  google.protobuf.Duration dispatch_interval = 11 [json_name = "dispatch_interval"];
+  // DispatchBatch is the maximum pending notifications processed per scan.
+  int32 dispatch_batch = 12 [json_name = "dispatch_batch"];
+  // MaxRetry is the maximum send attempts before marking a notification failed.
+  int32 max_retry = 13 [json_name = "max_retry"];
+}

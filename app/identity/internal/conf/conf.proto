@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package api.identity.v1;
+
+option go_package = "micro-one-api/app/identity/internal/conf;conf";
+
+// Bootstrap is the top-level configuration loaded from config.yaml.
+message Bootstrap {
+  Server server = 1;
+  Data data = 2;
+  Clients clients = 3;
+  OAuth oauth = 4;
+  Registration registration = 5;
+  Registry registry = 6;
+}
+
+// Server holds the HTTP and gRPC server configuration.
+message Server {
+  HTTP http = 1;
+  GRPC grpc = 2;
+}
+
+message HTTP {
+  string addr = 1 [json_name = "addr"];
+}
+
+message GRPC {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Data holds the database and Redis configuration.
+message Data {
+  Database database = 1;
+  Redis redis = 2;
+}
+
+message Database {
+  string driver = 1 [json_name = "driver"];
+  string source = 2 [json_name = "source"];
+  // Schema isolates this service to a specific database schema (Phase 2.4).
+  string schema = 3 [json_name = "schema"];
+}
+
+message Redis {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Clients holds the client endpoint configuration.
+message Clients {
+  Billing billing = 1 [json_name = "billing"];
+}
+
+message Billing {
+  string endpoint = 1 [json_name = "endpoint"];
+}
+
+// OAuth holds the OAuth provider configuration.
+message OAuth {
+  OAuthProvider github = 1 [json_name = "github"];
+  OAuthProvider google = 2 [json_name = "google"];
+  OIDCProvider oidc = 3 [json_name = "oidc"];
+  OAuthProvider lark = 4 [json_name = "lark"];
+  OAuthProvider wechat = 5 [json_name = "wechat"];
+  string base_url = 6 [json_name = "base_url"];
+}
+
+message OAuthProvider {
+  string client_id = 1 [json_name = "client_id"];
+  string client_secret = 2 [json_name = "client_secret"];
+  bool enabled = 3 [json_name = "enabled"];
+}
+
+message OIDCProvider {
+  string client_id = 1 [json_name = "client_id"];
+  string client_secret = 2 [json_name = "client_secret"];
+  bool enabled = 3 [json_name = "enabled"];
+  string authorize_url = 4 [json_name = "authorize_url"];
+  string token_url = 5 [json_name = "token_url"];
+  string user_info_url = 6 [json_name = "user_info_url"];
+  repeated string scopes = 7 [json_name = "scopes"];
+}
+
+// Registration holds the registration configuration.
+message Registration {
+  bool enabled = 1 [json_name = "enabled"];
+  bool disabled = 2 [json_name = "disabled"];
+  bool email_domain_restriction_enabled = 3 [json_name = "email_domain_restriction_enabled"];
+  repeated string email_domain_whitelist = 4 [json_name = "email_domain_whitelist"];
+  bool turnstile_check_enabled = 5 [json_name = "turnstile_check_enabled"];
+  string turnstile_secret = 6 [json_name = "turnstile_secret"];
+}
+
+// Registry holds the service registry configuration.
+message Registry {
+  string type = 1 [json_name = "type"];
+  Consul consul = 2 [json_name = "consul"];
+  map<string, string> metadata = 3 [json_name = "metadata"];
+}
+
+message Consul {
+  string address = 1 [json_name = "address"];
+  int64 health_check_interval = 2 [json_name = "health_check_interval"];
+}

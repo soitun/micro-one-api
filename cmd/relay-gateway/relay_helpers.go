@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc"
 
 	relaybiz "micro-one-api/internal/biz"
-	relaycfg "micro-one-api/internal/conf"
 	"micro-one-api/internal/server"
 	applogger "micro-one-api/platform/logging"
 	appauth "micro-one-api/platform/security/auth"
@@ -23,8 +22,8 @@ import (
 )
 
 // newModelMapper creates a ModelMapper from config, returning nil on error.
-func newModelMapper(cfg *relaycfg.Config) *relaybiz.ModelMapper {
-	path := cfg.Models.Path
+func newModelMapper(cfg *Config) *relaybiz.ModelMapper {
+	path := cfg.Bootstrap.Models.Path
 	if path == "" {
 		for _, candidate := range []string{"/configs/models.yaml", "configs/models.yaml"} {
 			if _, err := os.Stat(candidate); err == nil {
@@ -42,11 +41,11 @@ func newModelMapper(cfg *relaycfg.Config) *relaybiz.ModelMapper {
 }
 
 // newRetryPolicy creates a RetryPolicy from config.
-func newRetryPolicy(cfg *relaycfg.Config) *relaybiz.RetryPolicy {
-	retryCfg := cfg.Retry
+func newRetryPolicy(cfg *Config) *relaybiz.RetryPolicy {
+	retryCfg := cfg.Bootstrap.Retry
 	statuses := make(map[int]bool)
 	for _, s := range retryCfg.GetRetryableStatus() {
-		statuses[s] = true
+		statuses[int(s)] = true
 	}
 	initialInterval, err := time.ParseDuration(retryCfg.GetInitialInterval())
 	if err != nil {
@@ -57,7 +56,7 @@ func newRetryPolicy(cfg *relaycfg.Config) *relaybiz.RetryPolicy {
 		maxInterval = 5 * time.Second
 	}
 	return &relaybiz.RetryPolicy{
-		MaxAttempts:     retryCfg.GetMaxAttempts(),
+		MaxAttempts:     int(retryCfg.GetMaxAttempts()),
 		InitialInterval: initialInterval,
 		MaxInterval:     maxInterval,
 		Multiplier:      retryCfg.GetMultiplier(),
@@ -67,8 +66,8 @@ func newRetryPolicy(cfg *relaycfg.Config) *relaybiz.RetryPolicy {
 
 // newKratosHTTPServer creates a kratos HTTP server for relay-gateway.
 // It wraps the internal HTTPServer and registers its routes.
-func newKratosHTTPServer(cfg *relaycfg.Config, httpServer *server.HTTPServer, providerTimeout time.Duration) *khttp.Server {
-	srv := khttp.NewServer(xhttp.SafeKratosServerOptions(khttp.Address(cfg.Server.HTTP.Addr), khttp.Timeout(providerTimeout))...)
+func newKratosHTTPServer(cfg *Config, httpServer *server.HTTPServer, providerTimeout time.Duration) *khttp.Server {
+	srv := khttp.NewServer(xhttp.SafeKratosServerOptions(khttp.Address(cfg.Bootstrap.Server.Http.Addr), khttp.Timeout(providerTimeout))...)
 	httpServer.RegisterRoutes(srv)
 	return srv
 }
@@ -141,13 +140,13 @@ func appwsDrainConfig(drainTimeout time.Duration) *appws.DrainConfig {
 	}
 }
 
-// modelsConfigPath returns the resolved path to models.yaml: cfg.Models.Path
+// modelsConfigPath returns the resolved path to models.yaml: cfg.Bootstrap.Models.Path
 // when set, otherwise the first existing well-known default. Phase 2.5: used
 // by the hot-reload subscriber so it watches the same file newModelMapper
 // actually loaded.
-func modelsConfigPath(cfg *relaycfg.Config) string {
-	if cfg != nil && cfg.Models.Path != "" {
-		return cfg.Models.Path
+func modelsConfigPath(cfg *Config) string {
+	if cfg != nil && cfg.Bootstrap.Models.Path != "" {
+		return cfg.Bootstrap.Models.Path
 	}
 	for _, candidate := range []string{"/configs/models.yaml", "configs/models.yaml"} {
 		if _, err := os.Stat(candidate); err == nil {

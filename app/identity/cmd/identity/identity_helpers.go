@@ -13,7 +13,6 @@ import (
 
 	billingv1 "micro-one-api/api/billing/v1"
 	"micro-one-api/app/identity/internal/biz"
-	identitycfg "micro-one-api/app/identity/internal/conf"
 	"micro-one-api/app/identity/internal/server"
 	applogger "micro-one-api/platform/logging"
 	"micro-one-api/platform/security" // package name is `oauth`
@@ -95,68 +94,78 @@ func validateGeneratedPasswordFilePath(path string) (string, error) {
 	return cleanPath, nil
 }
 
-func registrationPolicyFromConfig(cfg *identitycfg.Config) server.RegistrationPolicy {
-	enabled := !cfg.Registration.Disabled
-	if cfg.Registration.Enabled {
+func registrationPolicyFromConfig(cfg *Config) server.RegistrationPolicy {
+	if cfg == nil || cfg.Bootstrap == nil || cfg.Bootstrap.Registration == nil {
+		return server.RegistrationPolicy{Enabled: true}
+	}
+	reg := cfg.Bootstrap.Registration
+	enabled := !reg.Disabled
+	if reg.Enabled {
 		enabled = true
 	}
 	return server.RegistrationPolicy{
 		Enabled:                       enabled,
-		EmailDomainRestrictionEnabled: cfg.Registration.EmailDomainRestrictionEnabled,
-		EmailDomainWhitelist:          cfg.Registration.EmailDomainWhitelist,
-		TurnstileCheckEnabled:         cfg.Registration.TurnstileCheckEnabled,
-		TurnstileSecret:               cfg.Registration.TurnstileSecret,
+		EmailDomainRestrictionEnabled: reg.EmailDomainRestrictionEnabled,
+		EmailDomainWhitelist:          reg.EmailDomainWhitelist,
+		TurnstileCheckEnabled:         reg.TurnstileCheckEnabled,
+		TurnstileSecret:               reg.TurnstileSecret,
 	}
 }
 
-func setupOAuth(cfg *identitycfg.Config) *oauth.ProviderRegistry {
+func setupOAuth(cfg *Config) *oauth.ProviderRegistry {
+	if cfg == nil || cfg.Bootstrap == nil || cfg.Bootstrap.Oauth == nil {
+		return oauth.NewProviderRegistry()
+	}
 	registry := oauth.NewProviderRegistry()
-	baseURL := cfg.OAuth.BaseURL
+	oauthCfg := cfg.Bootstrap.Oauth
+
+	baseURL := oauthCfg.BaseUrl
 	if baseURL == "" {
 		baseURL = "http://localhost:8001"
 	}
 
-	if cfg.OAuth.GitHub.Enabled && cfg.OAuth.GitHub.ClientID != "" {
+	if oauthCfg.Github != nil && oauthCfg.Github.Enabled && oauthCfg.Github.ClientId != "" {
 		registry.Register(oauth.NewGitHubProvider(oauth.Config{
-			ClientID:     cfg.OAuth.GitHub.ClientID,
-			ClientSecret: cfg.OAuth.GitHub.ClientSecret,
+			ClientID:     oauthCfg.Github.ClientId,
+			ClientSecret: oauthCfg.Github.ClientSecret,
 			RedirectURL:  baseURL + "/v1/oauth/github/callback",
 		}))
 	}
-	if cfg.OAuth.Google.Enabled && cfg.OAuth.Google.ClientID != "" {
+	if oauthCfg.Google != nil && oauthCfg.Google.Enabled && oauthCfg.Google.ClientId != "" {
 		registry.Register(oauth.NewGoogleProvider(oauth.Config{
-			ClientID:     cfg.OAuth.Google.ClientID,
-			ClientSecret: cfg.OAuth.Google.ClientSecret,
+			ClientID:     oauthCfg.Google.ClientId,
+			ClientSecret: oauthCfg.Google.ClientSecret,
 			RedirectURL:  baseURL + "/v1/oauth/google/callback",
 		}))
 	}
-	if cfg.OAuth.OIDC.Enabled && cfg.OAuth.OIDC.ClientID != "" && cfg.OAuth.OIDC.AuthorizeURL != "" && cfg.OAuth.OIDC.TokenURL != "" && cfg.OAuth.OIDC.UserInfoURL != "" {
+	if oauthCfg.Oidc != nil && oauthCfg.Oidc.Enabled && oauthCfg.Oidc.ClientId != "" &&
+		oauthCfg.Oidc.AuthorizeUrl != "" && oauthCfg.Oidc.TokenUrl != "" && oauthCfg.Oidc.UserInfoUrl != "" {
 		registry.Register(oauth.NewOIDCProvider(oauth.OIDCConfig{
 			Config: oauth.Config{
-				ClientID:     cfg.OAuth.OIDC.ClientID,
-				ClientSecret: cfg.OAuth.OIDC.ClientSecret,
+				ClientID:     oauthCfg.Oidc.ClientId,
+				ClientSecret: oauthCfg.Oidc.ClientSecret,
 				RedirectURL:  baseURL + "/v1/oauth/oidc/callback",
 			},
-			AuthorizeURL: cfg.OAuth.OIDC.AuthorizeURL,
-			TokenURL:     cfg.OAuth.OIDC.TokenURL,
-			UserInfoURL:  cfg.OAuth.OIDC.UserInfoURL,
-			Scopes:       cfg.OAuth.OIDC.Scopes,
+			AuthorizeURL: oauthCfg.Oidc.AuthorizeUrl,
+			TokenURL:     oauthCfg.Oidc.TokenUrl,
+			UserInfoURL:  oauthCfg.Oidc.UserInfoUrl,
+			Scopes:       oauthCfg.Oidc.Scopes,
 		}))
 	}
-	if cfg.OAuth.Lark.Enabled && cfg.OAuth.Lark.ClientID != "" {
+	if oauthCfg.Lark != nil && oauthCfg.Lark.Enabled && oauthCfg.Lark.ClientId != "" {
 		registry.Register(oauth.NewLarkProvider(oauth.EndpointConfig{
 			Config: oauth.Config{
-				ClientID:     cfg.OAuth.Lark.ClientID,
-				ClientSecret: cfg.OAuth.Lark.ClientSecret,
+				ClientID:     oauthCfg.Lark.ClientId,
+				ClientSecret: oauthCfg.Lark.ClientSecret,
 				RedirectURL:  baseURL + "/v1/oauth/lark/callback",
 			},
 		}))
 	}
-	if cfg.OAuth.WeChat.Enabled && cfg.OAuth.WeChat.ClientID != "" {
+	if oauthCfg.Wechat != nil && oauthCfg.Wechat.Enabled && oauthCfg.Wechat.ClientId != "" {
 		registry.Register(oauth.NewWeChatProvider(oauth.EndpointConfig{
 			Config: oauth.Config{
-				ClientID:     cfg.OAuth.WeChat.ClientID,
-				ClientSecret: cfg.OAuth.WeChat.ClientSecret,
+				ClientID:     oauthCfg.Wechat.ClientId,
+				ClientSecret: oauthCfg.Wechat.ClientSecret,
 				RedirectURL:  baseURL + "/v1/oauth/wechat/callback",
 			},
 		}))
@@ -166,11 +175,14 @@ func setupOAuth(cfg *identitycfg.Config) *oauth.ProviderRegistry {
 
 // newBillingClient creates the optional billing-service gRPC client. Returns
 // a nil client and nil conn when no endpoint is configured.
-func newBillingClient(cfg *identitycfg.Config) (billingv1.BillingServiceClient, *grpc.ClientConn, error) {
-	if cfg.Clients.Billing.Endpoint == "" {
+func newBillingClient(cfg *Config) (billingv1.BillingServiceClient, *grpc.ClientConn, error) {
+	if cfg == nil || cfg.Bootstrap == nil || cfg.Bootstrap.Clients == nil || cfg.Bootstrap.Clients.Billing == nil {
 		return nil, nil, nil
 	}
-	conn, err := grpc.NewClient(cfg.Clients.Billing.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if cfg.Bootstrap.Clients.Billing.Endpoint == "" {
+		return nil, nil, nil
+	}
+	conn, err := grpc.NewClient(cfg.Bootstrap.Clients.Billing.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to connect to billing service: %w", err)
 	}

@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"micro-one-api/app/identity/internal/biz"
-	identitycfg "micro-one-api/app/identity/internal/conf"
+	identityconf "micro-one-api/app/identity/internal/conf"
 	applogger "micro-one-api/platform/logging"
 )
 
 func TestRegistrationPolicyFromConfigDefaultsEnabled(t *testing.T) {
-	policy := registrationPolicyFromConfig(&identitycfg.Config{})
+	policy := registrationPolicyFromConfig(&Config{})
 
 	if !policy.Enabled {
 		t.Fatal("registration should default to enabled")
@@ -21,15 +21,18 @@ func TestRegistrationPolicyFromConfigDefaultsEnabled(t *testing.T) {
 }
 
 func TestRegistrationPolicyFromConfigSupportsRestrictionsAndExplicitDisable(t *testing.T) {
-	policy := registrationPolicyFromConfig(&identitycfg.Config{
-		Registration: identitycfg.RegistrationConfig{
-			Disabled:                      true,
-			EmailDomainRestrictionEnabled: true,
-			EmailDomainWhitelist:          []string{"example.com"},
-			TurnstileCheckEnabled:         true,
-			TurnstileSecret:               "secret",
+	cfg := &Config{
+		Bootstrap: &identityconf.Bootstrap{
+			Registration: &identityconf.Registration{
+				Disabled:                      true,
+				EmailDomainRestrictionEnabled: true,
+				EmailDomainWhitelist:          []string{"example.com"},
+				TurnstileCheckEnabled:         true,
+				TurnstileSecret:               "secret",
+			},
 		},
-	})
+	}
+	policy := registrationPolicyFromConfig(cfg)
 
 	if policy.Enabled {
 		t.Fatal("registration should be disabled")
@@ -90,20 +93,23 @@ func TestWriteGeneratedPasswordFileRejectsUnsafePaths(t *testing.T) {
 }
 
 func TestSetupOAuthRegistersOIDCWhenConfigured(t *testing.T) {
-	registry := setupOAuth(&identitycfg.Config{
-		OAuth: identitycfg.OAuthConfig{
-			BaseURL: "https://one-api.example.com",
-			OIDC: identitycfg.OIDCProviderConfig{
-				Enabled:      true,
-				ClientID:     "client-id",
-				ClientSecret: "client-secret",
-				AuthorizeURL: "https://idp.example.com/oauth2/authorize",
-				TokenURL:     "https://idp.example.com/oauth2/token",
-				UserInfoURL:  "https://idp.example.com/oauth2/userinfo",
-				Scopes:       []string{"openid", "email"},
+	cfg := &Config{
+		Bootstrap: &identityconf.Bootstrap{
+			Oauth: &identityconf.OAuth{
+				BaseUrl: "https://one-api.example.com",
+				Oidc: &identityconf.OIDCProvider{
+					Enabled:      true,
+					ClientId:     "client-id",
+					ClientSecret: "client-secret",
+					AuthorizeUrl: "https://idp.example.com/oauth2/authorize",
+					TokenUrl:     "https://idp.example.com/oauth2/token",
+					UserInfoUrl:  "https://idp.example.com/oauth2/userinfo",
+					Scopes:       []string{"openid", "email"},
+				},
 			},
 		},
-	})
+	}
+	registry := setupOAuth(cfg)
 
 	provider, ok := registry.Get("oidc")
 	if !ok {
@@ -115,21 +121,24 @@ func TestSetupOAuthRegistersOIDCWhenConfigured(t *testing.T) {
 }
 
 func TestSetupOAuthRegistersLarkAndWeChatWhenConfigured(t *testing.T) {
-	registry := setupOAuth(&identitycfg.Config{
-		OAuth: identitycfg.OAuthConfig{
-			BaseURL: "https://one-api.example.com",
-			Lark: identitycfg.OAuthProviderConfig{
-				Enabled:      true,
-				ClientID:     "lark-client",
-				ClientSecret: "lark-secret",
-			},
-			WeChat: identitycfg.OAuthProviderConfig{
-				Enabled:      true,
-				ClientID:     "wechat-client",
-				ClientSecret: "wechat-secret",
+	cfg := &Config{
+		Bootstrap: &identityconf.Bootstrap{
+			Oauth: &identityconf.OAuth{
+				BaseUrl: "https://one-api.example.com",
+				Lark: &identityconf.OAuthProvider{
+					Enabled:      true,
+					ClientId:     "lark-client",
+					ClientSecret: "lark-secret",
+				},
+				Wechat: &identityconf.OAuthProvider{
+					Enabled:      true,
+					ClientId:     "wechat-client",
+					ClientSecret: "wechat-secret",
+				},
 			},
 		},
-	})
+	}
+	registry := setupOAuth(cfg)
 
 	lark, ok := registry.Get("lark")
 	if !ok {

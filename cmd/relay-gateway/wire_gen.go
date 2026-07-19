@@ -9,17 +9,22 @@ package main
 import (
 	"context"
 	"fmt"
-	billingv1 "micro-one-api/api/billing/v1"
-	channelv1 "micro-one-api/api/channel/v1"
-	identityv1 "micro-one-api/api/identity/v1"
-	logv1 "micro-one-api/api/log/v1"
+	"github.com/go-kratos/kratos/v2"
+	"github.com/go-kratos/kratos/v2/config"
+	"github.com/google/wire"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"micro-one-api/api/billing/v1"
+	"micro-one-api/api/channel/v1"
+	"micro-one-api/api/identity/v1"
+	"micro-one-api/api/log/v1"
 	biz2 "micro-one-api/domain/subscription/biz"
 	data2 "micro-one-api/domain/subscription/data"
 	"micro-one-api/domain/upstream/credential"
 	"micro-one-api/domain/upstream/provider"
 	"micro-one-api/internal/adaptor"
 	"micro-one-api/internal/biz"
-	"micro-one-api/internal/conf"
 	"micro-one-api/internal/data"
 	"micro-one-api/internal/identity"
 	"micro-one-api/internal/server"
@@ -27,10 +32,11 @@ import (
 	"micro-one-api/pkg/timeout"
 	"micro-one-api/platform/audit"
 	"micro-one-api/platform/cache"
+	"micro-one-api/platform/config"
 	"micro-one-api/platform/database/xdb"
 	"micro-one-api/platform/events"
 	grpc2 "micro-one-api/platform/grpc"
-	logger "micro-one-api/platform/logging"
+	"micro-one-api/platform/logging"
 	"micro-one-api/platform/metrics"
 	"micro-one-api/platform/middleware"
 	"micro-one-api/platform/registry"
@@ -39,16 +45,9 @@ import (
 	"net/http"
 	"os"
 	"time"
+)
 
-	"github.com/go-kratos/kratos/v2"
-	"github.com/google/wire"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
-	xconfig "micro-one-api/platform/config"
-
-	"github.com/go-kratos/kratos/v2/config"
+import (
 	_ "github.com/go-kratos/kratos/v2/config/file"
 )
 
@@ -84,7 +83,7 @@ var ProviderSet = wire.NewSet(
 	newApp,
 )
 
-func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
+func newApp(cfg *Config) (*kratos.App, func(), error) {
 	tlsConfig := tls.LoadTLSConfig()
 	enableAuth := os.Getenv("ENABLE_AUTH") != "false"
 	var serviceAuth *auth.ServiceAuthConfig
@@ -103,20 +102,20 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 		}
 	}
 
-	discovery, err := registry.NewDiscovery(cfg.Registry)
+	discovery, err := registry.NewDiscovery(cfg.Registry())
 	if err != nil {
 		return nil, nil, fmt.Errorf("create discovery: %w", err)
 	}
-	registrar, err := registry.NewRegistrar(cfg.Registry)
+	registrar, err := registry.NewRegistrar(cfg.Registry())
 	if err != nil {
 		return nil, nil, fmt.Errorf("create registrar: %w", err)
 	}
 
 	resolver := registry.NewResolver(discovery)
-	resolver.SetStatic("identity-service", cfg.Clients.Identity.Endpoint)
-	resolver.SetStatic("channel-service", cfg.Clients.Channel.Endpoint)
-	resolver.SetStatic("billing-service", cfg.Clients.Billing.Endpoint)
-	resolver.SetStatic("log-service", cfg.Clients.Log.Endpoint)
+	resolver.SetStatic("identity-service", cfg.Bootstrap.Clients.Identity.Endpoint)
+	resolver.SetStatic("channel-service", cfg.Bootstrap.Clients.Channel.Endpoint)
+	resolver.SetStatic("billing-service", cfg.Bootstrap.Clients.Billing.Endpoint)
+	resolver.SetStatic("log-service", cfg.Bootstrap.Clients.Log.Endpoint)
 
 	var identityConn, channelConn, billingConn, logConn *grpc.ClientConn
 	var identityClient identityv1.IdentityServiceClient
@@ -182,8 +181,8 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	billingClient = billingv1.NewBillingServiceClient(billingConn)
 	logClient = logv1.NewLogServiceClient(logConn)
 
-	resilienceTimeout := parseDurationOrDefault(cfg.Resilience.Timeout, 3*time.Second)
-	if cfg.Resilience.Enabled {
+	resilienceTimeout := parseDurationOrDefault(cfg.Bootstrap.Resilience.Timeout, 3*time.Second)
+	if cfg.Bootstrap.Resilience.Enabled {
 		identityClient = data.NewResilientIdentityClient(identityClient, resilienceTimeout)
 		channelClient = data.NewResilientChannelClient(channelClient, resilienceTimeout)
 		billingClient = data.NewResilientBillingClient(billingClient, resilienceTimeout)
@@ -193,7 +192,7 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	providerFactory := provider.NewProviderFactory(providerTimeout)
 	adaptor.SetProviderFactory(providerFactory)
 
-	identityTTL := parseDurationOrDefault(cfg.HybridAdaptor.GetIdentityTTL(), 24*time.Hour)
+	identityTTL := parseDurationOrDefault(cfg.Bootstrap.HybridAdaptor.GetIdentityTtl(), 24*time.Hour)
 	identityService := identity.NewIdentityService(identityTTL)
 	adaptor.SetIdentityService(identityService)
 
@@ -217,29 +216,29 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	oauthHTTPClient := &http.Client{Timeout: providerTimeout}
 
 	var refreshTask *credential.RefreshTask
-	if cfg.HybridAdaptor.GetTokenRefreshEnabled() {
+	if cfg.Bootstrap.HybridAdaptor.GetTokenRefreshEnabled() {
 		refreshTask = credential.NewRefreshTask(
 			map[credential.Platform]credential.TokenProvider{credential.PlatformClaude: claudeTokenProvider, credential.PlatformCodex: codexTokenProvider},
 			accountLookup,
 			func(accountID int64) credential.Platform {
 				return accountLookup.PlatformOf(context.Background(), accountID)
 			}, credential.RefreshTaskConfig{
-				Interval:                  parseDurationOrDefault(cfg.HybridAdaptor.GetRefreshInterval(), 10*time.Minute),
-				Lookahead:                 parseDurationOrDefault(cfg.HybridAdaptor.GetRefreshLookahead(), 24*time.Hour),
-				MaxRetries:                cfg.HybridAdaptor.TokenRefresh.MaxRetries,
-				RetryBackoff:              time.Duration(cfg.HybridAdaptor.TokenRefresh.RetryBackoffSeconds) * time.Second,
-				TempUnschedulableDuration: parseDurationOrDefault(cfg.HybridAdaptor.TokenRefresh.TempUnschedDuration, 10*time.Minute),
+				Interval:                  parseDurationOrDefault(cfg.Bootstrap.HybridAdaptor.GetRefreshInterval(), 10*time.Minute),
+				Lookahead:                 parseDurationOrDefault(cfg.Bootstrap.HybridAdaptor.GetRefreshLookahead(), 24*time.Hour),
+				MaxRetries:                int(cfg.Bootstrap.HybridAdaptor.TokenRefresh.MaxRetries),
+				RetryBackoff:              time.Duration(cfg.Bootstrap.HybridAdaptor.TokenRefresh.RetryBackoffSeconds) * time.Second,
+				TempUnschedulableDuration: parseDurationOrDefault(cfg.Bootstrap.HybridAdaptor.TokenRefresh.TempUnschedDuration, 10*time.Minute),
 				Hook:                      accountLookup,
 			},
 		)
 		refreshTask.Start()
 	}
 
-	redisAddr := cfg.Redis.Addr
-	redisPassword := cfg.Redis.Password
+	redisAddr := cfg.Bootstrap.Redis.Addr
+	redisPassword := cfg.Bootstrap.Redis.Password
 	if redisAddr == "" {
-		redisAddr = cfg.OpenAIWS.RedisAddr
-		redisPassword = cfg.OpenAIWS.RedisPassword
+		redisAddr = cfg.Bootstrap.OpenaiWs.RedisAddr
+		redisPassword = cfg.Bootstrap.OpenaiWs.RedisPassword
 	}
 	redisClient := xdb.NewRedisClient(redisAddr, redisPassword)
 	eventBus := events.NewConfiguredEventBus(redisClient, "relay-gateway")
@@ -250,7 +249,7 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	}
 	identityClient = data.NewCachedIdentityClient(identityClient, authCache)
 
-	if cfg.ChannelCache.GetChannelCacheEnabled() {
+	if cfg.Bootstrap.ChannelCache.GetChannelCacheEnabled() {
 		channelLoader := cache.NewChannelCacheLoader(channelClient, nil, resilienceTimeout)
 		channelCache, err := cache.NewChannelCache(redisClient, nil, channelLoader.Load)
 		if err != nil {
@@ -262,16 +261,16 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	modelMapper := newModelMapper(cfg)
 	var modelReloadStop func()
 	if mm := modelMapper; mm != nil {
-		// Phase 2.5 — models.yaml hot reload. The callback re-reads the file
-		// and atomically swaps the mapper's snapshot; a parse/validation
-		// failure is logged and the previous snapshot remains in effect.
+
 		if mp := modelsConfigPath(cfg); mp != "" {
 			modelReloadStop, _ = xconfig.SubscribeFile(mp, func(_ *config.KeyValue) {
 				if err := mm.Reload(); err != nil {
-					logger.Log.Warn("models.yaml hot reload failed; keeping previous snapshot", zap.String("path", mp), zap.Error(err))
+					logger.Log.
+						Warn("models.yaml hot reload failed; keeping previous snapshot", zap.String("path", mp), zap.Error(err))
 					return
 				}
-				logger.Log.Info("models.yaml hot-reloaded", zap.String("path", mp))
+				logger.Log.
+					Info("models.yaml hot-reloaded", zap.String("path", mp))
 			})
 		}
 	}
@@ -283,25 +282,25 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	relayUsecase.SetRuntimeBlocker(biz.NewMemoryRuntimeBlocker())
 
 	httpServer := server.NewHTTPServer(identityClient, channelClient, billingClient, providerFactory, relayUsecase, logClient)
-	httpServer.SetHybridAdaptorEnabled(cfg.HybridAdaptor.GetHybridAdaptorEnabled())
-	httpServer.SetSubscriptionSessionStickyEnabled(cfg.SessionSticky.GetSessionStickyEnabled())
-	httpServer.SetRelayOrchestratorEnabled(cfg.RelayOrchestrator.GetRelayOrchestratorEnabled())
+	httpServer.SetHybridAdaptorEnabled(cfg.Bootstrap.HybridAdaptor.GetHybridAdaptorEnabled())
+	httpServer.SetSubscriptionSessionStickyEnabled(cfg.Bootstrap.SessionSticky.GetSessionStickyEnabled())
+	httpServer.SetRelayOrchestratorEnabled(cfg.Bootstrap.RelayOrchestrator.GetRelayOrchestratorEnabled())
 	httpServer.SetSubscriptionAccountResolver(accountResolver)
 	httpServer.SetOAuthHTTPClient(oauthHTTPClient)
 	httpServer.SetSubscriptionAccountQuotaRecorder(accountLookup)
-	httpServer.SetUserRPMLimit(cfg.Subscription.GetUserRPMLimit())
+	httpServer.SetUserRPMLimit(cfg.Bootstrap.Subscription.GetUserRPMLimit())
 	httpServer.SetRuntimeBlockDurations(
-		parseDurationOrDefault(cfg.HybridAdaptor.RuntimeBlock.GetRateLimitedDuration(), 5*time.Second),
-		parseDurationOrDefault(cfg.HybridAdaptor.RuntimeBlock.GetUnauthorizedDuration(), 2*time.Minute),
-		parseDurationOrDefault(cfg.HybridAdaptor.RuntimeBlock.GetServerErrorDuration(), 2*time.Minute),
-		parseDurationOrDefault(cfg.HybridAdaptor.RuntimeBlock.GetOverloadedDuration(), 30*time.Second),
+		parseDurationOrDefault(cfg.Bootstrap.HybridAdaptor.RuntimeBlock.GetRateLimitedDuration(), 5*time.Second),
+		parseDurationOrDefault(cfg.Bootstrap.HybridAdaptor.RuntimeBlock.GetUnauthorizedDuration(), 2*time.Minute),
+		parseDurationOrDefault(cfg.Bootstrap.HybridAdaptor.RuntimeBlock.GetServerErrorDuration(), 2*time.Minute),
+		parseDurationOrDefault(cfg.Bootstrap.HybridAdaptor.RuntimeBlock.GetOverloadedDuration(), 30*time.Second),
 	)
 	stopBlockerReporter := func() {}
 	if redisClient != nil {
 		redisBlocker := biz.NewRedisRuntimeBlocker(redisClient)
 		httpServer.SetRuntimeBlocker(redisBlocker)
 		stopBlockerReporter = redisBlocker.StartActiveGaugeReporter(
-			parseDurationOrDefault(cfg.HybridAdaptor.RuntimeBlock.GetActiveGaugeInterval(), 30*time.Second),
+			parseDurationOrDefault(cfg.Bootstrap.HybridAdaptor.RuntimeBlock.GetActiveGaugeInterval(), 30*time.Second),
 			func(v float64) {
 				metrics.RelayRuntimeBlockActive.Set(v)
 			},
@@ -318,7 +317,7 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	}
 
 	var routeMiddleware []func(http.Handler) http.Handler
-	if cfg.Subscription.GetSubscriptionEnabled() {
+	if cfg.Bootstrap.Subscription.GetSubscriptionEnabled() {
 		subscriptionRepo, subErr := data2.NewRepositoryFromEnv(os.Getenv("SQL_DRIVER"))
 		if subErr != nil {
 			return nil, nil, fmt.Errorf("create subscription repository: %w", subErr)
@@ -327,36 +326,36 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 		httpServer.SetSubscriptionUsecase(subscriptionUc)
 		routeMiddleware = append(routeMiddleware, httpServer.SubscriptionQuotaMiddleware)
 	}
-	if cfg.Idempotency.Enabled {
-		ttl := parseDurationOrDefault(cfg.Idempotency.TTL, 24*time.Hour)
+	if cfg.Bootstrap.Idempotency.Enabled {
+		ttl := parseDurationOrDefault(cfg.Bootstrap.Idempotency.Ttl, 24*time.Hour)
 		routeMiddleware = append(routeMiddleware, middleware.NewIdempotencyMiddleware(redisClient, &middleware.IdempotencyConfig{
 			Header:    "Idempotency-Key",
 			TTL:       ttl,
 			CacheKeys: true,
 		}).Handler)
 	}
-	if cfg.Audit.Enabled {
+	if cfg.Bootstrap.Audit.Enabled {
 		routeMiddleware = append(routeMiddleware, audit.NewMiddleware(audit.NewAuditor(true)).Handler)
 	}
 	httpServer.UseRouteMiddleware(routeMiddleware...)
 
 	{
 
-		wsWrite, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSWriteTimeout())
-		wsIdle, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSIdleTimeout())
-		wsDial, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSDialTimeout())
-		wsFirst, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSFirstMessageTimeout())
+		wsWrite, _ := time.ParseDuration(cfg.Bootstrap.OpenaiWs.GetOpenAIWSWriteTimeout())
+		wsIdle, _ := time.ParseDuration(cfg.Bootstrap.OpenaiWs.GetOpenAIWSIdleTimeout())
+		wsDial, _ := time.ParseDuration(cfg.Bootstrap.OpenaiWs.GetOpenAIWSDialTimeout())
+		wsFirst, _ := time.ParseDuration(cfg.Bootstrap.OpenaiWs.GetOpenAIWSFirstMessageTimeout())
 
-		wsDrain, _ := time.ParseDuration(cfg.OpenAIWS.GetOpenAIWSDrainTimeout())
+		wsDrain, _ := time.ParseDuration(cfg.Bootstrap.OpenaiWs.GetOpenAIWSDrainTimeout())
 		if wsDrain > 0 {
 			httpServer.SetOpenAIWSDrainConfig(appwsDrainConfig(wsDrain))
 		}
 		httpServer.SetOpenAIWSTimeouts(wsWrite, wsIdle, wsDial, wsFirst)
 		httpServer.SetOpenAIWSConnPool()
 		httpServer.SetOpenAIWSPoolConfig(
-			cfg.OpenAIWS.GetOpenAIWSMaxConnsPerChannel(),
-			cfg.OpenAIWS.GetOpenAIWSFailoverMaxSwitches(),
-			parseDurationOrDefault(cfg.OpenAIWS.GetOpenAIWSStickyTTL(), time.Hour),
+			cfg.Bootstrap.OpenaiWs.GetOpenAIWSMaxConnsPerChannel(),
+			cfg.Bootstrap.OpenaiWs.GetOpenAIWSFailoverMaxSwitches(),
+			parseDurationOrDefault(cfg.Bootstrap.OpenaiWs.GetOpenAIWSStickyTTL(), time.Hour),
 		)
 		httpServer.SetOpenAIWSStickyStore(redisClient)
 	}
@@ -365,16 +364,16 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 
 	grpcSvc := service.NewRelayGrpcService(identityClient, channelClient, billingClient, providerFactory, relayUsecase)
 	var relayGRPCOpts []grpc.ServerOption
-	if cfg.MTLS.Enabled {
-		mtlsOpts, mtlsErr := grpc2.MTLSServerOptions(cfg.MTLS.CertFile, cfg.MTLS.KeyFile, cfg.MTLS.CAFile)
+	if cfg.Bootstrap.Mtls.Enabled {
+		mtlsOpts, mtlsErr := grpc2.MTLSServerOptions(cfg.Bootstrap.Mtls.CertFile, cfg.Bootstrap.Mtls.KeyFile, cfg.Bootstrap.Mtls.CaFile)
 		if mtlsErr != nil {
 			return nil, nil, fmt.Errorf("create relay mTLS server options: %w", mtlsErr)
 		}
 		relayGRPCOpts = append(relayGRPCOpts, mtlsOpts...)
 	}
-	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, grpcSvc, relayGRPCOpts...)
+	grpcSrv := server.NewGRPCServer(cfg.Bootstrap.Server.Grpc.Addr, grpcSvc, relayGRPCOpts...)
 
-	drainTimeout := parseDurationOrDefault(cfg.OpenAIWS.GetOpenAIWSDrainTimeout(), 30*time.Second)
+	drainTimeout := parseDurationOrDefault(cfg.Bootstrap.OpenaiWs.GetOpenAIWSDrainTimeout(), 30*time.Second)
 	stopTimeout := drainTimeout + 10*time.Second
 
 	kratosOpts := []kratos.Option{kratos.Name("relay-gateway"), kratos.Server(srv, grpcSrv), kratos.StopTimeout(stopTimeout), kratos.BeforeStop(func(ctx context.Context) error {
@@ -389,7 +388,7 @@ func newApp(cfg *conf.Config) (*kratos.App, func(), error) {
 	}
 	app := kratos.New(kratosOpts...)
 	logger.Log.
-		Info("relay-gateway starting", zap.String("http_addr", cfg.Server.HTTP.Addr))
+		Info("relay-gateway starting", zap.String("http_addr", cfg.Bootstrap.Server.Http.Addr))
 
 	cleanup := func() {
 		if modelReloadStop != nil {

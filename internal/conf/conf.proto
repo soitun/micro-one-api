@@ -1,0 +1,182 @@
+syntax = "proto3";
+
+package api.relay.v1;
+
+option go_package = "micro-one-api/internal/conf;conf";
+
+// Bootstrap is the top-level configuration loaded from config.yaml.
+message Bootstrap {
+  Server server = 1;
+  Clients clients = 2;
+  Retry retry = 3;
+  Models models = 4;
+  Registry registry = 5;
+  Redis redis = 6;
+  OpenaiWS openai_ws = 7;
+  HybridAdaptor hybrid_adaptor = 8;
+  SessionSticky session_sticky = 9;
+  Subscription subscription = 10;
+  RelayOrchestrator relay_orchestrator = 11;
+  ChannelCache channel_cache = 12;
+  Idempotency idempotency = 13;
+  Audit audit = 14;
+  Resilience resilience = 15;
+  Mtls mtls = 16;
+}
+
+// Server holds the HTTP and gRPC server configuration.
+message Server {
+  HTTP http = 1;
+  GRPC grpc = 2;
+}
+
+message HTTP {
+  string addr = 1 [json_name = "addr"];
+}
+
+message GRPC {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Clients holds the client endpoint configuration.
+message Clients {
+  Identity identity = 1 [json_name = "identity"];
+  Channel channel = 2 [json_name = "channel"];
+  Billing billing = 3 [json_name = "billing"];
+  Log log = 4 [json_name = "log"];
+}
+
+message Identity {
+  string endpoint = 1 [json_name = "endpoint"];
+}
+
+message Channel {
+  string endpoint = 1 [json_name = "endpoint"];
+}
+
+message Billing {
+  string endpoint = 1 [json_name = "endpoint"];
+}
+
+message Log {
+  string endpoint = 1 [json_name = "endpoint"];
+}
+
+// Retry holds retry configuration for upstream provider calls.
+message Retry {
+  int32 max_attempts = 1 [json_name = "max_attempts"];
+  string initial_interval = 2 [json_name = "initial_interval"];
+  string max_interval = 3 [json_name = "max_interval"];
+  double multiplier = 4 [json_name = "multiplier"];
+  repeated int32 retryable_status = 5 [json_name = "retryable_status"];
+}
+
+// ModelsConfig holds model mapping configuration.
+message Models {
+  string path = 1 [json_name = "path"];
+}
+
+// RedisConfig holds Redis configuration.
+message Redis {
+  string addr = 1 [json_name = "addr"];
+  string password = 2 [json_name = "password"];
+}
+
+// Registry holds the service registry configuration.
+message Registry {
+  string type = 1 [json_name = "type"];
+  Consul consul = 2 [json_name = "consul"];
+  map<string, string> metadata = 3 [json_name = "metadata"];
+}
+
+message Consul {
+  string address = 1 [json_name = "address"];
+  int64 health_check_interval = 2 [json_name = "health_check_interval"];
+}
+
+// OpenaiWSConfig holds tunables for the Codex Responses WebSocket relay.
+message OpenaiWS {
+  string write_timeout = 1 [json_name = "write_timeout"];
+  string idle_timeout = 2 [json_name = "idle_timeout"];
+  string dial_timeout = 3 [json_name = "dial_timeout"];
+  string first_message_timeout = 4 [json_name = "first_message_timeout"];
+  int32 max_conns_per_channel = 5 [json_name = "max_conns_per_channel"];
+  int32 failover_max_switches = 6 [json_name = "failover_max_switches"];
+  string sticky_ttl = 7 [json_name = "sticky_ttl"];
+  string drain_timeout = 8 [json_name = "drain_timeout"];
+  string redis_addr = 9 [json_name = "redis_addr"];
+  string redis_password = 10 [json_name = "redis_password"];
+}
+
+// HybridAdaptorConfig controls the hybrid adaptor layer.
+message HybridAdaptor {
+  bool enabled = 1 [json_name = "enabled"];
+  string identity_ttl = 2 [json_name = "identity_ttl"];
+  string refresh_interval = 3 [json_name = "refresh_interval"];
+  string refresh_lookahead = 4 [json_name = "refresh_lookahead"];
+  TokenRefresh token_refresh = 5 [json_name = "token_refresh"];
+  RuntimeBlock runtime_block = 6 [json_name = "runtime_block"];
+}
+
+message TokenRefresh {
+  bool enabled = 1 [json_name = "enabled"];
+  int32 check_interval_minutes = 2 [json_name = "check_interval_minutes"];
+  int32 refresh_before_expiry_hours = 3 [json_name = "refresh_before_expiry_hours"];
+  int32 max_retries = 4 [json_name = "max_retries"];
+  int32 retry_backoff_seconds = 5 [json_name = "retry_backoff_seconds"];
+  string temp_unsched_duration = 6 [json_name = "temp_unsched_duration"];
+}
+
+message RuntimeBlock {
+  string rate_limited_duration = 1 [json_name = "rate_limited_duration"];
+  string unauthorized_duration = 2 [json_name = "unauthorized_duration"];
+  string server_error_duration = 3 [json_name = "server_error_duration"];
+  string overloaded_duration = 4 [json_name = "overloaded_duration"];
+  string active_gauge_interval = 5 [json_name = "active_gauge_interval"];
+}
+
+// SessionStickyConfig gates cross-session subscription-account stickiness.
+message SessionSticky {
+  bool enabled = 1 [json_name = "enabled"];
+}
+
+// SubscriptionConfig controls user subscription quota enforcement.
+message Subscription {
+  bool enabled = 1 [json_name = "enabled"];
+  int32 user_rpm_limit = 2 [json_name = "user_rpm_limit"];
+}
+
+// RelayOrchestratorConfig controls the handler -> orchestrator -> forwarder route.
+message RelayOrchestrator {
+  bool enabled = 1 [json_name = "enabled"];
+}
+
+// ChannelCacheConfig controls the multi-level ChannelCache.
+message ChannelCache {
+  bool enabled = 1 [json_name = "enabled"];
+}
+
+// IdempotencyConfig controls idempotency middleware.
+message Idempotency {
+  bool enabled = 1 [json_name = "enabled"];
+  string ttl = 2 [json_name = "ttl"];
+}
+
+// AuditConfig controls audit logging.
+message Audit {
+  bool enabled = 1 [json_name = "enabled"];
+}
+
+// ResilienceConfig controls resilience features.
+message Resilience {
+  bool enabled = 1 [json_name = "enabled"];
+  string timeout = 2 [json_name = "timeout"];
+}
+
+// MtlsConfig controls mTLS configuration.
+message Mtls {
+  bool enabled = 1 [json_name = "enabled"];
+  string cert_file = 2 [json_name = "cert_file"];
+  string key_file = 3 [json_name = "key_file"];
+  string ca_file = 4 [json_name = "ca_file"];
+}

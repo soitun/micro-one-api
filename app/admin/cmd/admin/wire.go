@@ -12,10 +12,10 @@ import (
 	channelv1 "micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
 	"micro-one-api/app/admin/internal/biz"
-	admincfg "micro-one-api/app/admin/internal/conf"
 	"micro-one-api/app/admin/internal/server"
 	"micro-one-api/app/admin/internal/service"
 
+	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	appregistry "micro-one-api/platform/registry"
 )
 
@@ -47,8 +47,8 @@ type registrarResult struct {
 	Registrar kregistry.Registrar
 }
 
-func provideRegistrar(cfg *admincfg.Config) registrarResult {
-	registrar, err := appregistry.NewRegistrar(cfg.Registry)
+func provideRegistrar(cfg *Config) registrarResult {
+	registrar, err := appregistry.NewRegistrar(cfg.Registry())
 	if err != nil {
 		return registrarResult{}
 	}
@@ -64,7 +64,7 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 }
 
 func newApp(
-	cfg *admincfg.Config,
+	cfg *Config,
 	clients *clientsResult,
 	sub subscriptionResult,
 	svc *service.AdminService,
@@ -77,7 +77,15 @@ func newApp(
 	}
 
 	grpcSrv := newGRPCServer(cfg, svc)
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc, cfg.Clients.Identity.HTTPEndpoint, cfg.Server.HTTP.WebRoot)
+
+	// Build HTTP server with nil-safety checks.
+	var httpSrv *khttp.Server
+	if cfg.Bootstrap != nil && cfg.Bootstrap.Server != nil && cfg.Bootstrap.Server.Http != nil &&
+		cfg.Bootstrap.Clients != nil && cfg.Bootstrap.Clients.Identity != nil {
+		httpSrv = server.NewHTTPServer(cfg.Bootstrap.Server.Http.Addr, svc, cfg.Bootstrap.Clients.Identity.HttpEndpoint, cfg.Bootstrap.Server.Http.WebRoot)
+	} else {
+		httpSrv = server.NewHTTPServer("", svc, "", "")
+	}
 
 	opts := []kratos.Option{
 		kratos.Name("admin-api"),
@@ -91,8 +99,10 @@ func newApp(
 	startSignalHandler(appSignalStopper{app})
 
 	return app, func() {
-		clients.identityConn.Close()
-		clients.channelConn.Close()
-		clients.billingConn.Close()
+		if clients != nil {
+			clients.identityConn.Close()
+			clients.channelConn.Close()
+			clients.billingConn.Close()
+		}
 	}
 }

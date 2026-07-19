@@ -16,7 +16,6 @@ import (
 	channelv1 "micro-one-api/api/channel/v1"
 	identityv1 "micro-one-api/api/identity/v1"
 	"micro-one-api/app/admin/internal/biz"
-	admincfg "micro-one-api/app/admin/internal/conf"
 	"micro-one-api/app/admin/internal/data"
 	"micro-one-api/app/admin/internal/service"
 	"micro-one-api/platform/database/xdb"
@@ -43,21 +42,31 @@ type clientsResult struct {
 
 // newClients dials the identity, channel, and billing services via the
 // resolver, returning proto clients and their underlying connections.
-func newClients(cfg *admincfg.Config) (*clientsResult, error) {
-	discovery, dErr := appregistry.NewDiscovery(cfg.Registry)
+func newClients(cfg *Config) (*clientsResult, error) {
+	if cfg.Bootstrap == nil || cfg.Bootstrap.Registry == nil || cfg.Bootstrap.Clients == nil {
+		return nil, fmt.Errorf("invalid config: missing bootstrap, registry, or clients")
+	}
+
+	discovery, dErr := appregistry.NewDiscovery(cfg.Registry())
 	if dErr != nil {
 		applogger.Log.Warn("failed to create service discovery", zap.Error(dErr))
 	}
-	registrar, rErr := appregistry.NewRegistrar(cfg.Registry)
+	registrar, rErr := appregistry.NewRegistrar(cfg.Registry())
 	_ = registrar
 	if rErr != nil {
 		applogger.Log.Warn("failed to create registrar", zap.Error(rErr))
 	}
 
 	resolver := appregistry.NewResolver(discovery)
-	resolver.SetStatic("identity-service", cfg.Clients.Identity.Endpoint)
-	resolver.SetStatic("channel-service", cfg.Clients.Channel.Endpoint)
-	resolver.SetStatic("billing-service", cfg.Clients.Billing.Endpoint)
+	if cfg.Bootstrap.Clients.Identity != nil {
+		resolver.SetStatic("identity-service", cfg.Bootstrap.Clients.Identity.Endpoint)
+	}
+	if cfg.Bootstrap.Clients.Channel != nil {
+		resolver.SetStatic("channel-service", cfg.Bootstrap.Clients.Channel.Endpoint)
+	}
+	if cfg.Bootstrap.Clients.Billing != nil {
+		resolver.SetStatic("billing-service", cfg.Bootstrap.Clients.Billing.Endpoint)
+	}
 
 	identityEndpoint, _ := resolver.ResolveGRPC(context.Background(), "identity-service")
 	channelEndpoint, _ := resolver.ResolveGRPC(context.Background(), "channel-service")
@@ -101,17 +110,20 @@ type systemOptionsResult struct {
 
 // newSystemOptionsRepo opens the system-options DB if configured, returning
 // a zero value (nil repo) when DB is not available.
-func newSystemOptionsRepo(cfg *admincfg.Config) systemOptionsResult {
-	if cfg.Data.Database.Source == "" {
+func newSystemOptionsRepo(cfg *Config) systemOptionsResult {
+	if cfg.Bootstrap == nil || cfg.Bootstrap.Data == nil || cfg.Bootstrap.Data.Database == nil {
 		return systemOptionsResult{}
 	}
-	source := resolveAdminSchemaDSN(cfg.Data.Database.Driver, cfg.Data.Database.Source)
-	db, dbErr := xdb.OpenSQL(cfg.Data.Database.Driver, source)
+	if cfg.Bootstrap.Data.Database.Source == "" {
+		return systemOptionsResult{}
+	}
+	source := resolveAdminSchemaDSN(cfg.Bootstrap.Data.Database.Driver, cfg.Bootstrap.Data.Database.Source)
+	db, dbErr := xdb.OpenSQL(cfg.Bootstrap.Data.Database.Driver, source)
 	if dbErr != nil {
 		applogger.Log.Warn("failed to connect to system options DB", zap.Error(dbErr))
 		return systemOptionsResult{}
 	}
-	return systemOptionsResult{Repo: data.NewSystemOptionsRepoWithDriver(db, cfg.Data.Database.Driver)}
+	return systemOptionsResult{Repo: data.NewSystemOptionsRepoWithDriver(db, cfg.Bootstrap.Data.Database.Driver)}
 }
 
 // subscriptionResult wraps the optional subscription usecase.
@@ -122,12 +134,15 @@ type subscriptionResult struct {
 }
 
 // newSubscriptionUsecases opens the subscription DB if configured.
-func newSubscriptionUsecases(cfg *admincfg.Config) subscriptionResult {
-	if cfg.Data.Database.Source == "" {
+func newSubscriptionUsecases(cfg *Config) subscriptionResult {
+	if cfg.Bootstrap == nil || cfg.Bootstrap.Data == nil || cfg.Bootstrap.Data.Database == nil {
 		return subscriptionResult{}
 	}
-	driver := cfg.Data.Database.Driver
-	source := resolveAdminSchemaDSN(cfg.Data.Database.Driver, cfg.Data.Database.Source)
+	if cfg.Bootstrap.Data.Database.Source == "" {
+		return subscriptionResult{}
+	}
+	driver := cfg.Bootstrap.Data.Database.Driver
+	source := resolveAdminSchemaDSN(cfg.Bootstrap.Data.Database.Driver, cfg.Bootstrap.Data.Database.Source)
 	repo, subErr := subscriptiondata.NewRepositoryFromEnv(driver, source)
 	if subErr != nil {
 		applogger.Log.Warn("failed to connect to subscription DB", zap.Error(subErr))
@@ -141,8 +156,11 @@ func newSubscriptionUsecases(cfg *admincfg.Config) subscriptionResult {
 }
 
 // newGRPCServer creates the admin gRPC server and registers the AdminService.
-func newGRPCServer(cfg *admincfg.Config, svc *service.AdminService) *grpcx.Server {
-	grpcSrv := grpcx.NewServer(grpcx.Address(cfg.Server.GRPC.Addr))
+func newGRPCServer(cfg *Config, svc *service.AdminService) *grpcx.Server {
+	if cfg.Bootstrap == nil || cfg.Bootstrap.Server == nil || cfg.Bootstrap.Server.Grpc == nil {
+		return grpcx.NewServer()
+	}
+	grpcSrv := grpcx.NewServer(grpcx.Address(cfg.Bootstrap.Server.Grpc.Addr))
 	adminv1.RegisterAdminServiceServer(grpcSrv, svc)
 	return grpcSrv
 }

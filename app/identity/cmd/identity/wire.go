@@ -9,7 +9,6 @@ import (
 	"github.com/google/wire"
 
 	"micro-one-api/app/identity/internal/biz"
-	identitycfg "micro-one-api/app/identity/internal/conf"
 	"micro-one-api/app/identity/internal/data"
 	"micro-one-api/app/identity/internal/server"
 	"micro-one-api/app/identity/internal/service"
@@ -27,16 +26,16 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(biz.IdentityRepo), new(*data.Repository)),
 )
 
-func newRepo(cfg *identitycfg.Config) (*data.Repository, error) {
-	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
+func newRepo(cfg *Config) (*data.Repository, error) {
+	return data.NewRepositoryFromEnv(cfg.Bootstrap.Data.Database.Driver, cfg.Bootstrap.Data.Database.Source, cfg.Bootstrap.Data.Database.Schema)
 }
 
 type registrarResult struct {
 	Registrar kregistry.Registrar
 }
 
-func provideRegistrar(cfg *identitycfg.Config) registrarResult {
-	registrar, err := appregistry.NewRegistrar(cfg.Registry)
+func provideRegistrar(cfg *Config) registrarResult {
+	registrar, err := appregistry.NewRegistrar(cfg.Registry())
 	if err != nil {
 		return registrarResult{}
 	}
@@ -53,17 +52,17 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 }
 
 func newApp(
-	cfg *identitycfg.Config,
+	cfg *Config,
 	uc *biz.IdentityUsecase,
 	svc *service.IdentityService,
 	oauthRegistry *oauth.ProviderRegistry,
 	reg registrarResult,
 ) (*kratos.App, func()) {
 	bootstrapAdmin(uc)
-	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
+	grpcSrv := server.NewGRPCServer(cfg.Bootstrap.Server.Grpc.Addr, svc)
 	billingClient, billingConn, _ := newBillingClient(cfg)
 	httpSrv := server.NewHTTPServerWithRegistrationPolicy(
-		cfg.Server.HTTP.Addr, uc, oauthRegistry,
+		cfg.Bootstrap.Server.Http.Addr, uc, oauthRegistry,
 		registrationPolicyFromConfig(cfg), billingClient,
 	)
 	opts := []kratos.Option{

@@ -12,7 +12,6 @@ import (
 	"github.com/google/wire"
 
 	"micro-one-api/app/log/internal/biz"
-	logcfg "micro-one-api/app/log/internal/conf"
 	"micro-one-api/app/log/internal/data"
 	"micro-one-api/app/log/internal/server"
 	"micro-one-api/app/log/internal/service"
@@ -33,16 +32,16 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(biz.LogRepo), new(*data.Repository)),
 )
 
-func newRepo(cfg *logcfg.Config) (*data.Repository, error) {
-	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
+func newRepo(cfg *Config) (*data.Repository, error) {
+	return data.NewRepositoryFromEnv(cfg.Bootstrap.Data.Database.Driver, cfg.Bootstrap.Data.Database.Source, cfg.Bootstrap.Data.Database.Schema)
 }
 
 type registrarResult struct {
 	Registrar registry.Registrar
 }
 
-func provideRegistrar(cfg *logcfg.Config) registrarResult {
-	registrar, err := appregistry.NewRegistrar(cfg.Registry)
+func provideRegistrar(cfg *Config) registrarResult {
+	registrar, err := appregistry.NewRegistrar(cfg.Registry())
 	if err != nil {
 		return registrarResult{}
 	}
@@ -57,12 +56,19 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	))
 }
 
-func newApp(cfg *logcfg.Config, repo *data.Repository, uc *biz.LogUsecase, svc *service.LogService, reg registrarResult) (*kratos.App, func()) {
-	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc)
-	cleanupRetention := startLogRetentionCleanup(uc, cfg.Log.RetentionDays)
+func newApp(cfg *Config, repo *data.Repository, uc *biz.LogUsecase, svc *service.LogService, reg registrarResult) (*kratos.App, func()) {
+	grpcSrv := server.NewGRPCServer(cfg.Bootstrap.Server.Grpc.Addr, svc)
+	httpSrv := server.NewHTTPServer(cfg.Bootstrap.Server.Http.Addr, svc)
+
+	// Parse retention days with fallback to 30.
+	retentionDays := 30
+	if cfg.Bootstrap.LogSvc != nil && cfg.Bootstrap.LogSvc.RetentionDays > 0 {
+		retentionDays = int(cfg.Bootstrap.LogSvc.RetentionDays)
+	}
+	cleanupRetention := startLogRetentionCleanup(uc, retentionDays)
+
 	partitionCtx, partitionCancel := context.WithCancel(context.Background())
-	partitionStop := startPartitionMaintenance(partitionCtx, repo.DB(), cfg.Partition)
+	partitionStop := startPartitionMaintenance(partitionCtx, repo.DB(), cfg.Bootstrap.Partition)
 
 	// Phase 2.3: optional async batch log writer. When disabled (default),
 	// LogUsecase.IngestLog falls back to synchronous repo.Create; when
@@ -71,12 +77,20 @@ func newApp(cfg *logcfg.Config, repo *data.Repository, uc *biz.LogUsecase, svc *
 	// log latency. The writer's lifecycle is tied to the app cleanup.
 	var batchWriter *biz.BatchLogWriter
 	var batchStop func()
-	if cfg.Log.BatchEnabled {
-		batchSize := cfg.Log.BatchSize
+	if cfg.Bootstrap.LogSvc != nil && cfg.Bootstrap.LogSvc.BatchEnabled {
+		batchSize := int(cfg.Bootstrap.LogSvc.BatchSize)
 		if batchSize <= 0 {
 			batchSize = 100
 		}
-		flushInterval := parseLogFlushInterval(cfg.Log.BatchFlushInterval, time.Second)
+
+		// Parse batch flush interval with fallback to 1s.
+		flushInterval := time.Second
+		if cfg.Bootstrap.LogSvc.BatchFlushInterval != nil {
+			if d := cfg.Bootstrap.LogSvc.BatchFlushInterval.AsDuration(); d > 0 {
+				flushInterval = d
+			}
+		}
+
 		batchWriter = biz.NewBatchLogWriter(repo, batchSize, flushInterval)
 		batchWriter.Start()
 		uc.SetBatchWriter(batchWriter)
@@ -106,17 +120,4 @@ func newApp(cfg *logcfg.Config, repo *data.Repository, uc *biz.LogUsecase, svc *
 			batchStop()
 		}
 	}
-}
-
-// parseLogFlushInterval parses a duration string with a fallback. Empty or
-// unparsable values fall back to the provided default so a missing config
-// field never blocks the writer.
-func parseLogFlushInterval(raw string, fallback time.Duration) time.Duration {
-	if raw == "" {
-		return fallback
-	}
-	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
-		return d
-	}
-	return fallback
 }

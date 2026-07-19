@@ -9,7 +9,6 @@ import (
 	"github.com/google/wire"
 
 	"micro-one-api/app/monitor/internal/biz"
-	monitorcfg "micro-one-api/app/monitor/internal/conf"
 	"micro-one-api/app/monitor/internal/data"
 	"micro-one-api/app/monitor/internal/server"
 	"micro-one-api/app/monitor/internal/service"
@@ -27,16 +26,16 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(biz.MonitorRepo), new(*data.Repository)),
 )
 
-func newRepo(cfg *monitorcfg.Config) (*data.Repository, error) {
-	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
+func newRepo(cfg *Config) (*data.Repository, error) {
+	return data.NewRepositoryFromEnv(cfg.Bootstrap.Data.Database.Driver, cfg.Bootstrap.Data.Database.Source, cfg.Bootstrap.Data.Database.Schema)
 }
 
 type registrarResult struct {
 	Registrar registry.Registrar
 }
 
-func provideRegistrar(cfg *monitorcfg.Config) registrarResult {
-	registrar, err := appregistry.NewRegistrar(cfg.Registry)
+func provideRegistrar(cfg *Config) registrarResult {
+	registrar, err := appregistry.NewRegistrar(cfg.Registry())
 	if err != nil {
 		return registrarResult{}
 	}
@@ -51,9 +50,9 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	))
 }
 
-func newApp(cfg *monitorcfg.Config, svc *service.MonitorService, reg registrarResult) (*kratos.App, func()) {
-	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc)
+func newApp(cfg *Config, svc *service.MonitorService, reg registrarResult) (*kratos.App, func()) {
+	grpcSrv := server.NewGRPCServer(cfg.Bootstrap.Server.Grpc.Addr, svc)
+	httpSrv := server.NewHTTPServer(cfg.Bootstrap.Server.Http.Addr, svc)
 	_, channelCleanup := newChannelHealthChecker(cfg)
 	opts := []kratos.Option{
 		kratos.Name("monitor-worker"),
@@ -70,6 +69,6 @@ func newApp(cfg *monitorcfg.Config, svc *service.MonitorService, reg registrarRe
 	}
 }
 
-func newChannelHealthChecker(cfg *monitorcfg.Config) (*biz.ChannelHealthChecker, func()) {
+func newChannelHealthChecker(cfg *Config) (*biz.ChannelHealthChecker, func()) {
 	return newChannelHealthCheckerImpl(cfg)
 }

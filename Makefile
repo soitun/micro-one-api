@@ -9,9 +9,11 @@ PROTOC_GEN_OPENAPI_VERSION := v0.7.1
 ifeq ($(GOHOSTOS), windows)
 Git_Bash := $(subst \,/,$(subst cmd\,bin\bash.exe,$(dir $(shell where git))))
 INTERNAL_PROTO_FILES := $(shell $(Git_Bash) -c "find app -name "*.proto"")
+INTERNAL_CONF_PROTO_FILES := $(shell $(Git_Bash) -c "find internal/conf -name "*.proto" 2>/dev/null")
 API_PROTO_FILES := $(shell $(Git_Bash) -c "find api -name '*.proto' ! -path 'api/openapi.yaml'")
 else
 INTERNAL_PROTO_FILES := $(shell find app -name "*.proto")
+INTERNAL_CONF_PROTO_FILES := $(shell find internal/conf -name "*.proto" 2>/dev/null)
 API_PROTO_FILES := $(shell find api -name '*.proto')
 endif
 PROTO_SYSTEM_INCLUDE_DIRS := $(strip $(foreach dir,/usr/include /usr/local/include /opt/homebrew/include,$(if $(wildcard $(dir)/google/protobuf/descriptor.proto),--proto_path=$(dir))))
@@ -35,8 +37,9 @@ proto-tools:
 	go install github.com/google/gnostic/cmd/protoc-gen-openapi@$(PROTOC_GEN_OPENAPI_VERSION)
 
 .PHONY: config
-# generate internal proto
+# generate internal proto (app/*/internal/conf/*.proto + internal/conf/*.proto)
 config:
+	@# Generate app/* internal conf proto
 ifneq ($(strip $(INTERNAL_PROTO_FILES)),)
 	protoc --proto_path=./app \
 		--proto_path=./third_party \
@@ -44,7 +47,17 @@ ifneq ($(strip $(INTERNAL_PROTO_FILES)),)
 		--go_out=paths=source_relative:./app \
 		$(INTERNAL_PROTO_FILES)
 else
-	@echo "no internal proto files"
+	@echo "no app internal proto files"
+endif
+	@# Generate relay-gateway internal conf proto
+ifneq ($(strip $(INTERNAL_CONF_PROTO_FILES)),)
+	protoc --proto_path=./internal/conf \
+		--proto_path=./third_party \
+		$(PROTO_SYSTEM_INCLUDE_DIRS) \
+		--go_out=paths=source_relative:./internal/conf \
+		$(INTERNAL_CONF_PROTO_FILES)
+else
+	@echo "no internal/conf proto files"
 endif
 
 .PHONY: api

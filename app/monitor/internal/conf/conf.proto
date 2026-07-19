@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package api.monitor.v1;
+
+option go_package = "micro-one-api/app/monitor/internal/conf;conf";
+
+import "google/protobuf/duration.proto";
+
+// Bootstrap is the top-level configuration loaded from config.yaml.
+message Bootstrap {
+  Server server = 1;
+  Data data = 2;
+  Registry registry = 3;
+  MonitorSvc monitor_svc = 4;
+  Clients clients = 5;
+}
+
+// Server holds the HTTP and gRPC server configuration.
+message Server {
+  HTTP http = 1;
+  GRPC grpc = 2;
+}
+
+message HTTP {
+  string addr = 1 [json_name = "addr"];
+}
+
+message GRPC {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Data holds the database and Redis configuration.
+message Data {
+  Database database = 1;
+  Redis redis = 2;
+}
+
+message Database {
+  string driver = 1 [json_name = "driver"];
+  string source = 2 [json_name = "source"];
+  // Schema isolates this service to a specific database schema (Phase 2.4).
+  string schema = 3 [json_name = "schema"];
+}
+
+message Redis {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Registry holds the service registry configuration.
+message Registry {
+  string type = 1 [json_name = "type"];
+  Consul consul = 2 [json_name = "consul"];
+  map<string, string> metadata = 3 [json_name = "metadata"];
+}
+
+message Consul {
+  string address = 1 [json_name = "address"];
+  int64 health_check_interval = 2 [json_name = "health_check_interval"];
+}
+
+// MonitorSvc holds the monitor-worker-specific settings.
+message MonitorSvc {
+  // CollectIntervalSec is the metrics collection interval in seconds.
+  int32 collect_interval_sec = 1 [json_name = "collect_interval_sec"];
+  // AlertRetentionDays is how many days to keep alert history.
+  int32 alert_retention_days = 2 [json_name = "alert_retention_days"];
+  // NotifyEmail is the recipient for alert notifications.
+  string notify_email = 3 [json_name = "notify_email"];
+  // ChannelHealthCheckEnabled enables periodic upstream channel probes.
+  bool channel_health_check_enabled = 4 [json_name = "channel_health_check_enabled"];
+  // ChannelHealthCheckInterval is the probe interval.
+  google.protobuf.Duration channel_health_check_interval = 5 [json_name = "channel_health_check_interval"];
+  // ChannelHealthCheckTimeout is the per-channel probe timeout.
+  google.protobuf.Duration channel_health_check_timeout = 6 [json_name = "channel_health_check_timeout"];
+}
+
+// Clients holds the client endpoint configuration.
+message Clients {
+  Channel channel = 1 [json_name = "channel"];
+}
+
+message Channel {
+  string endpoint = 1 [json_name = "endpoint"];
+}

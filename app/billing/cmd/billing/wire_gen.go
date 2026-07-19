@@ -11,13 +11,14 @@ import (
 	"fmt"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/registry"
+	grpc2 "github.com/go-kratos/kratos/v2/transport/grpc"
+	"github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/google/wire"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"micro-one-api/api/notify/v1"
 	"micro-one-api/app/billing/internal/biz"
-	"micro-one-api/app/billing/internal/conf"
 	"micro-one-api/app/billing/internal/data"
 	"micro-one-api/app/billing/internal/server"
 	"micro-one-api/app/billing/internal/service"
@@ -60,32 +61,39 @@ var ProviderSet = wire.NewSet(
 	provideRegistrar,
 )
 
-func newData(cfg *conf.Config) (*data.Data, error) {
-	return data.NewData(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
+func newData(cfg *Config) (*data.Data, error) {
+	return data.NewData(cfg.Bootstrap.Data.Database.Driver, cfg.Bootstrap.Data.Database.Source, cfg.Bootstrap.Data.Database.Schema)
 }
 
 type registrarResult struct {
 	Registrar registry.Registrar
 }
 
-func provideRegistrar(cfg *conf.Config) registrarResult {
-	registrar, err := registry2.NewRegistrar(cfg.Registry)
+func provideRegistrar(cfg *Config) registrarResult {
+	registrar, err := registry2.NewRegistrar(cfg.Registry())
 	if err != nil {
 		return registrarResult{}
 	}
 	return registrarResult{Registrar: registrar}
 }
 
-func newApp(cfg *conf.Config, d *data.Data, reg registrarResult) (*kratos.App, func()) {
+func newApp(cfg *Config, d *data.Data, reg registrarResult) (*kratos.App, func()) {
+	if cfg.Bootstrap == nil {
+		panic("config bootstrap is nil")
+	}
+
 	pricing := biz.PricingConfig{
-		GroupRatios:      cfg.Billing.GroupRatios,
-		ModelRatios:      cfg.Billing.ModelRatios,
-		CompletionRatios: cfg.Billing.CompletionRatios,
-		PricingStore:     d.PricingConfigStore(),
+		PricingStore: d.PricingConfigStore(),
+	}
+	if cfg.Bootstrap.Billing != nil {
+		pricing.GroupRatios = cfg.Bootstrap.Billing.GroupRatios
+		pricing.ModelRatios = cfg.Bootstrap.Billing.ModelRatios
+		pricing.CompletionRatios = cfg.Bootstrap.Billing.CompletionRatios
 	}
 	if len(pricing.GroupRatios) == 0 {
 		pricing.GroupRatios = biz.DefaultGroupRatios()
 	}
+
 	subscriptionRepo := data2.NewRepository(d.DB(), d.Redis())
 	subscriptionUc := biz2.NewSubscriptionUsecase(subscriptionRepo, subscriptionRepo)
 	uc := biz.NewBillingUsecaseWithPricing(
@@ -97,28 +105,43 @@ func newApp(cfg *conf.Config, d *data.Data, reg registrarResult) (*kratos.App, f
 	)
 	uc.SetSubscriptionPrimatives(subscriptionUc)
 	uc.SetReceivableRepo(d.ReceivableRepo())
+
 	var asyncBilling *biz.AsyncBillingUsecase
-	if cfg.Billing.Async.Enabled {
+	if cfg.Bootstrap.Billing != nil && cfg.Bootstrap.Billing.Async != nil && cfg.Bootstrap.Billing.Async.Enabled {
+		asyncCfg := cfg.Bootstrap.Billing.Async
 		asyncBilling = biz.NewAsyncBillingUsecase(
 			uc,
 			d.Redis(),
-			defaultInt(cfg.Billing.Async.QueueSize, 1000),
-			defaultInt(cfg.Billing.Async.BatchSize, 100),
-			parseDurationOrDefault(cfg.Billing.Async.BatchInterval, 5*time.Second),
+			defaultInt(int(asyncCfg.QueueSize), 1000),
+			defaultInt(int(asyncCfg.BatchSize), 100),
+			parseDurationOrDefault(asyncCfg.BatchInterval, 5*time.Second),
 		)
 	}
+
 	reconUc := biz.NewReconciliationUsecase(
 		d.AccountRepo(),
 		d.ReservationRepo(),
 		d.ReconciliationRepo(),
 		d.ReconciliationRunStore(),
 	)
-	paymentProvider := biz.NewConfiguredPaymentProvider(cfg.Payment)
+
+	var paymentProvider biz.PaymentProvider
+	if cfg.Bootstrap.Payment != nil {
+		paymentProvider = biz.NewConfiguredPaymentProvider(cfg.Bootstrap.Payment.ToPaymentConfig())
+	} else {
+		paymentProvider = biz.NewConfiguredPaymentProvider(biz.PaymentConfig{})
+	}
 	paymentAssetIssuer := biz.NewPaymentAssetIssuer(uc)
 	paymentSubscriptionAssigner := biz.NewPaymentSubscriptionAssigner(subscriptionUc, subscriptionRepo, subscriptionRepo)
 	planSnapshotter := biz.NewPaymentPlanSnapshotter(subscriptionRepo)
 	paymentUc := biz.NewPaymentUsecaseWithAssignerAndSnapshotter(d.PaymentRepo(), paymentProvider, paymentAssetIssuer, paymentSubscriptionAssigner, planSnapshotter)
-	alipayVerifier := biz.NewAlipayPaymentProvider(cfg.Payment.Alipay)
+
+	var alipayVerifier biz.PaymentNotifyVerifier
+	if cfg.Bootstrap.Payment != nil && cfg.Bootstrap.Payment.Alipay != nil {
+		alipayVerifier = biz.NewAlipayPaymentProvider(cfg.Bootstrap.Payment.ToPaymentConfig().Alipay)
+	} else {
+		alipayVerifier = biz.NewAlipayPaymentProvider(biz.AlipayConfig{})
+	}
 	svc := service.NewBillingService(uc, reconUc, paymentUc, alipayVerifier)
 
 	refundUc := biz.NewRefundUsecase(d.PaymentRepo(), d.AccountRepo(), d.LedgerRepo(), subscriptionUc)
@@ -135,32 +158,54 @@ func newApp(cfg *conf.Config, d *data.Data, reg registrarResult) (*kratos.App, f
 	var notifier biz.Notifier = biz.NoopNotifier()
 	interval := 1 * time.Hour
 	recipients := []string{""}
-	if cfg.Recon.Enabled {
-		if cfg.Recon.Interval != "" {
-			if d, parseErr := time.ParseDuration(cfg.Recon.Interval); parseErr == nil && d > 0 {
+	if cfg.Bootstrap.Recon != nil && cfg.Bootstrap.Recon.Enabled {
+		if cfg.Bootstrap.Recon.Interval != "" {
+			if d, parseErr := time.ParseDuration(cfg.Bootstrap.Recon.Interval); parseErr == nil && d > 0 {
 				interval = d
 			}
 		}
-		if len(cfg.Recon.Recipients) > 0 {
-			recipients = cfg.Recon.Recipients
+		if len(cfg.Bootstrap.Recon.Recipients) > 0 {
+			recipients = cfg.Bootstrap.Recon.Recipients
 		}
-		if cfg.Clients.Notify.Endpoint != "" {
+		if cfg.Bootstrap.Clients != nil && cfg.Bootstrap.Clients.Notify != nil && cfg.Bootstrap.Clients.Notify.Endpoint != "" {
 			var err error
-			notifyConn, err = grpc.NewClient(cfg.Clients.Notify.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			notifyConn, err = grpc.NewClient(cfg.Bootstrap.Clients.Notify.Endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 			if err != nil {
 				logger.Log.
 					Error("dial notify endpoint", zap.Error(err))
 			} else {
 				client := notifyv1.NewNotifyServiceClient(notifyConn)
-				notifier = newGRPCNotifier(client, cfg.Clients.Notify.NotifyType)
+				notifyType := ""
+				if cfg.Bootstrap.Clients.Notify != nil {
+					notifyType = cfg.Bootstrap.Clients.Notify.NotifyType
+				}
+				notifier = newGRPCNotifier(client, notifyType)
 			}
 		}
 	}
 
-	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc)
+	var grpcSrv *grpc2.Server = nil
+	var httpSrv *http.Server = nil
+	if cfg.Bootstrap.Server != nil {
+		if cfg.Bootstrap.Server.Grpc != nil {
+			grpcSrv = server.NewGRPCServer(cfg.Bootstrap.Server.Grpc.Addr, svc)
+		}
+		if cfg.Bootstrap.Server.Http != nil {
+			httpSrv = server.NewHTTPServer(cfg.Bootstrap.Server.Http.Addr, svc)
+		}
+	}
 
-	opts := []kratos.Option{kratos.Name("billing-service"), kratos.Server(grpcSrv, httpSrv)}
+	opts := []kratos.Option{kratos.Name("billing-service")}
+	if grpcSrv != nil {
+		opts = append(opts, kratos.Server(grpcSrv))
+	}
+	if httpSrv != nil {
+		if grpcSrv == nil {
+			opts = append(opts, kratos.Server(httpSrv))
+		} else {
+			opts[len(opts)-1] = kratos.Server(grpcSrv, httpSrv)
+		}
+	}
 	if reg.Registrar != nil {
 		opts = append(opts, kratos.Registrar(reg.Registrar))
 	}
@@ -168,11 +213,14 @@ func newApp(cfg *conf.Config, d *data.Data, reg registrarResult) (*kratos.App, f
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cleanupJob := biz.NewCleanupJob(uc, 1*time.Minute)
-	reconJobOpts := []biz.JobOption{biz.WithNotifier(notifier), biz.WithRecipients(recipients), biz.WithNotifyType(cfg.Clients.Notify.NotifyType)}
+	reconJobOpts := []biz.JobOption{biz.WithNotifier(notifier), biz.WithRecipients(recipients)}
+	if cfg.Bootstrap.Clients != nil && cfg.Bootstrap.Clients.Notify != nil {
+		reconJobOpts = append(reconJobOpts, biz.WithNotifyType(cfg.Bootstrap.Clients.Notify.NotifyType))
+	}
 	reconJob := biz.NewReconciliationJob(reconUc, interval, reconJobOpts...)
 	go cleanupJob.Start(ctx)
 	go reconJob.Start(ctx)
-	partitionStop := startPartitionMaintenance(ctx, d.DB(), cfg.Partition)
+	partitionStop := startPartitionMaintenance(ctx, d.DB(), cfg.Bootstrap.Partition)
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

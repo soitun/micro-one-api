@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package api.billing.v1;
+
+option go_package = "micro-one-api/app/billing/internal/conf;conf";
+
+// Bootstrap is the top-level configuration loaded from config.yaml.
+message Bootstrap {
+  Server server = 1;
+  Data data = 2;
+  Billing billing = 3;
+  Payment payment = 4;
+  Clients clients = 5;
+  Recon recon = 6;
+  Partition partition = 7;
+  Registry registry = 8;
+}
+
+// Server holds the HTTP and gRPC server configuration.
+message Server {
+  HTTP http = 1;
+  GRPC grpc = 2;
+}
+
+message HTTP {
+  string addr = 1 [json_name = "addr"];
+}
+
+message GRPC {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Data holds the database and Redis configuration.
+message Data {
+  Database database = 1;
+  Redis redis = 2;
+}
+
+message Database {
+  string driver = 1 [json_name = "driver"];
+  string source = 2 [json_name = "source"];
+  // Schema isolates this service to a specific database schema (Phase 2.4).
+  string schema = 3 [json_name = "schema"];
+}
+
+message Redis {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Billing holds the billing-service-specific settings.
+message Billing {
+  string reservation_timeout = 1 [json_name = "reservation_timeout"];
+  map<string, double> group_ratios = 2 [json_name = "group_ratios"];
+  map<string, double> model_ratios = 3 [json_name = "model_ratios"];
+  map<string, double> completion_ratios = 4 [json_name = "completion_ratios"];
+  AsyncBilling async = 5 [json_name = "async"];
+}
+
+message AsyncBilling {
+  bool enabled = 1 [json_name = "enabled"];
+  int32 queue_size = 2 [json_name = "queue_size"];
+  int32 batch_size = 3 [json_name = "batch_size"];
+  string batch_interval = 4 [json_name = "batch_interval"];
+}
+
+// Payment holds the payment configuration.
+message Payment {
+  int64 amount_per_unit = 1 [json_name = "amount_per_unit"];
+  Alipay alipay = 2 [json_name = "alipay"];
+}
+
+message Alipay {
+  bool enabled = 1 [json_name = "enabled"];
+  string form_url = 2 [json_name = "form_url"];
+  string app_id = 3 [json_name = "app_id"];
+  string private_key = 4 [json_name = "private_key"];
+  string private_key_path = 5 [json_name = "private_key_path"];
+  string public_key = 6 [json_name = "public_key"];
+  string public_key_path = 7 [json_name = "public_key_path"];
+  string notify_url = 8 [json_name = "notify_url"];
+  string return_url = 9 [json_name = "return_url"];
+  string app_cert_path = 10 [json_name = "app_cert_path"];
+  string root_cert_path = 11 [json_name = "root_cert_path"];
+  string alipay_public_cert_path = 12 [json_name = "alipay_public_cert_path"];
+}
+
+// Clients holds the gRPC endpoints for downstream services.
+message Clients {
+  Notify notify = 1 [json_name = "notify"];
+}
+
+message Notify {
+  string endpoint = 1 [json_name = "endpoint"];
+  string notify_type = 2 [json_name = "notify_type"];
+}
+
+// ReconAlertConfig configures reconciliation job alert delivery.
+message Recon {
+  bool enabled = 1 [json_name = "enabled"];
+  repeated string recipients = 2 [json_name = "recipients"];
+  string interval = 3 [json_name = "interval"];
+}
+
+// PartitionConfig controls periodic table-partition maintenance.
+message Partition {
+  bool enabled = 1 [json_name = "enabled"];
+  string interval = 2 [json_name = "interval"];
+  repeated string tables = 3 [json_name = "tables"];
+}
+
+// Registry holds the service registry configuration.
+message Registry {
+  string type = 1 [json_name = "type"];
+  Consul consul = 2 [json_name = "consul"];
+  map<string, string> metadata = 3 [json_name = "metadata"];
+}
+
+message Consul {
+  string address = 1 [json_name = "address"];
+  int64 health_check_interval = 2 [json_name = "health_check_interval"];
+}

@@ -9,12 +9,12 @@ package main
 import (
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/google/wire"
 	"micro-one-api/api/billing/v1"
 	"micro-one-api/api/channel/v1"
 	"micro-one-api/api/identity/v1"
 	"micro-one-api/app/admin/internal/biz"
-	"micro-one-api/app/admin/internal/conf"
 	"micro-one-api/app/admin/internal/server"
 	"micro-one-api/app/admin/internal/service"
 	registry2 "micro-one-api/platform/registry"
@@ -80,8 +80,8 @@ type registrarResult struct {
 	Registrar registry.Registrar
 }
 
-func provideRegistrar(cfg *conf.Config) registrarResult {
-	registrar, err := registry2.NewRegistrar(cfg.Registry)
+func provideRegistrar(cfg *Config) registrarResult {
+	registrar, err := registry2.NewRegistrar(cfg.Registry())
 	if err != nil {
 		return registrarResult{}
 	}
@@ -89,7 +89,7 @@ func provideRegistrar(cfg *conf.Config) registrarResult {
 }
 
 func newApp(
-	cfg *conf.Config,
+	cfg *Config,
 	clients *clientsResult,
 	sub subscriptionResult,
 	svc *service.AdminService,
@@ -102,7 +102,15 @@ func newApp(
 	}
 
 	grpcSrv := newGRPCServer(cfg, svc)
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc, cfg.Clients.Identity.HTTPEndpoint, cfg.Server.HTTP.WebRoot)
+
+	// Build HTTP server with nil-safety checks.
+	var httpSrv *http.Server
+	if cfg.Bootstrap != nil && cfg.Bootstrap.Server != nil && cfg.Bootstrap.Server.Http != nil &&
+		cfg.Bootstrap.Clients != nil && cfg.Bootstrap.Clients.Identity != nil {
+		httpSrv = server.NewHTTPServer(cfg.Bootstrap.Server.Http.Addr, svc, cfg.Bootstrap.Clients.Identity.HttpEndpoint, cfg.Bootstrap.Server.Http.WebRoot)
+	} else {
+		httpSrv = server.NewHTTPServer("", svc, "", "")
+	}
 
 	opts := []kratos.Option{kratos.Name("admin-api"), kratos.Server(grpcSrv, httpSrv)}
 	if reg.Registrar != nil {
@@ -113,8 +121,10 @@ func newApp(
 	startSignalHandler(appSignalStopper{app})
 
 	return app, func() {
-		clients.identityConn.Close()
-		clients.channelConn.Close()
-		clients.billingConn.Close()
+		if clients != nil {
+			clients.identityConn.Close()
+			clients.channelConn.Close()
+			clients.billingConn.Close()
+		}
 	}
 }

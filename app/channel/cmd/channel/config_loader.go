@@ -41,30 +41,37 @@ func loadConfig(confPath string) (*Config, error) {
 	// Initialize nil nested messages that are required by wire functions
 	// Kratos config.Scan doesn't allocate nested proto messages even when
 	// the YAML has the corresponding fields.
-	if bootstrap.Server == nil {
-		bootstrap.Server = &channelcfg.Server{}
-	}
-	if bootstrap.Server.Http == nil {
-		bootstrap.Server.Http = &channelcfg.HTTP{}
-	}
-	if bootstrap.Server.Grpc == nil {
-		bootstrap.Server.Grpc = &channelcfg.GRPC{}
-	}
-	if bootstrap.Data == nil {
-		bootstrap.Data = &channelcfg.Data{}
-	}
-	if bootstrap.Data.Database == nil {
-		bootstrap.Data.Database = &channelcfg.Database{}
-	}
-	if bootstrap.Data.Redis == nil {
-		bootstrap.Data.Redis = &channelcfg.Redis{}
-	}
-	if bootstrap.Registry == nil {
-		bootstrap.Registry = &channelcfg.Registry{}
-	}
-	if bootstrap.Registry.Consul == nil {
-		bootstrap.Registry.Consul = &channelcfg.Consul{}
-	}
+	initBootstrap(&bootstrap)
 
 	return &Config{Bootstrap: &bootstrap}, nil
+}
+
+// initBootstrap ensures all nested message pointers are non-nil.
+// It modifies the Bootstrap in-place to avoid copying proto messages
+// (which contain sync.Mutex and cannot be copied by value).
+func initBootstrap(b *channelcfg.Bootstrap) {
+	if b.Server == nil {
+		b.Server = &channelcfg.Server{}
+	}
+	if b.Server.Http == nil {
+		b.Server.Http = &channelcfg.HTTP{}
+	}
+	if b.Server.Grpc == nil {
+		b.Server.Grpc = &channelcfg.GRPC{}
+	}
+	if b.Data == nil {
+		b.Data = &channelcfg.Data{}
+	}
+	if b.Data.Database == nil {
+		b.Data.Database = &channelcfg.Database{}
+	}
+	if b.Data.Redis == nil {
+		b.Data.Redis = &channelcfg.Redis{}
+	}
+	if b.Registry == nil {
+		b.Registry = &channelcfg.Registry{}
+	}
+	if b.Registry.Consul == nil {
+		b.Registry.Consul = &channelcfg.Consul{}
+	}
 }

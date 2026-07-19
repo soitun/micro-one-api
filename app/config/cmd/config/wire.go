@@ -9,7 +9,6 @@ import (
 	"github.com/google/wire"
 
 	"micro-one-api/app/config/internal/biz"
-	configcfg "micro-one-api/app/config/internal/conf"
 	"micro-one-api/app/config/internal/data"
 	"micro-one-api/app/config/internal/server"
 	"micro-one-api/app/config/internal/service"
@@ -32,9 +31,9 @@ var ProviderSet = wire.NewSet(
 )
 
 // newRepo wraps data.NewRepositoryFromEnv so Wire can resolve it from a
-// *configcfg.Config (it passes the configured driver + DSN).
-func newRepo(cfg *configcfg.Config) (*data.Repository, error) {
-	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
+// *Config (it passes the configured driver + DSN).
+func newRepo(cfg *Config) (*data.Repository, error) {
+	return data.NewRepositoryFromEnv(cfg.Bootstrap.Data.Database.Driver, cfg.Bootstrap.Data.Database.Source, cfg.Bootstrap.Data.Database.Schema)
 }
 
 // newEventBus builds the EventBus from the repository's Redis client.
@@ -50,8 +49,8 @@ type registrarResult struct {
 
 // provideRegistrar builds the optional service registrar. On error a zero
 // value is returned so the app can still start without service discovery.
-func provideRegistrar(cfg *configcfg.Config) registrarResult {
-	registrar, err := appregistry.NewRegistrar(cfg.Registry)
+func provideRegistrar(cfg *Config) registrarResult {
+	registrar, err := appregistry.NewRegistrar(cfg.Registry())
 	if err != nil {
 		return registrarResult{}
 	}
@@ -66,9 +65,9 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	))
 }
 
-func newApp(cfg *configcfg.Config, svc *service.ConfigService, reg registrarResult) (*kratos.App, func()) {
-	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc)
+func newApp(cfg *Config, svc *service.ConfigService, reg registrarResult) (*kratos.App, func()) {
+	grpcSrv := server.NewGRPCServer(cfg.Bootstrap.Server.Grpc.Addr, svc)
+	httpSrv := server.NewHTTPServer(cfg.Bootstrap.Server.Http.Addr, svc)
 	opts := []kratos.Option{
 		kratos.Name("config-service"),
 		kratos.Server(grpcSrv, httpSrv),

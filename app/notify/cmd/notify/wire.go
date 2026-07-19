@@ -12,7 +12,6 @@ import (
 	"github.com/google/wire"
 
 	"micro-one-api/app/notify/internal/biz"
-	notifycfg "micro-one-api/app/notify/internal/conf"
 	"micro-one-api/app/notify/internal/data"
 	"micro-one-api/app/notify/internal/server"
 	"micro-one-api/app/notify/internal/service"
@@ -30,16 +29,16 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(biz.NotifyRepo), new(*data.Repository)),
 )
 
-func newRepo(cfg *notifycfg.Config) (*data.Repository, error) {
-	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
+func newRepo(cfg *Config) (*data.Repository, error) {
+	return data.NewRepositoryFromEnv(cfg.Bootstrap.Data.Database.Driver, cfg.Bootstrap.Data.Database.Source, cfg.Bootstrap.Data.Database.Schema)
 }
 
 type registrarResult struct {
 	Registrar registry.Registrar
 }
 
-func provideRegistrar(cfg *notifycfg.Config) registrarResult {
-	registrar, err := appregistry.NewRegistrar(cfg.Registry)
+func provideRegistrar(cfg *Config) registrarResult {
+	registrar, err := appregistry.NewRegistrar(cfg.Registry())
 	if err != nil {
 		return registrarResult{}
 	}
@@ -54,26 +53,41 @@ func InitApp(confPath string) (*kratos.App, func(), error) {
 	))
 }
 
-func newApp(cfg *notifycfg.Config, uc *biz.NotifyUsecase, svc *service.NotifyService, reg registrarResult) (*kratos.App, func()) {
-	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc)
-	dispatchInterval, err := time.ParseDuration(cfg.Notify.DispatchInterval)
-	if err != nil {
-		dispatchInterval = 30 * time.Second
+func newApp(cfg *Config, uc *biz.NotifyUsecase, svc *service.NotifyService, reg registrarResult) (*kratos.App, func()) {
+	grpcSrv := server.NewGRPCServer(cfg.Bootstrap.Server.Grpc.Addr, svc)
+	httpSrv := server.NewHTTPServer(cfg.Bootstrap.Server.Http.Addr, svc)
+
+	// Parse dispatch interval with fallback to 30s.
+	dispatchInterval := 30 * time.Second
+	if cfg.Bootstrap.NotifySvc != nil && cfg.Bootstrap.NotifySvc.DispatchInterval != nil {
+		dispatchInterval = cfg.Bootstrap.NotifySvc.DispatchInterval.AsDuration()
 	}
+
+	// Parse dispatch batch with fallback to 20.
+	dispatchBatch := int32(20)
+	if cfg.Bootstrap.NotifySvc != nil && cfg.Bootstrap.NotifySvc.DispatchBatch > 0 {
+		dispatchBatch = cfg.Bootstrap.NotifySvc.DispatchBatch
+	}
+
+	// Parse max retry with fallback to 3.
+	maxRetry := 3
+	if cfg.Bootstrap.NotifySvc != nil && cfg.Bootstrap.NotifySvc.MaxRetry > 0 {
+		maxRetry = int(cfg.Bootstrap.NotifySvc.MaxRetry)
+	}
+
 	sender := biz.NewMultiSender(biz.SenderConfig{
-		WebhookURL:         cfg.Notify.WebhookURL,
-		SMTPHost:           cfg.Notify.SMTPHost,
-		SMTPPort:           cfg.Notify.SMTPPort,
-		SMTPUser:           cfg.Notify.SMTPUser,
-		SMTPPass:           cfg.Notify.SMTPPass,
-		SMTPFrom:           cfg.Notify.SMTPFrom,
-		WeComWebhookURL:    cfg.Notify.WeComWebhookURL,
-		DingTalkWebhookURL: cfg.Notify.DingTalkWebhookURL,
-		FeishuWebhookURL:   cfg.Notify.FeishuWebhookURL,
-		SlackWebhookURL:    cfg.Notify.SlackWebhookURL,
+		WebhookURL:         cfg.Bootstrap.NotifySvc.WebhookUrl,
+		SMTPHost:           cfg.Bootstrap.NotifySvc.SmtpHost,
+		SMTPPort:           int(cfg.Bootstrap.NotifySvc.SmtpPort),
+		SMTPUser:           cfg.Bootstrap.NotifySvc.SmtpUser,
+		SMTPPass:           cfg.Bootstrap.NotifySvc.SmtpPass,
+		SMTPFrom:           cfg.Bootstrap.NotifySvc.SmtpFrom,
+		WeComWebhookURL:    cfg.Bootstrap.NotifySvc.WecomWebhookUrl,
+		DingTalkWebhookURL: cfg.Bootstrap.NotifySvc.DingtalkWebhookUrl,
+		FeishuWebhookURL:   cfg.Bootstrap.NotifySvc.FeishuWebhookUrl,
+		SlackWebhookURL:    cfg.Bootstrap.NotifySvc.SlackWebhookUrl,
 	})
-	dispatcher := biz.NewDispatcher(uc, sender, dispatchInterval, cfg.Notify.DispatchBatch, cfg.Notify.MaxRetry)
+	dispatcher := biz.NewDispatcher(uc, sender, dispatchInterval, dispatchBatch, maxRetry)
 	stopDispatcher := dispatcher.Start(context.Background())
 	opts := []kratos.Option{
 		kratos.Name("notify-worker"),

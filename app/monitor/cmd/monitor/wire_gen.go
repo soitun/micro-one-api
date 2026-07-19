@@ -7,17 +7,17 @@
 package main
 
 import (
+	"github.com/go-kratos/kratos/v2"
+	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/google/wire"
 	"micro-one-api/app/monitor/internal/biz"
-	"micro-one-api/app/monitor/internal/conf"
 	"micro-one-api/app/monitor/internal/data"
 	"micro-one-api/app/monitor/internal/server"
 	"micro-one-api/app/monitor/internal/service"
 	registry2 "micro-one-api/platform/registry"
+)
 
-	"github.com/go-kratos/kratos/v2"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/google/wire"
-
+import (
 	_ "github.com/go-kratos/kratos/v2/config/file"
 )
 
@@ -47,25 +47,25 @@ var ProviderSet = wire.NewSet(
 	newRepo, biz.NewMonitorUsecase, service.NewMonitorService, server.NewGRPCServer, server.NewHTTPServer, provideRegistrar, wire.Bind(new(biz.MonitorRepo), new(*data.Repository)),
 )
 
-func newRepo(cfg *conf.Config) (*data.Repository, error) {
-	return data.NewRepositoryFromEnv(cfg.Data.Database.Driver, cfg.Data.Database.Source, cfg.Data.Database.Schema)
+func newRepo(cfg *Config) (*data.Repository, error) {
+	return data.NewRepositoryFromEnv(cfg.Bootstrap.Data.Database.Driver, cfg.Bootstrap.Data.Database.Source, cfg.Bootstrap.Data.Database.Schema)
 }
 
 type registrarResult struct {
 	Registrar registry.Registrar
 }
 
-func provideRegistrar(cfg *conf.Config) registrarResult {
-	registrar, err := registry2.NewRegistrar(cfg.Registry)
+func provideRegistrar(cfg *Config) registrarResult {
+	registrar, err := registry2.NewRegistrar(cfg.Registry())
 	if err != nil {
 		return registrarResult{}
 	}
 	return registrarResult{Registrar: registrar}
 }
 
-func newApp(cfg *conf.Config, svc *service.MonitorService, reg registrarResult) (*kratos.App, func()) {
-	grpcSrv := server.NewGRPCServer(cfg.Server.GRPC.Addr, svc)
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTP.Addr, svc)
+func newApp(cfg *Config, svc *service.MonitorService, reg registrarResult) (*kratos.App, func()) {
+	grpcSrv := server.NewGRPCServer(cfg.Bootstrap.Server.Grpc.Addr, svc)
+	httpSrv := server.NewHTTPServer(cfg.Bootstrap.Server.Http.Addr, svc)
 	_, channelCleanup := newChannelHealthChecker(cfg)
 	opts := []kratos.Option{kratos.Name("monitor-worker"), kratos.Server(grpcSrv, httpSrv)}
 	if reg.Registrar != nil {
@@ -79,6 +79,6 @@ func newApp(cfg *conf.Config, svc *service.MonitorService, reg registrarResult) 
 	}
 }
 
-func newChannelHealthChecker(cfg *conf.Config) (*biz.ChannelHealthChecker, func()) {
+func newChannelHealthChecker(cfg *Config) (*biz.ChannelHealthChecker, func()) {
 	return newChannelHealthCheckerImpl(cfg)
 }

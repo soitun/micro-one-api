@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package api.config.v1;
+
+option go_package = "micro-one-api/app/config/internal/conf;conf";
+
+// Bootstrap is the top-level configuration loaded from config.yaml.
+message Bootstrap {
+  Server server = 1;
+  Data data = 2;
+  Registry registry = 3;
+  ConfigSvc config_svc = 4;
+}
+
+// Server holds the HTTP and gRPC server configuration.
+message Server {
+  HTTP http = 1;
+  GRPC grpc = 2;
+}
+
+message HTTP {
+  string addr = 1 [json_name = "addr"];
+}
+
+message GRPC {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Data holds the database and Redis configuration.
+message Data {
+  Database database = 1;
+  Redis redis = 2;
+}
+
+message Database {
+  string driver = 1 [json_name = "driver"];
+  string source = 2 [json_name = "source"];
+  // Schema isolates this service to a specific database schema (Phase 2.4).
+  string schema = 3 [json_name = "schema"];
+}
+
+message Redis {
+  string addr = 1 [json_name = "addr"];
+}
+
+// Registry holds the service registry configuration.
+message Registry {
+  string type = 1 [json_name = "type"];
+  Consul consul = 2 [json_name = "consul"];
+  map<string, string> metadata = 3 [json_name = "metadata"];
+}
+
+message Consul {
+  string address = 1 [json_name = "address"];
+  int64 health_check_interval = 2 [json_name = "health_check_interval"];
+}
+
+// ConfigSvc holds the config-service-specific settings.
+message ConfigSvc {
+  // CacheTTL is the TTL in seconds for cached config entries.
+  int32 cache_ttl = 1 [json_name = "cache_ttl"];
+  // Namespace is the default config namespace.
+  string namespace = 2 [json_name = "namespace"];
+}
