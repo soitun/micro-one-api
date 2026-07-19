@@ -492,7 +492,7 @@ make test-e2e-suite
 
 > 来源：2026-07-19 生产部署评估。Phase 2.4 代码 + `schema_split.sql` + `ownership.yaml` 已合入仓库，但**生产环境直接启用 schema 隔离存在数据/功能风险**，需先补齐下列前置项才能切流。
 
-### [ ] 生产启用 Schema 隔离的前置修复
+### [x] 生产启用 Schema 隔离的前置修复
 
 **背景**：`migrations/schema_split.sql`（Phase 2.4 参考脚本）在已有 MySQL 实例上把共享 `oneapi` 库的表**复制**（而非移动）到 8 个 per-service schema。但代码实际访问的表超出了 `schema_split.sql` 复制的范围，直接切流会导致跨 schema 读失败。
 
