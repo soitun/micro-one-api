@@ -23,7 +23,7 @@ monitor_svc:
   alert_retention_days: ${MONITOR_ALERT_RETENTION:-30}
   notify_email: ${MONITOR_NOTIFY_EMAIL:-}
   channel_health_check_enabled: ${CHANNEL_HEALTH_CHECK_ENABLED:-true}
-  channel_health_check_interval: ${CHANNEL_HEALTH_CHECK_INTERVAL:-5m}
+  channel_health_check_interval: ${CHANNEL_HEALTH_CHECK_INTERVAL:-300s}
   channel_health_check_timeout: ${CHANNEL_HEALTH_CHECK_TIMEOUT:-10s}
 clients:
   channel:

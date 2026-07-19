@@ -24,4 +24,4 @@ log_svc:
 
 partition:
   enabled: ${PARTITION_ENABLED:-false}
-  interval: ${PARTITION_INTERVAL:-24h}
+  interval: ${PARTITION_INTERVAL:-86400s}
