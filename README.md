@@ -6,7 +6,7 @@
 
 本项目面向需要统一管理多个上游模型供应商、钱包余额、访问令牌、账务和运营后台的场景。它不是上游服务的替代品，也不提供任何第三方模型账号、订阅或 API Key。
 
-> 📣 **最新发布**：[v0.8.0 发布公告](./docs/releases/release-v0.8.0.md)（API 指南页、CC Switch 导入、admin 前端改由 ADMIN_WEB_ROOT 提供） · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.8.0)
+> 📣 **最新发布**：[v0.9.3 发布公告](./docs/releases/release-v0.9.3.md)（Kratos v3 升级、buf 工具链迁移、用量日志与订阅管理修复） · [GitHub Release](https://github.com/mengbin92/micro-one-api/releases/tag/v0.9.3)
 
 ## 功能概览
 
@@ -178,6 +178,18 @@ make web-dist
 ```
 
 完整部署说明见 [docs/deployment.md](./docs/deployment.md)。
+
+### 升级到 v0.9.3
+
+v0.9.3 是基础设施升级版本：全量切换到 Kratos v3，proto 生成从 protoc 迁移到 buf，并修复 admin-api 订阅管理、日志 Flush 与用量日志端点记录问题。**没有 API 破坏性变更，也没有数据库迁移**；开发者拉取后需执行 `make init && make proto` 重新生成代码（pb.go 不入库），使用自有 compose 文件的环境需为 admin-api 补 `SUBSCRIPTION_SCHEMA`。详见 [docs/releases/release-v0.9.3.md](./docs/releases/release-v0.9.3.md)。
+
+### 升级到 v0.9.2
+
+v0.9.2 修复启用 schema 隔离 + 异步 Billing 后的 token 扣费异常：在 `oneapi_billing` schema 通过视图暴露 `system_options` 供 billing-service 加载定价配置。已启用 schema 隔离的环境需执行 `make migrate` 应用 `061` 增量迁移（幂等）并重启 billing-service；未启用 schema 隔离的环境无需任何动作。详见 [docs/releases/release-v0.9.2.md](./docs/releases/release-v0.9.2.md)。
+
+### 升级到 v0.9.0
+
+v0.9.0 引入异步 Billing（Phase 2.1）与 schema 隔离（Phase 2.4），新增数据库迁移。升级前请阅读 [docs/releases/release-v0.9.0.md](./docs/releases/release-v0.9.0.md) 与 [v0.9.1](./docs/releases/release-v0.9.1.md) 中的迁移与配置说明。
 
 ### 升级到 v0.8.0
 
