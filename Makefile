@@ -2,15 +2,18 @@ GOHOSTOS := $(shell go env GOHOSTOS)
 GOPATH := $(shell go env GOPATH)
 VERSION := $(shell git describe --tags --always 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo dev)
 
+# `make config` still uses protoc on the 9 app/*/internal/conf/conf.proto
+# + internal/conf/conf.proto files (see `config` target note). `make api`
+# goes through buf, so it needs no proto file list. Windows needs Git
+# Bash for the `find` calls below (bundled with Git for Windows); unix
+# shells use `find` directly.
 ifeq ($(GOHOSTOS), windows)
 Git_Bash := $(subst \,/,$(subst cmd\,bin\bash.exe,$(dir $(shell where git))))
 INTERNAL_PROTO_FILES := $(shell $(Git_Bash) -c "find app -name "*.proto"")
 INTERNAL_CONF_PROTO_FILES := $(shell $(Git_Bash) -c "find internal/conf -name "*.proto" 2>/dev/null")
-API_PROTO_FILES := $(shell $(Git_Bash) -c "find api -name '*.proto' ! -path 'api/openapi.yaml'")
 else
 INTERNAL_PROTO_FILES := $(shell find app -name "*.proto")
 INTERNAL_CONF_PROTO_FILES := $(shell find internal/conf -name "*.proto" 2>/dev/null)
-API_PROTO_FILES := $(shell find api -name '*.proto')
 endif
 
 .PHONY: init
