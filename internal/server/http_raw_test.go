@@ -19,7 +19,7 @@ import (
 	subscriptionbiz "micro-one-api/domain/subscription/biz"
 	subscriptiondata "micro-one-api/domain/subscription/data"
 
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
+	khttp "github.com/go-kratos/kratos/v3/transport/http"
 )
 
 func TestHTTPServerRawRoutesAreRegistered(t *testing.T) {

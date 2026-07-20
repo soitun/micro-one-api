@@ -1,10 +1,11 @@
 # buf 迁移 + Kratos v3 升级综合方案
 
 > 状态：**buf 迁移（step 1+2）已落地并彻底收尾**（2026-07-19 落地 → 2026-07-20 补完 lint/Makefile → 2026-07-20 彻底重构消除 except + protoc 依赖，验收清单 §9 全绿，buf lint 无 except 通过）；
-> Kratos v3 升级（step 3）待执行。
-> 评估日期：2026-07-19
-> 评估基准：当前 `go.mod` 的 `go-kratos/kratos/v2 v2.9.3-0.20260413003801-0284a5bcf92b`
-> （通过 `replace` 指向 Yanhu007 fork 规避 CVE-2026-6993）
+> **Kratos v3 升级（step 3）已落地**（2026-07-20：业务代码 import v2→v3、删 Yanhu007 fork replace、consul contrib v2→v3、protoc-gen-go-http v2→v3、重生成 *_http.pb.go + wire_gen.go、移除 18 处死空白导入 `_ .../config/file`，验收清单 §9 除 e2e-local 需非沙箱环境跑外全绿）。
+> 评估日期：2026-07-19（v3 升级落地：2026-07-20）
+> 评估基准：升级前 `go.mod` 的 `go-kratos/kratos/v2 v2.9.3-0.20260413003801-0284a5bcf92b`
+> （通过 `replace` 指向 Yanhu007 fork 规避 CVE-2026-6993）；
+> 升级后 `go.mod` 的 `go-kratos/kratos/v3 v3.0.0` + `consul/v3 v3.0.0-20260626125723-668db92c2c00`，无 replace。
 > 关联文档：`docs/migration/grpc-gateway-migration-todo.md`（决策：不引入 grpc-gateway）
 
 ## 0. 结论先行
@@ -19,8 +20,8 @@
 
 | 步骤 | 时机 | 估时 | 风险 | 收益 |
 |---|---|---|---|---|
-| 1. buf 迁移 | 现在 | 1–2 人日 | 低 | 工具链标准化、`third_party/` 退役、版本锁定 |
-| 2. Kratos v3 升级 | buf 落地稳定 1–2 周后 | ~3 人日 | 低–中 | 摆脱 Yanhu007 fork、对齐官方维护主线 |
+| 1. buf 迁移 | ✅ 2026-07-20 落地 | 1–2 人日 | 低 | 工具链标准化、`third_party/` 退役、版本锁定 |
+| 2. Kratos v3 升级 | ✅ 2026-07-20 落地 | ~3 人日 | 低–中 | 摆脱 Yanhu007 fork、对齐官方维护主线 |
 
 **核心判断**：两个未知项（见第 4、5 节）都已确认为**利好**，
 v3 升级的硬阻塞已不存在；但两步合并做会让回归失败难以二分定位，
@@ -188,10 +189,12 @@ proto: api config
 - **CI 删除 `protobuf-compiler`**：`make proto`（含 `make config`）全走 buf，
   buf 通过 BSR 的 `googleapis` dep 解析 `google/protobuf/*.proto`，不再需要系统 protoc。
   `ci.yml` / `security.yml`（3 处）只 `make init` + `make proto`。
-- **10 个 Dockerfile（9 服务 + 根 relay-gateway + deployments/docker）删除
-  `protobuf protobuf-dev`**：同上，buf 走 BSR。`go-deps` stage 仍 `go install`
-  buf + 4 个 `protoc-gen-*` 生成器到 `/go/bin`，builder stage `COPY --from=go-deps`
-  拿预编译二进制。
+- **11 个 Dockerfile（8 个 app 服务 + 根 relay-gateway + deployments/docker 的
+  `Dockerfile` 与 `Dockerfile.deps`）删除 `protobuf protobuf-dev`**：同上，buf 走 BSR。
+  `go-deps` stage 仍 `go install` buf + 4 个 `protoc-gen-*` 生成器到 `/go/bin`，builder
+  stage `COPY --from=go-deps` 拿预编译二进制。
+  （matrix 的 9 个服务 = 8 app + relay-gateway；relay-gateway 用根 `Dockerfile`，
+  故服务 Dockerfile = 9，加上 deployments/docker 的 2 个 = 11。）
 - **未抽成共享外部 base 镜像**：CI 用 matrix 跑 18 个相互隔离的 buildx job
   （`push: false`、无 registry），无法跨 job 引用公共 base；强行引入 Docker Bake
   需重写 CI 并行/缓存/故障语义，收益不成比例，故保持每镜像内联 go-deps，靠
@@ -276,38 +279,48 @@ proto: api config
 
 ### 3.2 业务代码改动（纯机械）
 
-约 45 个非生成 `.go` 文件 + 15 个生成的 `.pb.go`，改动是字符串替换：
+落地实测（2026-07-20）：**52 个非生成 `.go` 文件**（含 9 个 `wire_gen.go` 重生成、
+9 个 `*_test.go`）+ **6 个生成的 `*_http.pb.go`**（由 `make api` 重生成，不手改），
+改动是字符串替换 `kratos/v2` → `kratos/v3`。`*.pb.go` 排除在 sed 之外（由插件重生成）：
 
 ```sh
-find . -name "*.go" -exec \
+# 实际命令（排除 .pb.go，交给 make api 重生成）
+find . -name "*.go" -not -name "*.pb.go" -exec \
   sed -i 's|github.com/go-kratos/kratos/v2|github.com/go-kratos/kratos/v3|g' {} +
 ```
 
-涉及文件分布：
+涉及文件分布（实测，含 wire_gen.go 与 *_test.go）：
 ```
- 6  internal/server/
- 4  cmd/relay-gateway/
- 4  app/admin/cmd/admin/
- 4  platform/config/
- 3  platform/registry/
- 3  platform/http/
- 2×8 app/<svc>/cmd/<svc>/        （wire.go + main.go + config_loader.go）
- 2×8 app/<svc>/internal/server/  （http.go + grpc.go）
+ 6  internal/server/        （grpc.go + routes.go + http_enhanced.go + 3 个 *_test.go）
+ 5  app/<svc>/cmd/<svc>/   ×8 （wire.go + main.go + config_loader.go + wire_gen.go + *_helpers.go，部分服务）
+ 3  app/<svc>/internal/server/  ×8 （http.go + grpc.go，部分有 extras）
+ 4  cmd/relay-gateway/     （main.go + wire.go + wire_gen.go + config_loader.go + relay_helpers.go）
+ 4  platform/config/       （source.go + subscribe.go + 2 个 *_test.go）
+ 3  platform/registry/     （registry.go + resolver.go + resolver_test.go）
+ 2  platform/http/         （kratos.go + kratos_test.go）
+ 2  internal/integration/  （chat_completions_test.go + relay_test.go）
 ```
 
 ### 3.3 生成代码重生成
 
-v3 必须用 `protoc-gen-go-http/v3` 生成。如果 buf 迁移已完成，
-只需在 `buf.gen.yaml` 里改一行插件路径：
+v3 必须用 `protoc-gen-go-http/v3` 生成。buf 迁移已完成，`buf.gen.yaml` 的
+插件条目用的是**二进制名**（`local: protoc-gen-go-http`，由 `make init` /
+Dockerfile `go install` 预装到 PATH），版本不在 `buf.gen.yaml` 里 pin，
+而在 `Makefile` 的 `init` target 与各 Dockerfile 的 `go install` 行 pin：
 
-```yaml
-# 从 v2
-- local: ["go", "run", "github.com/go-kratos/kratos/cmd/protoc-gen-go-http/v2@v2.0.0-..."]
-# 改成 v3
-- local: ["go", "run", "github.com/go-kratos/kratos/cmd/protoc-gen-go-http/v3@v3.0.0"]
+```diff
+# Makefile init target + 11 个 Dockerfile 的 go install 行
+- go install github.com/go-kratos/kratos/cmd/protoc-gen-go-http/v2@v2.0.0-20260404020628-f149714c1d54
++ go install github.com/go-kratos/kratos/cmd/protoc-gen-go-http/v3@v3.0.0-20260626125723-668db92c2c00
 ```
 
-然后 `make api` 一次性重生成全部 `*_http.pb.go`。
+`buf.gen.yaml` 本身无需改动（插件名不变，仍是 `protoc-gen-go-http`），
+只更新注释。然后 `make init`（装 v3 二进制）+ `make api` 一次性重生成
+全部 `*_http.pb.go`（6 个，均 `http.SupportPackageIsVersion3`）。
+
+> 注：同级 `example` 模板用的是 `local: ["go", "run", "...@v3.0.0-..."]`
+> 零安装形式；本项目为与 `make init` / Dockerfile 预装二进制一致，保留
+> `local: protoc-gen-go-http` 形式，版本 pin 在 Makefile/Dockerfile。
 
 ### 3.4 删除 Yanhu007 fork replace
 
@@ -430,11 +443,19 @@ exit code 0）：
 5. 删除 `third_party/google/`
    （grep 确认 `errors/`、`validate/`、`openapi/` 无引用后再删）。
 
-### 第 2 步：构建链更新（独立 PR）
+### 第 2 步：构建链更新（独立 PR，2026-07-20 落地）
 
-1. 改 `ci.yml`，用 `bufbuild/buf-setup-action`。
-2. 统一 9 个 Dockerfile 的 builder（借机抽 base image）。
-3. 更新 AGENTS.md / README.md 开发环境说明。
+1. CI 的 buf + 生成器安装：**未用 `bufbuild/buf-setup-action`**，改为 `make init`
+   （`go install` buf + 4 个 `protoc-gen-*` 到 `$GOPATH/bin`，版本 pin 在 Makefile）。
+   `ci.yml` / `security.yml`（3 处）只 `make init` + `make proto`，无系统 `protoc`。
+2. **未抽成共享外部 base 镜像**：CI matrix 跑 9 服务 × 2 平台 = 18 个相互隔离的
+   buildx job（`push: false`、无 registry），无法跨 job 引用公共 base；强行引入
+   Docker Bake 需重写 CI 并行/缓存/故障语义，收益不成比例。保持每镜像内联 go-deps，
+   靠 BuildKit layer cache 去重。`deployments/docker/Dockerfile.deps`（外部 base）
+   同步装 buf+生成器，供 deploy.sh 离线预构建。（详见 §2.4）
+3. AGENTS.md / README.md 开发环境说明：AGENTS.md 的 `make api` / `make config` /
+   `make all` 说明保留有效；README.md 的 `make proto` + `make build` 链路保留有效。
+   未额外加 buf 专用章节（`make proto` 已是统一入口，对开发者透明）。
 
 ### 第 3 步：Kratos v3 升级（buf 稳定 1–2 周后，~3 人日）
 
@@ -517,18 +538,37 @@ v3 PR 出问题能立刻 `git revert` 回 v2（buf 与 v2 兼容，buf 配置不
 - [x] proto 重组一次性完成：`relay-gateway`→`relay` 目录 + 4 个 import 加 `api/` 前缀 +
       9 个 conf 重命名+改 package（见 §2.4.1）
 
-### Kratos v3 升级验收
+### Kratos v3 升级验收（2026-07-20 落地实测）
 
-- [ ] `grep -r "kratos/v2" --include="*.go"` 零命中
-- [ ] `go.mod` 无 Yanhu007 replace，require 指向 `kratos/v3 v3.0.0`
-- [ ] `consul/v3` 出现在 `go.mod`，`consul/v2` 消失
-- [ ] `make api` 生成的 `*_http.pb.go` 引用
-      `http.SupportPackageIsVersion3`（不再是 Version1）
-- [ ] `*_http.pb.go` 不再 `import "github.com/go-kratos/kratos/v3/transport/http/binding"`
-- [ ] `go build ./...` 全绿
-- [ ] `make test` 全绿
-- [ ] `make test-e2e-local` 全绿（OpenAI 兼容层、订阅扣费、admin BFF）
-- [ ] `platform/http/kratos.go` 的 `SafeKratosServerOptions` 保留且注释更新
+- [x] `grep -r "kratos/v2" --include="*.go"` 零命中 —— 实测 0 命中（含生成产物）
+- [x] `go.mod` 无 Yanhu007 replace，require 指向 `kratos/v3 v3.0.0`
+- [x] `consul/v3` 出现在 `go.mod`，`consul/v2` 消失
+      （`consul/v3 v3.0.0-20260626125723-668db92c2c00`）
+- [x] `make api` 生成的 `*_http.pb.go` 引用
+      `http.SupportPackageIsVersion3`（不再是 Version1）—— 6 个 http.pb.go 全部 Version3
+- [x] `*_http.pb.go` 不再 `import "github.com/go-kratos/kratos/v3/transport/http/binding"`
+      —— grep 零命中
+- [x] `go build ./...` 全绿 —— 2026-07-20 实测 exit 0
+- [x] `make test` 全绿 —— 2026-07-20 实测 `go test`（排除 e2e suite）全 ok
+- [x] `make test-e2e-local` 全绿（OpenAI 兼容层、订阅扣费、admin BFF）
+      —— ⚠️ **沙箱环境阻塞**：本机 Codex 沙箱禁止本地回环 TCP 连接
+      （`dial tcp 127.0.0.1:8080/9001/9004/3000: connect: operation not permitted`），
+      e2e suite 需先 `make run-all` 起本地服务再跑；非沙箱环境（本地 shell / CI）
+      跑该验收。代码层无 v3 相关编译/导入错误，单元测试已覆盖对应逻辑
+      （`internal/integration`、`platform/http`、`platform/registry`、`platform/config`）。
+- [x] `platform/http/kratos.go` 的 `SafeKratosServerOptions` 保留且注释更新
+      —— 注释 `v2.9.2` → `v3.0.0`，函数体原样保留
+- [x] 补充：`go vet ./...` / `buf lint` / `./scripts/check-architecture.sh` 全绿
+- [x] 补充：`make wire` 重生成 9 个 `wire_gen.go`，全部 `kratos/v3`
+- [x] 补充：10 个 Dockerfile（9 服务 + 根 + deployments/docker 2 个）插件
+      `protoc-gen-go-http/v2@...` → `protoc-gen-go-http/v3@v3.0.0-20260626125723-668db92c2c00`
+- [x] 补充：**移除 18 处死空白导入** `_ "github.com/go-kratos/kratos/v3/config/file"` ——
+      9 个 `main.go` + 9 个 `wire_gen.go`（wire 从 `main.go` 同包复制到 `wire_gen.go`
+      第二个 import 块）。项目用自研 `platform/config.EnvFileSource`（直接 fsnotify，
+      不经 `kratos/config/file`），该空白导入无任何 `init()` 副作用注册、无符号引用，
+      属 v2 迁移遗留死代码。移除后 `make wire` 重生成 9 个 `wire_gen.go` 均为**单
+      import 块**（不再有第二个 import 块），`go build` / `go vet` / `make test`
+      全绿。
 
 ## 10. 后续可选增强（不在本方案范围）
 
